@@ -66,6 +66,11 @@ export interface Settings {
   scan_automatically: boolean;
 }
 
+export interface CleanupProgress {
+  done: number;
+  total: number;
+}
+
 export interface ScanProgress {
   provider: string;
   done: number;
@@ -89,7 +94,13 @@ export const updateSettings = (settings: Settings) =>
 
 export const onScanProgress = (cb: (p: ScanProgress) => void): Promise<UnlistenFn> =>
   listen<ScanProgress>("scan_progress", (e) => cb(e.payload));
+export const onScanStarted = (cb: () => void): Promise<UnlistenFn> =>
+  listen<null>("scan_started", () => cb());
 export const onScanCompleted = (cb: (s: ScanSummary) => void): Promise<UnlistenFn> =>
   listen<ScanSummary>("scan_completed", (e) => cb(e.payload));
+export const onCleanupStarted = (cb: (ids: string[]) => void): Promise<UnlistenFn> =>
+  listen<string[]>("cleanup_started", (e) => cb(e.payload));
+export const onCleanupProgress = (cb: (p: CleanupProgress) => void): Promise<UnlistenFn> =>
+  listen<CleanupProgress>("cleanup_progress", (e) => cb(e.payload));
 export const onCleanupCompleted = (cb: (r: CleanupResult[]) => void): Promise<UnlistenFn> =>
   listen<CleanupResult[]>("cleanup_completed", (e) => cb(e.payload));

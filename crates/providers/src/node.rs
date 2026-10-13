@@ -3,7 +3,7 @@
 //! Finds `node_modules/` directories whose parent holds a `package.json`.
 //! Cleans by deleting the directory only — lockfiles are never touched.
 
-use super::provider::{dir_size, CleanupAction, Provider};
+use super::provider::{age_suffix, dir_size, CleanupAction, Provider};
 use devclean_core::{Resource, SafetyLevel};
 use std::path::{Path, PathBuf};
 
@@ -56,7 +56,7 @@ impl Provider for NodeModulesProvider {
                     size_bytes: size,
                     reclaimable_bytes: size,
                     safety: SafetyLevel::Safe,
-                    detail: Some(format!("project: {project_name}")),
+                    detail: Some(format!("project: {project_name}{}", age_suffix(project))),
                 });
             }
         }

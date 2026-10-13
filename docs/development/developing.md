@@ -19,6 +19,12 @@ cargo tauri dev
 ```
 
 Open the DevClean window → click **Scan** → 4 providers appear with byte counts.
+Click a provider header to expand the project drill-down (search, stale
+filter, per-provider rescan); click a project for details. Cancel works
+anytime via **Cancel ✕** (scan) or **Cancel remaining** (cleanup). Cleanup
+always goes preview → acknowledgement → result table (requested → freed
+per resource). Scan roots and toggles live under the **⚙ Settings** dialog
+(in-memory until M3; the validator still rejects anything outside roots).
 
 **Your setup works if:**
 

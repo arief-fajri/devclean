@@ -17,19 +17,25 @@
 
 Exit: `cargo tauri dev` opens, `cargo test` is green, docs are complete.
 
-## M1+M2 — Scanner + safe cleanup (active work)
+## M1+M2 — Scanner + safe cleanup ✅ (done)
 
 ```text
-[ ] Svelte dashboard: total reclaimable + per-provider bars + scan progress
-[ ] Per-provider drill-down (project list + age/stale signal)
-[ ] Preview → ConfirmDialog → cleanup → result flow (bytes freed + before/after)
-[ ] Transparent per-resource errors + scan/cleanup cancel from the UI
-[ ] Validate the 4 providers on a real machine (node, rust, go, docker-builder)
-[ ] CI workflow + svelte-check gate
+[x] Svelte dashboard: total reclaimable + per-provider bars + scan progress
+[x] Per-provider drill-down (project list + age/stale signal)
+[x] Preview → ConfirmDialog → cleanup → result flow (bytes freed + before/after)
+[x] Transparent per-resource errors + scan/cleanup cancel from the UI
+[x] Validate the 4 providers on a real machine (node, rust, go, docker-builder)
+[x] CI workflow + svelte-check gate
 ```
 
 Exit: the user can reclaim real storage safely end-to-end, with no crashes
 and no deletions outside scan roots (evidence: demo + tests).
+
+Evidence: node fixture found + freed 3002/3002 B with source intact;
+rust_target found; go build/module caches read (~4.0/4.3 GB); docker
+build cache read (~10.8 GB). Gates: `cargo test` 13 passed, clippy 0
+warnings, fmt clean, `svelte-check` 0 errors 0 warnings, `vite build` ok.
+Contract unchanged (still 9 commands + 6 events v0.1.0).
 
 ## M3 — Safety hardening + UX (later)
 

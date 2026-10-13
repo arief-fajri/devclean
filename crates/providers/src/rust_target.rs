@@ -1,7 +1,7 @@
 //! Rust `target/` provider. Finds `Cargo.toml` projects, then their
 //! `target/` dir. Regenerable via `cargo build`, hence `Safe`.
 
-use super::provider::{dir_size, CleanupAction, Provider};
+use super::provider::{age_suffix, dir_size, CleanupAction, Provider};
 use devclean_core::{Resource, SafetyLevel};
 use std::path::{Path, PathBuf};
 
@@ -49,7 +49,7 @@ impl Provider for RustTargetProvider {
                     size_bytes: size,
                     reclaimable_bytes: size,
                     safety: SafetyLevel::Safe,
-                    detail: Some(format!("project: {project_name}")),
+                    detail: Some(format!("project: {project_name}{}", age_suffix(project))),
                 });
             }
         }

@@ -48,3 +48,47 @@ pub fn dir_size(path: &Path) -> u64 {
         .map(|m| m.len())
         .sum()
 }
+
+/// Age of `path` in whole days, from filesystem mtime. This is a display
+/// signal only — never a safety verdict (a stale project is not automatically
+/// safe to delete; the validator still decides).
+pub fn age_days(path: &Path) -> Option<u64> {
+    let mtime = std::fs::metadata(path).ok()?.modified().ok()?;
+    let age = std::time::SystemTime::now()
+        .duration_since(mtime)
+        .unwrap_or_default();
+    Some(age.as_secs() / 86_400)
+}
+
+/// Human age suffix for the `detail` string, e.g. `" · 143d old"`.
+/// Empty when the mtime is unreadable.
+pub fn age_suffix(path: &Path) -> String {
+    match age_days(path) {
+        Some(d) if d < 30 => format!(" · {d}d old"),
+        Some(d) if d < 365 => format!(" · {}mo old", d / 30),
+        Some(d) => format!(" · {}y old", d / 365),
+        None => String::new(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn age_of_fresh_dir_is_zero_days() {
+        let dir = std::env::temp_dir().join(format!("devclean-age-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        assert_eq!(age_days(&dir), Some(0));
+        assert_eq!(age_suffix(&dir), " · 0d old");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn age_of_missing_path_is_none() {
+        let missing = std::path::PathBuf::from("/definitely/not/a/devclean/path");
+        assert_eq!(age_days(&missing), None);
+        assert_eq!(age_suffix(&missing), "");
+    }
+}
