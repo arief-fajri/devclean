@@ -58,6 +58,20 @@ fixture with venv invisible, cargo registry ~443 MB Caution, xcode,
 gradle absent → empty); contract v0.2.0 (`+get_history`,
 `+get_cached_scan`, `Settings.theme`).
 
+## UI polish — Phase 1+2 ✅ (done)
+
+```text
+[x] Summary panel (safe-to-clean split, share %, Scan again as primary) + stat tiles
+[x] lucide-svelte icon set, tabular numerals, max-w-5xl, 2-line resource rows
+[x] Global search/filter/sort toolbar + selection-aware cleanup bar
+[x] Resource.impact (contract v0.3.0, additive, old caches still load) +
+    grouped ConfirmDialog (review first) + ResultPanel
+[x] vitest: 20 frontend tests (view, format, safety, providerMeta)
+```
+
+Evidence: `cargo test` 41 passed, clippy 0 warnings, fmt clean,
+`svelte-check` 0 errors 0 warnings, `vite build` ok, `vitest` 20 passed.
+
 ## V1.0 (recommended scope)
 
 Dashboard, filesystem scanner, node_modules, npm/pnpm cache, Go cache,

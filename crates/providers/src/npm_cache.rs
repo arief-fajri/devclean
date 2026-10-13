@@ -3,21 +3,24 @@
 //! deleted by hand (P5). All caches are regenerable (`npm install`, …),
 //! hence `Safe`.
 
-use super::provider::{dir_size_checked, home_dir, tool_output_dir, CleanupAction, Provider};
+use super::provider::{
+    dir_size_checked, home_dir, impact, tool_output_dir, CleanupAction, Provider,
+};
 use devclean_core::{Resource, SafetyLevel};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 
 pub struct NpmCacheProvider;
 
-/// (id suffix, label, program, args to print the cache dir, clean args).
-/// Fixed strings only (G-SAFE-02).
+/// (id suffix, label, program, args to print the cache dir, clean args,
+/// cleanup consequence, reclaim cost). Fixed strings only (G-SAFE-02).
 struct Manager {
     label: &'static str,
     program: &'static str,
     dir_args: &'static [&'static str],
     clean_args: &'static [&'static str],
-    clean_hint: &'static str,
+    consequence: &'static str,
+    cost: &'static str,
 }
 
 const MANAGERS: &[Manager] = &[
@@ -26,23 +29,31 @@ const MANAGERS: &[Manager] = &[
         program: "npm",
         dir_args: &["config", "get", "cache"],
         clean_args: &["cache", "clean", "--force"],
-        clean_hint: "cleaned via `npm cache clean --force`",
+        consequence: "Package cache only; your projects are untouched.",
+        cost: "Next install re-downloads",
     },
     Manager {
         label: "pnpm store",
         program: "pnpm",
         dir_args: &["store", "path"],
         clean_args: &["store", "prune"],
-        clean_hint: "cleaned via `pnpm store prune`",
+        consequence: "Package store only; your projects are untouched.",
+        cost: "Next install re-fetches",
     },
     Manager {
         label: "yarn cache",
         program: "yarn",
         dir_args: &["cache", "dir"],
         clean_args: &["cache", "clean"],
-        clean_hint: "cleaned via `yarn cache clean`",
+        consequence: "Download cache only; your projects are untouched.",
+        cost: "Next install re-downloads",
     },
 ];
+
+/// The exact command shown as secondary detail, e.g. `"pnpm store prune"`.
+fn clean_command(m: &Manager) -> String {
+    format!("{} {}", m.program, m.clean_args.join(" "))
+}
 
 /// Resolve a manager's cache dir: prefer the tool's own report, fall back
 /// to the conventional home-relative location for npm.
@@ -95,7 +106,8 @@ impl Provider for NpmCacheProvider {
                 size_bytes: size,
                 reclaimable_bytes: size,
                 safety: SafetyLevel::Safe,
-                detail: Some(m.clean_hint.to_string()),
+                detail: None,
+                impact: impact(m.consequence, Some(m.cost), Some(&clean_command(m))),
             });
         }
         out
@@ -134,9 +146,21 @@ mod tests {
             program: "devclean-definitely-missing-bin",
             dir_args: &[],
             clean_args: &[],
-            clean_hint: "",
+            consequence: "",
+            cost: "",
         };
         assert!(cache_dir(&missing).is_none());
+    }
+
+    #[test]
+    fn managers_describe_impact_and_commands() {
+        for m in MANAGERS {
+            assert!(!m.consequence.is_empty(), "{} needs a consequence", m.label);
+            assert!(!m.cost.is_empty(), "{} needs a cost", m.label);
+            let cmd = clean_command(m);
+            assert!(cmd.starts_with(m.program), "{cmd} must name the tool");
+            assert!(cmd.len() > m.program.len(), "{cmd} must include args");
+        }
     }
 
     #[test]
@@ -146,6 +170,9 @@ mod tests {
             assert!(r.path.is_dir(), "{} must exist", r.path.display());
             assert_eq!(r.provider, "npm_cache");
             assert_eq!(r.safety, SafetyLevel::Safe);
+            let impact = r.impact.as_ref().expect("impact must be set");
+            assert!(!impact.consequence.is_empty());
+            assert!(impact.command.as_deref().is_some_and(|c| !c.is_empty()));
         }
     }
 }

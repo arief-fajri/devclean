@@ -20,5 +20,5 @@ pub use settings::{Settings, ThemeMode};
 pub use system::{app_data_dir, default_scan_roots, platform_name};
 pub use types::{
     CleanupPreview, CleanupPreviewItem, CleanupResult, CleanupStatus, HistoryEntry,
-    ProviderSummary, Resource, SafetyLevel, ScanSummary,
+    ProviderSummary, Resource, ResourceImpact, SafetyLevel, ScanSummary,
 };

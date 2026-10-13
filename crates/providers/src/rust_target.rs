@@ -1,7 +1,9 @@
 //! Rust `target/` provider. Finds `Cargo.toml` projects, then their
 //! `target/` dir. Regenerable via `cargo build`, hence `Safe`.
 
-use super::provider::{dir_size_checked, project_detail, walk_cancelled, CleanupAction, Provider};
+use super::provider::{
+    dir_size_checked, impact, project_detail, walk_cancelled, CleanupAction, Provider,
+};
 use devclean_core::{Resource, SafetyLevel};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -53,6 +55,11 @@ impl Provider for RustTargetProvider {
                     reclaimable_bytes: size,
                     safety: SafetyLevel::Safe,
                     detail: Some(project_detail(&project_name, project, size)),
+                    impact: impact(
+                        "Build artifacts only; your source code is untouched.",
+                        Some("First build after cleanup recompiles from scratch"),
+                        None,
+                    ),
                 });
             });
         }
@@ -61,5 +68,27 @@ impl Provider for RustTargetProvider {
 
     fn cleanup_action(&self, path: &Path) -> CleanupAction {
         CleanupAction::RemoveDir(path.to_path_buf())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn finds_target_and_describes_impact() {
+        let root = std::env::temp_dir().join(format!("devclean-test-{}-rs", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let proj = root.join("proj");
+        std::fs::create_dir_all(proj.join("target/debug")).unwrap();
+        std::fs::write(proj.join("Cargo.toml"), "[package]\nname = \"proj\"").unwrap();
+        std::fs::write(proj.join("target/debug/app"), "x".repeat(1000)).unwrap();
+        let cancel = AtomicBool::new(false);
+        let found = RustTargetProvider.scan(std::slice::from_ref(&root), &cancel);
+        assert_eq!(found.len(), 1, "expected exactly one hit: {found:?}");
+        assert!(found[0].name.ends_with("/target"));
+        let impact = found[0].impact.as_ref().expect("impact must be set");
+        assert!(!impact.consequence.is_empty());
+        let _ = std::fs::remove_dir_all(&root);
     }
 }

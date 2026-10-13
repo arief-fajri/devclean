@@ -7,7 +7,7 @@
 //! so this provider declares [`Provider::extra_allowed_roots`] — the
 //! validator still enforces protected paths and the exact dir (I2, I7).
 
-use super::provider::{dir_size, home_dir, CleanupAction, Provider};
+use super::provider::{dir_size, home_dir, impact, CleanupAction, Provider};
 use devclean_core::{Resource, SafetyLevel};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::AtomicBool;
@@ -46,7 +46,12 @@ impl Provider for CargoRegistryProvider {
             size_bytes: size,
             reclaimable_bytes: size,
             safety: SafetyLevel::Caution,
-            detail: Some("re-downloaded on next build; slow on metered connections".to_string()),
+            detail: None,
+            impact: impact(
+                "Crates are re-downloaded from crates.io on the next build.",
+                Some("Requires network · slow on metered connections"),
+                None,
+            ),
         }]
     }
 

@@ -18,15 +18,21 @@ cd apps/desktop && npm install && cd ../..
 cargo tauri dev
 ```
 
-Open the DevClean window → click **Scan** → 9 providers appear with byte counts.
-Click a provider header to expand the project drill-down (search, stale
-filter, per-provider rescan); click a project for details. Cancel works
-anytime via **Cancel ✕** (scan) or **Cancel remaining** (cleanup). Cleanup
-always goes preview → acknowledgement → result table (requested → freed
-per resource). Scan roots, ignore list, and toggles live under the
-**⚙ Settings** dialog (persisted to disk since M3); past cleanups under
-**🕘 History**. The tray icon offers Show / Scan now / Quit; notifications
-fire only for completed scans/cleanups while the window is unfocused.
+Open the DevClean window → the summary panel shows reclaimable storage with a
+safe-to-clean split → click **Scan again** → 9 providers appear with byte
+counts and share percentages. The toolbar above the list offers global
+search, All/Safe/Review/Stale/Selected filters, and sorting (largest first
+by default); the stat tiles toggle the safety filter. Click a provider
+header to expand the project drill-down (per-provider rescan); click a
+project for details with its cleanup consequence. Selecting items raises
+the selection bar (safe/review split, Clear, Review & clean selected).
+Cancel works anytime via **Cancel scan** or **Cancel remaining** (cleanup).
+Cleanup always goes preview (review items first) → acknowledgement →
+result panel (requested → freed per resource). Scan roots, ignore list, and
+toggles live under the Settings dialog (persisted to disk since M3); past
+cleanups under History. The tray icon offers Show / Scan now / Quit;
+notifications fire only for completed scans/cleanups while the window is
+unfocused.
 
 Limits: each provider scan is bounded by 60s (`PROVIDER_SCAN_TIMEOUT`),
 each cleanup subprocess by 120s (`CLEANUP_COMMAND_TIMEOUT`, child killed
@@ -38,7 +44,7 @@ on expiry). Cancel settles in <1s (tested).
 - No `curl` needed — verify via the UI: Scan lists 9 providers
   (`node_modules`, `Rust target`, `Go cache`, `Docker`, npm/pnpm/yarn,
   Python, Cargo registry, Gradle, Xcode — absent tools simply report empty)
-- `cargo test --workspace` is green, `cargo clippy` has 0 warnings, `npm run check` has 0 errors
+- `cargo test --workspace` is green, `cargo clippy` has 0 warnings, `npm run check` has 0 errors, `npm test` (vitest) is green
 
 ## Prerequisites
 
@@ -69,6 +75,7 @@ cargo fmt --all                         # format (check: append -- --check)
 
 npm --prefix apps/desktop run check     # svelte-check + tsc
 npm --prefix apps/desktop run build     # build frontend (output ../dist)
+npm --prefix apps/desktop test          # vitest (view/filter/sort, format, safety meta)
 
 cargo tauri dev                         # dev mode (from the repo root)
 cargo tauri build                       # native bundle (DMG/MSI/deb)

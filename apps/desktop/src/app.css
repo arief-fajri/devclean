@@ -2,11 +2,43 @@
 
 @custom-variant dark (&:where(.dark, .dark *));
 
+@theme {
+  --animate-rise: rise 0.2s ease-out;
+
+  @keyframes rise {
+    from {
+      opacity: 0;
+      transform: translateY(12px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+}
+
 :root {
   color-scheme: light dark;
 }
 
 body {
   margin: 0;
-  font-family: system-ui, "Segoe UI", Roboto, sans-serif;
+  font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Tabular numerals for byte counts + percents so columns align. */
+.tnum {
+  font-variant-numeric: tabular-nums;
+}
+
+/* Consistent, visible keyboard focus (a11y). */
+:where(button, a, input, select, [tabindex]):focus-visible {
+  outline: 2px solid #059669;
+  outline-offset: 2px;
+  border-radius: 6px;
+}
+
+::selection {
+  background: #a7f3d0;
 }

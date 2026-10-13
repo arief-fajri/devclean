@@ -83,6 +83,7 @@ mod tests {
                 reclaimable_bytes: 10,
                 safety: SafetyLevel::Safe,
                 detail: None,
+                impact: None,
             }],
         }
     }

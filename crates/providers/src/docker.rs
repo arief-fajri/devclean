@@ -5,7 +5,7 @@
 //! only, `Safe`). Images/containers/volumes are reported as
 //! `Caution`/`Dangerous` and are NOT cleaned by default.
 
-use super::provider::{CleanupAction, Provider};
+use super::provider::{impact, CleanupAction, Provider};
 use devclean_core::{Resource, SafetyLevel};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -93,8 +93,11 @@ impl Provider for DockerProvider {
             size_bytes: bytes,
             reclaimable_bytes: bytes,
             safety: SafetyLevel::Safe,
-            detail: Some(
-                "cleaned via `docker builder prune -af`; future builds may be slower".to_string(),
+            detail: None,
+            impact: impact(
+                "Docker rebuilds image layers from your Dockerfile.",
+                Some("Next image build starts from scratch"),
+                Some("docker builder prune -af"),
             ),
         }]
     }

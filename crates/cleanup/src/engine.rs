@@ -292,6 +292,7 @@ mod tests {
                 reclaimable_bytes: 2000,
                 safety: SafetyLevel::Safe,
                 detail: None,
+                impact: None,
             },
         );
         let validator = SafetyValidator::new(vec![root.clone()]);
@@ -331,6 +332,7 @@ mod tests {
                 reclaimable_bytes: 2000,
                 safety: SafetyLevel::Safe,
                 detail: None,
+                impact: None,
             },
         );
         // Validator rooted elsewhere: the same path must be refused.

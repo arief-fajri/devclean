@@ -3,7 +3,7 @@
 //! To add a provider (e.g. Python cache): implement this trait, add it to
 //! [`crate::all_providers`], done. No `if/else` chains elsewhere.
 
-use devclean_core::{Resource, SafetyLevel};
+use devclean_core::{Resource, ResourceImpact, SafetyLevel};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 
@@ -169,6 +169,22 @@ pub fn stale_note_for_age(age_days: Option<u64>, bytes: u64) -> Option<String> {
     }
 }
 
+/// One-line safety-consequence descriptor for a scanned resource.
+/// Every provider must attach one: the UI renders `consequence` as the
+/// explanation and `command` as secondary detail, so CLI text is never
+/// truncated inside `detail` again.
+pub fn impact(
+    consequence: &str,
+    cost: Option<&str>,
+    command: Option<&str>,
+) -> Option<ResourceImpact> {
+    Some(ResourceImpact {
+        consequence: consequence.to_string(),
+        cost: cost.map(str::to_string),
+        command: command.map(str::to_string),
+    })
+}
+
 /// Full `detail` string for filesystem project caches: name, age signal,
 /// and optional stale note.
 pub fn project_detail(project_name: &str, project: &Path, bytes: u64) -> String {
@@ -217,6 +233,16 @@ mod tests {
         // Young but huge → aging (not stale).
         let note = stale_note_for_age(Some(31), 2_000_000_000).unwrap();
         assert!(note.contains("aging") && !note.contains("stale"));
+    }
+
+    #[test]
+    fn impact_helper_builds_a_complete_descriptor() {
+        let got = impact("c", Some("price"), Some("cmd")).unwrap();
+        assert_eq!(got.consequence, "c");
+        assert_eq!(got.cost.as_deref(), Some("price"));
+        assert_eq!(got.command.as_deref(), Some("cmd"));
+        let got = impact("c", None, None).unwrap();
+        assert!(got.cost.is_none() && got.command.is_none());
     }
 
     #[test]

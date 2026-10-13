@@ -1,7 +1,7 @@
 //! Go cache provider. Split into build cache + module cache, cleaned via
 //! the official `go` tool — never by deleting cache internals by hand.
 
-use super::provider::{dir_size_checked, CleanupAction, Provider};
+use super::provider::{dir_size_checked, impact, CleanupAction, Provider};
 use devclean_core::{Resource, SafetyLevel};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -32,10 +32,23 @@ impl Provider for GoProvider {
 
     fn scan(&self, _roots: &[PathBuf], cancel: &AtomicBool) -> Vec<Resource> {
         let mut out = Vec::new();
-        // (label, env key, clean args) — fixed strings only (G-SAFE-02).
-        for (label, key, clean_args) in [
-            ("Go build cache", "GOCACHE", "go clean -cache"),
-            ("Go module cache", "GOMODCACHE", "go clean -modcache"),
+        // (label, env key, clean args, consequence, cost) — fixed strings
+        // only (G-SAFE-02).
+        for (label, key, clean_args, consequence, cost) in [
+            (
+                "Go build cache",
+                "GOCACHE",
+                "go clean -cache",
+                "Build cache is recreated automatically by the Go toolchain.",
+                "Cold builds are slower",
+            ),
+            (
+                "Go module cache",
+                "GOMODCACHE",
+                "go clean -modcache",
+                "Modules are re-downloaded when missing.",
+                "Requires network to re-download",
+            ),
         ] {
             if cancel.load(Ordering::Relaxed) {
                 break;
@@ -56,7 +69,8 @@ impl Provider for GoProvider {
                     size_bytes: size,
                     reclaimable_bytes: size,
                     safety: SafetyLevel::Safe,
-                    detail: Some(format!("cleaned via `{clean_args}`")),
+                    detail: None,
+                    impact: impact(consequence, Some(cost), Some(clean_args)),
                 });
             }
         }

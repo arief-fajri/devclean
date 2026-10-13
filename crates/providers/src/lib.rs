@@ -20,7 +20,7 @@ pub use gradle_cache::GradleCacheProvider;
 pub use node::NodeModulesProvider;
 pub use npm_cache::NpmCacheProvider;
 pub use provider::{
-    dir_size, dir_size_checked, home_dir, project_detail, stale_note, stale_note_for_age,
+    dir_size, dir_size_checked, home_dir, impact, project_detail, stale_note, stale_note_for_age,
     tool_output_dir, walk_cancelled, CleanupAction, Provider,
 };
 pub use python_cache::PythonCacheProvider;

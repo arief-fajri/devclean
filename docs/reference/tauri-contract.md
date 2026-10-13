@@ -2,7 +2,7 @@
 
 > The single document defining what the frontend may see. Changing this file
 > = changing the contract → requires human approval (Level B) + a regression
-> test. Version: **v0.2.0 (M3)**.
+> test. Version: **v0.3.0 (UI polish)**.
 
 ## Commands (11)
 
@@ -35,8 +35,10 @@
 
 ```ts
 type SafetyLevel = "safe" | "caution" | "dangerous";
+interface ResourceImpact { consequence: string; cost?: string; command?: string }
 interface Resource { id: string; provider: string; name: string; path: string;
-  size_bytes: number; reclaimable_bytes: number; safety: SafetyLevel; detail?: string }
+  size_bytes: number; reclaimable_bytes: number; safety: SafetyLevel; detail?: string;
+  impact?: ResourceImpact }
 interface ProviderSummary { provider: string; name: string; total_bytes: number;
   reclaimable_bytes: number; resource_count: number }
 interface ScanSummary { total_bytes: number; reclaimable_bytes: number;
@@ -70,6 +72,11 @@ Not:
 
 ## Contract changelog
 
+- `v0.3.0` — UI polish: `Resource.impact?` (`ResourceImpact {consequence, cost?, command?}`,
+  additive, `#[serde(default)]` so v0.2.x on-disk caches still load). CLI
+  text moved out of `detail` (age/signal only) into `impact.command`.
+  Regression tests: `old_cached_scans_without_impact_still_deserialize`,
+  per-provider `impact` assertions. No new commands or events.
 - `v0.2.0` — M3: `+get_history`, `+get_cached_scan`, `Settings.theme`. Provider
   scans are cancellable per entry with a 60s timeout; cleanup subprocesses
   have a 120s timeout (both code+test enforced, no type changes).

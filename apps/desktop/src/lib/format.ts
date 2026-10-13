@@ -30,3 +30,12 @@ export function isStaleSignal(detail: string | undefined): boolean {
   const days = parseAgeDays(detail);
   return days !== null && days > 90;
 }
+
+/** Share of `part` in `total` as `"47.8%"` / `"2%"` / `"0%"`. */
+export function formatPct(part: number, total: number): string {
+  if (!Number.isFinite(part) || !Number.isFinite(total) || total <= 0 || part <= 0)
+    return "0%";
+  const pct = Math.min(100, (part / total) * 100);
+  const s = pct >= 100 ? "100" : pct.toFixed(1).replace(/\.0$/, "");
+  return `${s}%`;
+}

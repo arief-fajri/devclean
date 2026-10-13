@@ -6,7 +6,9 @@
 //! non-reinstallable state and count as significant destructive scope
 //! (G-SAFE-03).
 
-use super::provider::{dir_size_checked, project_detail, walk_cancelled, CleanupAction, Provider};
+use super::provider::{
+    dir_size_checked, impact, project_detail, walk_cancelled, CleanupAction, Provider,
+};
 use devclean_core::{Resource, SafetyLevel};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -62,6 +64,11 @@ impl Provider for PythonCacheProvider {
                     reclaimable_bytes: size,
                     safety: SafetyLevel::Safe,
                     detail: Some(project_detail(&project_name, project, size)),
+                    impact: impact(
+                        "Bytecode and test caches only; regenerated automatically.",
+                        Some("First run recompiles"),
+                        None,
+                    ),
                 });
             });
         }
@@ -98,6 +105,8 @@ mod tests {
         assert_eq!(found.len(), 1, "expected only __pycache__: {found:?}");
         assert!(found[0].name.ends_with("__pycache__"));
         assert!(found[0].size_bytes >= 1000);
+        let impact = found[0].impact.as_ref().expect("impact must be set");
+        assert!(!impact.consequence.is_empty());
         let _ = std::fs::remove_dir_all(&root);
     }
 }

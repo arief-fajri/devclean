@@ -32,6 +32,24 @@ pub struct Resource {
     pub safety: SafetyLevel,
     /// Extra context, e.g. `"143 days stale · pnpm"`.
     pub detail: Option<String>,
+    /// Human-readable cleanup consequence, set by the provider.
+    /// `#[serde(default)]` keeps v0.2.x on-disk scan caches readable.
+    #[serde(default)]
+    pub impact: Option<ResourceImpact>,
+}
+
+/// What happens when a resource is cleaned — one honest sentence plus
+/// the price the user pays (time / network) and the exact official
+/// command. Decided by the provider, never by the frontend.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ResourceImpact {
+    /// What happens after cleanup, e.g. `"Dependencies are reinstalled
+    /// from the lockfile; source code is untouched."`
+    pub consequence: String,
+    /// The price, e.g. `"Requires network · slow on metered connections"`.
+    pub cost: Option<String>,
+    /// The exact official command, shown as secondary detail.
+    pub command: Option<String>,
 }
 
 /// Per-provider totals for the dashboard.
@@ -94,6 +112,47 @@ pub enum CleanupStatus {
 /// One row of the cleanup history log (JSONL on disk, `get_history`
 /// over the bridge). Written after every `cleanup` call, one entry per
 /// resource — a durable mirror of [`CleanupResult`].
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn impact() -> ResourceImpact {
+        ResourceImpact {
+            consequence: "Dependencies are reinstalled from the lockfile.".to_string(),
+            cost: Some("Next install re-downloads packages".to_string()),
+            command: None,
+        }
+    }
+
+    #[test]
+    fn old_cached_scans_without_impact_still_deserialize() {
+        // v0.2.x on-disk cache payload: no `impact` field at all.
+        let json = r#"{"id":"nm:0000","provider":"node_modules","name":"x","path":"/tmp/x","size_bytes":10,"reclaimable_bytes":10,"safety":"safe","detail":null}"#;
+        let r: Resource = serde_json::from_str(json).expect("old cache must load");
+        assert_eq!(r.impact, None);
+    }
+
+    #[test]
+    fn impact_round_trips_through_json() {
+        let mut r = Resource {
+            id: "nm:0000".to_string(),
+            provider: "node_modules".to_string(),
+            name: "x".to_string(),
+            path: std::path::PathBuf::from("/tmp/x"),
+            size_bytes: 10,
+            reclaimable_bytes: 10,
+            safety: SafetyLevel::Safe,
+            detail: None,
+            impact: Some(impact()),
+        };
+        let back: Resource = serde_json::from_str(&serde_json::to_string(&r).unwrap()).unwrap();
+        assert_eq!(back.impact, r.impact);
+        r.impact = None;
+        let back: Resource = serde_json::from_str(&serde_json::to_string(&r).unwrap()).unwrap();
+        assert_eq!(back.impact, None);
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct HistoryEntry {
     /// Unix timestamp (seconds) when the cleanup finished.

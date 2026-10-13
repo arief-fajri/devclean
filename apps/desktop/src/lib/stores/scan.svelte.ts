@@ -58,6 +58,15 @@ class ScanStore {
       : [...this.selected, id];
   }
 
+  clearSelection() {
+    this.selected = [];
+  }
+
+  /** Add ids to the selection (used by "Select safe items"). */
+  selectMany(ids: string[]) {
+    this.selected = [...new Set([...this.selected, ...ids])];
+  }
+
   toggleProvider(provider: string) {
     const ids = this.resourcesByProvider(provider).map((r) => r.id);
     const all = ids.every((id) => this.selected.includes(id));

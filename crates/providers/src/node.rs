@@ -3,7 +3,9 @@
 //! Finds `node_modules/` directories whose parent holds a `package.json`.
 //! Cleans by deleting the directory only — lockfiles are never touched.
 
-use super::provider::{dir_size_checked, project_detail, walk_cancelled, CleanupAction, Provider};
+use super::provider::{
+    dir_size_checked, impact, project_detail, walk_cancelled, CleanupAction, Provider,
+};
 use devclean_core::{Resource, SafetyLevel};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -62,6 +64,11 @@ impl Provider for NodeModulesProvider {
                     reclaimable_bytes: size,
                     safety: SafetyLevel::Safe,
                     detail: Some(project_detail(&project_name, project, size)),
+                    impact: impact(
+                        "Dependencies are reinstalled from the lockfile; source code is untouched.",
+                        Some("Next install re-downloads packages"),
+                        None,
+                    ),
                 });
             });
         }
@@ -104,6 +111,8 @@ mod tests {
         assert_eq!(found[0].provider, "node_modules");
         assert!(found[0].size_bytes >= 1000);
         assert_eq!(found[0].reclaimable_bytes, found[0].size_bytes);
+        let impact = found[0].impact.as_ref().expect("impact must be set");
+        assert!(!impact.consequence.is_empty());
         let _ = std::fs::remove_dir_all(&root);
     }
 }

@@ -201,6 +201,7 @@ mod tests {
                     reclaimable_bytes: 1,
                     safety: SafetyLevel::Safe,
                     detail: None,
+                    impact: None,
                 });
             }
             out

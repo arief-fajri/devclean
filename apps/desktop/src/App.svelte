@@ -1,15 +1,32 @@
 <script lang="ts">
   import { onMount } from "svelte";
+  import {
+    History,
+    Leaf,
+    Moon,
+    RefreshCw,
+    Settings,
+    ShieldCheck,
+    Sun,
+    TriangleAlert,
+  } from "lucide-svelte";
   import ConfirmDialog from "$lib/components/ConfirmDialog.svelte";
   import HistoryDialog from "$lib/components/HistoryDialog.svelte";
+  import ListToolbar from "$lib/components/ListToolbar.svelte";
   import ProviderCard from "$lib/components/ProviderCard.svelte";
   import ResourceDetail from "$lib/components/ResourceDetail.svelte";
+  import ResultPanel from "$lib/components/ResultPanel.svelte";
+  import SelectionBar from "$lib/components/SelectionBar.svelte";
   import SettingsDialog from "$lib/components/SettingsDialog.svelte";
-  import { formatBytes } from "$lib/format";
+  import StatTile from "$lib/components/StatTile.svelte";
+  import SummaryPanel from "$lib/components/SummaryPanel.svelte";
+  import { isStaleSignal } from "$lib/format";
   import { cleanupStore } from "$lib/stores/cleanup.svelte";
   import { historyStore } from "$lib/stores/history.svelte";
   import { scanStore } from "$lib/stores/scan.svelte";
   import { settingsStore } from "$lib/stores/settings.svelte";
+  import { viewStore } from "$lib/stores/view.svelte";
+  import { applyView, countBySafety } from "$lib/view";
 
   let dark = $state(false);
 
@@ -55,128 +72,212 @@
     void settingsStore.setTheme(next);
   }
 
-  const maxBytes = $derived(
-    Math.max(1, ...(scanStore.summary?.providers.map((p) => p.reclaimable_bytes) ?? [1])),
+  const iconBtn =
+    "flex h-9 w-9 items-center justify-center rounded-lg border border-zinc-200 text-zinc-600 hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800";
+
+  /** Provider groups after the global view (search/filter/sort). */
+  const groups = $derived(
+    scanStore.summary
+      ? applyView(scanStore.summary, scanStore.selected, viewStore.options)
+      : [],
   );
-  const cancelled = $derived(
-    (cleanupStore.results ?? []).filter((r) => r.status === "cancelled"),
+  const allResources = $derived(scanStore.summary?.resources ?? []);
+  const totalReclaimable = $derived(scanStore.summary?.reclaimable_bytes ?? 0);
+  const safeBytes = $derived(
+    allResources
+      .filter((r) => r.safety === "safe")
+      .reduce((acc, r) => acc + r.reclaimable_bytes, 0),
+  );
+  const categoryCounts = $derived.by(() => {
+    let safeCats = 0;
+    let reviewCats = 0;
+    for (const p of scanStore.summary?.providers ?? []) {
+      const rs = allResources.filter((r) => r.provider === p.provider);
+      if (rs.length === 0) continue;
+      if (rs.every((r) => r.safety === "safe")) safeCats += 1;
+      else reviewCats += 1;
+    }
+    return { safeCats, reviewCats };
+  });
+  const statusLabel = $derived(
+    scanStore.scanning ? "Scanning…" : scanStore.fromCache ? "Cached" : "Up to date",
+  );
+  const scanStatus = $derived(
+    !scanStore.scanning
+      ? null
+      : scanStore.progress
+        ? `Scanning ${scanStore.progress.provider}… (${scanStore.progress.done}/${scanStore.progress.total})`
+        : scanStore.cancelling
+          ? "Cancelling scan…"
+          : "Starting scan…",
   );
   const scanPct = $derived(
     scanStore.progress && scanStore.progress.total > 0
       ? Math.round((scanStore.progress.done / scanStore.progress.total) * 100)
       : 0,
   );
-  const safetyCounts = $derived.by(() => {
+  const impactById = $derived(
+    new Map((scanStore.summary?.resources ?? []).map((r) => [r.id, r.impact])),
+  );
+  /** Safe/review split of the current selection (by id, filter-independent). */
+  const selectionSafety = $derived.by(() => {
     const map = new Map((scanStore.summary?.resources ?? []).map((r) => [r.id, r]));
     let safe = 0;
-    let caution = 0;
+    let review = 0;
     for (const id of scanStore.selected) {
       const r = map.get(id);
-      if (r?.safety === "caution") caution += 1;
-      else if (r) safe += 1;
+      if (!r) continue;
+      if (r.safety === "safe") safe += 1;
+      else review += 1;
     }
-    return { safe, caution };
+    return { safe, review };
   });
+  const listCounts = $derived(countBySafety(allResources));
+  const staleTotal = $derived(allResources.filter((r) => isStaleSignal(r.detail)).length);
+  const resultCount = $derived(groups.reduce((acc, g) => acc + g.resources.length, 0));
+  /** Visible, safe, not-yet-selected ids for "Select safe items". */
+  const selectableSafeIds = $derived(
+    groups
+      .flatMap((g) => g.resources)
+      .filter((r) => r.safety === "safe" && !scanStore.selected.includes(r.id))
+      .map((r) => r.id),
+  );
+  const barBusy = $derived(scanStore.scanning || cleanupStore.cleaning);
 </script>
 
 <div class="min-h-screen bg-zinc-50 text-zinc-900 dark:bg-zinc-950 dark:text-zinc-100">
-  <div class="mx-auto max-w-2xl px-4 pb-32 pt-6">
+  <div class="mx-auto max-w-5xl px-4 pb-32 pt-6">
     <!-- Header -->
-    <header class="flex items-center justify-between">
-      <h1 class="text-xl font-bold">DevClean</h1>
+    <header class="flex items-center justify-between gap-3">
+      <div class="flex items-center gap-2.5">
+        <span
+          aria-hidden="true"
+          class="flex h-9 w-9 items-center justify-center rounded-lg bg-emerald-100 dark:bg-emerald-950"
+        >
+          <Leaf size={20} class="text-emerald-700 dark:text-emerald-300" />
+        </span>
+        <span>
+          <span class="block text-xl leading-6 font-bold">DevClean</span>
+          <span class="block text-xs text-zinc-500">Developer Storage Manager</span>
+        </span>
+      </div>
       <div class="flex items-center gap-2">
+        <span
+          class="mr-1 hidden items-center gap-1.5 rounded-full border border-zinc-200 px-2.5 py-1 text-xs text-zinc-500 sm:inline-flex dark:border-zinc-700"
+          role="status"
+        >
+          <span
+            aria-hidden="true"
+            class="h-1.5 w-1.5 rounded-full {scanStore.scanning
+              ? 'animate-pulse bg-amber-500'
+              : 'bg-emerald-500'}"
+          ></span>
+          {statusLabel}
+        </span>
         <button
-          class="rounded-lg border border-zinc-200 px-3 py-1.5 text-sm hover:bg-zinc-100 dark:border-zinc-700 dark:hover:bg-zinc-800"
+          class={iconBtn}
           onclick={() => historyStore.openDialog()}
           aria-label="Open cleanup history"
           title="Cleanup history"
         >
-          🕘
+          <span aria-hidden="true" class="flex"><History size={16} /></span>
         </button>
         <button
-          class="rounded-lg border border-zinc-200 px-3 py-1.5 text-sm hover:bg-zinc-100 dark:border-zinc-700 dark:hover:bg-zinc-800"
+          class={iconBtn}
           onclick={() => settingsStore.openDialog()}
           aria-label="Open settings"
           title="Settings"
         >
-          ⚙
+          <span aria-hidden="true" class="flex"><Settings size={16} /></span>
         </button>
         <button
-          class="rounded-lg border border-zinc-200 px-3 py-1.5 text-sm hover:bg-zinc-100 dark:border-zinc-700 dark:hover:bg-zinc-800"
+          class={iconBtn}
           onclick={toggleDark}
           aria-label="Toggle dark mode"
+          title="Toggle dark mode"
         >
-          {dark ? "☀️" : "🌙"}
+          <span aria-hidden="true" class="flex">
+            {#if dark}<Sun size={16} />{:else}<Moon size={16} />{/if}
+          </span>
         </button>
-        <button
-          class="rounded-lg border border-zinc-200 px-3 py-1.5 text-sm hover:bg-zinc-100 disabled:opacity-50 dark:border-zinc-700 dark:hover:bg-zinc-800"
-          onclick={() => scanStore.start()}
-          disabled={scanStore.scanning}
-        >
-          {scanStore.scanning ? "Scanning…" : "Scan ↻"}
-        </button>
-        {#if scanStore.scanning}
-          <button
-            class="rounded-lg border border-zinc-200 px-3 py-1.5 text-sm hover:bg-zinc-100 disabled:opacity-50 dark:border-zinc-700 dark:hover:bg-zinc-800"
-            onclick={() => scanStore.cancel()}
-            disabled={scanStore.cancelling}
-          >
-            {scanStore.cancelling ? "Cancelling…" : "Cancel ✕"}
-          </button>
-        {/if}
       </div>
     </header>
 
-    <!-- Progress -->
-    {#if scanStore.scanning}
-      <div class="mt-4" role="status">
-        <p class="text-sm text-zinc-500">
-          {#if scanStore.progress}
-            Scanning {scanStore.progress.provider}… ({scanStore.progress.done}/{scanStore.progress
-              .total})
-          {:else}
-            {scanStore.cancelling ? "Cancelling scan…" : "Starting scan…"}
-          {/if}
-        </p>
-        {#if scanStore.progress && scanStore.progress.total > 0}
-          <div class="mt-2 h-2 overflow-hidden rounded-full bg-zinc-100 dark:bg-zinc-800">
-            <div class="h-full rounded-full bg-emerald-500" style="width: {scanPct}%"></div>
-          </div>
-        {/if}
-      </div>
-    {/if}
     {#if scanStore.error}
-      <p class="mt-4 rounded-lg bg-red-50 p-3 text-sm text-red-700 dark:bg-red-950 dark:text-red-300">
+      <p
+        class="mt-4 rounded-lg bg-red-50 p-3 text-sm text-red-700 dark:bg-red-950 dark:text-red-300"
+      >
         Scan error: {scanStore.error}
       </p>
     {/if}
 
-    <!-- Hero -->
+    <!-- Summary dashboard -->
     {#if scanStore.summary}
-      <div class="mt-6 text-center">
-        <p class="font-mono text-4xl font-bold">{formatBytes(scanStore.summary.reclaimable_bytes)}</p>
-        <p class="mt-1 text-sm text-zinc-500">Can be reclaimed</p>
-        <p class="mt-1 text-xs text-zinc-400">
-          {scanStore.summary.resources.length} projects · {scanStore.summary.providers.length} providers
-          {#if scanStore.lastScannedAt}
-            · Last scanned {scanStore.lastScannedAt.toLocaleTimeString()}
-          {/if}
-          {#if scanStore.fromCache && !scanStore.scanning}
-            · cached
-          {/if}
-        </p>
+      <div class="mt-6">
+        <SummaryPanel
+          reclaimable={scanStore.summary.reclaimable_bytes}
+          resourceCount={scanStore.summary.resources.length}
+          providerCount={scanStore.summary.providers.length}
+          lastScannedAt={scanStore.lastScannedAt}
+          fromCache={scanStore.fromCache}
+          scanning={scanStore.scanning}
+          cancelling={scanStore.cancelling}
+          scanStatus={scanStatus}
+          scanPct={scanPct}
+          safeBytes={safeBytes}
+          safeCategories={categoryCounts.safeCats}
+          reviewCategories={categoryCounts.reviewCats}
+          onScan={() => scanStore.start()}
+          onCancelScan={() => scanStore.cancel()}
+        />
       </div>
 
-      <!-- Provider breakdown -->
-      <div class="mt-6 space-y-3">
-        {#each scanStore.summary.providers as p (p.provider)}
+      <div class="mt-3 grid grid-cols-2 gap-3">
+        <StatTile
+          icon={ShieldCheck}
+          value={String(categoryCounts.safeCats)}
+          label="Safe categories"
+          iconClass="text-emerald-600 dark:text-emerald-400"
+          active={viewStore.safety === "safe"}
+          onSelect={() => {
+            viewStore.safety = viewStore.safety === "safe" ? "all" : "safe";
+          }}
+        />
+        <StatTile
+          icon={TriangleAlert}
+          value={String(categoryCounts.reviewCats)}
+          label="Need review"
+          iconClass="text-amber-600 dark:text-amber-400"
+          active={viewStore.safety === "review"}
+          onSelect={() => {
+            viewStore.safety = viewStore.safety === "review" ? "all" : "review";
+          }}
+        />
+      </div>
+
+      <div class="mt-4">
+        <ListToolbar
+          totalCount={allResources.length}
+          safeCount={listCounts.safe}
+          reviewCount={listCounts.review}
+          staleCount={staleTotal}
+          selectedCount={scanStore.selected.length}
+          resultCount={resultCount}
+          selectableSafe={selectableSafeIds.length}
+          onSelectSafe={() => scanStore.selectMany(selectableSafeIds)}
+        />
+      </div>
+
+      <!-- Provider breakdown (global view: search/filter/sort) -->
+      <div class="mt-4 space-y-3">
+        {#each groups as g (g.summary.provider)}
           <ProviderCard
-            summary={p}
-            resources={scanStore.resourcesByProvider(p.provider)}
+            summary={g.summary}
+            resources={g.resources}
             selected={scanStore.selected}
-            maxBytes={maxBytes}
-            expanded={scanStore.expanded.includes(p.provider)}
-            rescanning={scanStore.rescanning === p.provider}
+            totalBytes={totalReclaimable}
+            expanded={scanStore.expanded.includes(g.summary.provider)}
+            rescanning={scanStore.rescanning === g.summary.provider}
             onToggle={(id) => scanStore.toggle(id)}
             onToggleProvider={(prov) => scanStore.toggleProvider(prov)}
             onExpand={(prov) => scanStore.toggleExpand(prov)}
@@ -186,74 +287,69 @@
         {/each}
       </div>
 
+      {#if groups.length === 0 && scanStore.summary.providers.length > 0}
+        <div
+          class="mt-6 rounded-xl border border-dashed border-zinc-300 p-6 text-center dark:border-zinc-700"
+        >
+          <p class="text-sm text-zinc-500">No resources match the current filters.</p>
+          <button
+            class="mt-3 rounded-lg border border-zinc-200 px-4 py-1.5 text-sm hover:bg-zinc-100 dark:border-zinc-700 dark:hover:bg-zinc-800"
+            onclick={() => viewStore.reset()}
+          >
+            Clear filters
+          </button>
+        </div>
+      {/if}
+
       {#if scanStore.summary.providers.length === 0}
-        <p class="mt-6 rounded-xl border border-dashed border-zinc-300 p-6 text-center text-sm text-zinc-500 dark:border-zinc-700">
-          Nothing reclaimable found. Add a scan root in Settings
-          (defaults: ~/Projects, ~/Code, ~/Workspace) and scan again.
-        </p>
+        <div
+          class="mt-6 rounded-xl border border-dashed border-zinc-300 p-6 text-center dark:border-zinc-700"
+        >
+          <p class="text-sm font-medium text-zinc-700 dark:text-zinc-300">
+            Nothing reclaimable found
+          </p>
+          <p class="mt-1 text-sm text-zinc-500">
+            Add a scan root in Settings (defaults: ~/Projects, ~/Code, ~/Workspace) and scan
+            again.
+          </p>
+          <button
+            class="mt-3 inline-flex items-center gap-2 rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-700"
+            onclick={() => scanStore.start()}
+            disabled={scanStore.scanning}
+          >
+            <span aria-hidden="true" class="flex"><RefreshCw size={15} /></span>
+            Scan again
+          </button>
+        </div>
       {/if}
     {:else if !scanStore.scanning}
-      <p class="mt-6 text-center text-sm text-zinc-500">Press Scan to analyze your dev caches.</p>
+      <div class="mt-6 rounded-xl border border-dashed border-zinc-300 p-6 text-center dark:border-zinc-700">
+        <p class="text-sm text-zinc-500">Press Scan to analyze your dev caches.</p>
+        <button
+          class="mt-3 inline-flex items-center gap-2 rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-700"
+          onclick={() => scanStore.start()}
+        >
+          <span aria-hidden="true" class="flex"><RefreshCw size={15} /></span>
+          Scan now
+        </button>
+      </div>
+    {:else}
+      <p class="mt-6 text-center text-sm text-zinc-500" role="status">
+        {scanStatus ?? "Starting scan…"}
+      </p>
     {/if}
 
     <!-- Result: per-resource before/after (I8, G-REL-02) -->
     {#if cleanupStore.results}
-      <div class="mt-6 rounded-xl border border-emerald-200 bg-emerald-50 p-4 dark:border-emerald-900 dark:bg-emerald-950">
-        <p class="font-semibold text-emerald-900 dark:text-emerald-100">
-          ✓ Cleanup complete — {formatBytes(cleanupStore.freedBytes())} freed
-          <span class="font-normal">(of {formatBytes(cleanupStore.requestedBytes())} requested)</span>
-        </p>
-        <ul class="mt-3 space-y-1.5 text-sm">
-          {#each cleanupStore.results as r (r.resource_id)}
-            <li
-              class="flex items-center justify-between gap-2 rounded-lg bg-white/70 px-2 py-1.5 dark:bg-zinc-900/60"
-            >
-              <span class="min-w-0 flex-1 truncate" title={cleanupStore.nameOf(r.resource_id)}>
-                {#if r.status === "success"}✓{:else if r.status === "partial"}~{:else if r.status === "failed"}✗{:else}○{/if}
-                {cleanupStore.nameOf(r.resource_id)}
-              </span>
-              <span class="shrink-0 font-mono text-xs text-zinc-500">
-                {formatBytes(r.requested_bytes)} → {formatBytes(r.freed_bytes)}
-              </span>
-              <span
-                class="shrink-0 rounded px-1.5 py-0.5 text-[11px] font-semibold uppercase {r.status ===
-                'success'
-                  ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900 dark:text-emerald-200'
-                  : r.status === 'partial'
-                    ? 'bg-amber-100 text-amber-800 dark:bg-amber-900 dark:text-amber-200'
-                    : r.status === 'failed'
-                      ? 'bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200'
-                      : 'bg-zinc-200 text-zinc-600 dark:bg-zinc-700 dark:text-zinc-300'}"
-              >
-                {r.status}
-              </span>
-            </li>
-            {#if r.error}
-              <li class="-mt-1 pl-2 text-xs text-red-700 dark:text-red-300">{r.error}</li>
-            {/if}
-          {/each}
-        </ul>
-        {#if cancelled.length > 0}
-          <p class="mt-2 text-sm text-zinc-500 dark:text-zinc-400">
-            Cancelled: the in-flight item finished, the rest were skipped.
-          </p>
-        {/if}
-        <div class="mt-3 flex gap-2">
-          <button
-            class="rounded-lg border border-emerald-300 px-4 py-1.5 text-sm text-emerald-800 hover:bg-emerald-100 dark:border-emerald-800 dark:text-emerald-200 dark:hover:bg-emerald-900"
-            onclick={() => scanStore.start()}
-            disabled={scanStore.scanning}
-          >
-            Rescan
-          </button>
-          <button
-            class="rounded-lg bg-emerald-600 px-4 py-1.5 text-sm font-semibold text-white hover:bg-emerald-700"
-            onclick={() => cleanupStore.dismissResults()}
-          >
-            Done
-          </button>
-        </div>
-      </div>
+      <ResultPanel
+        results={cleanupStore.results}
+        requestedBytes={cleanupStore.requestedBytes()}
+        freedBytes={cleanupStore.freedBytes()}
+        scanning={scanStore.scanning}
+        nameOf={(id) => cleanupStore.nameOf(id)}
+        onRescan={() => scanStore.start()}
+        onDone={() => cleanupStore.dismissResults()}
+      />
     {/if}
     {#if cleanupStore.error}
       <p class="mt-4 rounded-lg bg-red-50 p-3 text-sm text-red-700 dark:bg-red-950 dark:text-red-300">
@@ -262,26 +358,17 @@
     {/if}
   </div>
 
-  <!-- Sticky action bar -->
+  <!-- Selection-aware cleanup bar -->
   {#if scanStore.selected.length > 0}
-    <div class="fixed inset-x-0 bottom-0 border-t border-zinc-200 bg-white/90 p-4 backdrop-blur dark:border-zinc-800 dark:bg-zinc-900/90">
-      <div class="mx-auto flex max-w-2xl items-center justify-between gap-3">
-        <span class="text-sm text-zinc-600 dark:text-zinc-300">
-          {scanStore.selected.length} selected · {formatBytes(scanStore.selectedBytes())}
-          {#if safetyCounts.caution > 0}
-            <span class="text-amber-600 dark:text-amber-400">
-              (SAFE {safetyCounts.safe} · CAUTION {safetyCounts.caution})
-            </span>
-          {/if}
-        </span>
-        <button
-          class="rounded-lg bg-emerald-600 px-5 py-2 text-sm font-semibold text-white hover:bg-emerald-700"
-          onclick={handleClean}
-        >
-          Clean selected
-        </button>
-      </div>
-    </div>
+    <SelectionBar
+      count={scanStore.selected.length}
+      bytes={scanStore.selectedBytes()}
+      safe={selectionSafety.safe}
+      review={selectionSafety.review}
+      busy={barBusy}
+      onClear={() => scanStore.clearSelection()}
+      onClean={handleClean}
+    />
   {/if}
 
   <!-- Resource drill-down (get_resource_details, ids only) -->
@@ -303,6 +390,7 @@
       cleaning={cleanupStore.cleaning}
       cancelling={cleanupStore.cancelling}
       progress={cleanupStore.progress}
+      lookupImpact={(id) => impactById.get(id) ?? undefined}
       onConfirm={() => cleanupStore.execute(scanStore.selected)}
       onCancel={() => cleanupStore.close()}
       onCancelCleanup={() => cleanupStore.cancel()}

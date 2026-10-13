@@ -1,6 +1,6 @@
 /**
  * Typed Tauri bridge — the ONLY module allowed to call `invoke`/`listen`.
- * Mirrors `docs/reference/tauri-contract.md` v0.2.0. Contract change here
+ * Mirrors `docs/reference/tauri-contract.md` v0.3.0. Contract change here
  * requires a contract doc update (G-API-01).
  */
 import { invoke } from "@tauri-apps/api/core";
@@ -8,6 +8,12 @@ import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 
 export type SafetyLevel = "safe" | "caution" | "dangerous";
 export type CleanupStatus = "success" | "partial" | "failed" | "cancelled";
+
+export interface ResourceImpact {
+  consequence: string;
+  cost?: string;
+  command?: string;
+}
 
 export interface Resource {
   id: string;
@@ -18,6 +24,7 @@ export interface Resource {
   reclaimable_bytes: number;
   safety: SafetyLevel;
   detail?: string;
+  impact?: ResourceImpact;
 }
 
 export interface ProviderSummary {
