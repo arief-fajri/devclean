@@ -3,9 +3,10 @@
 //! Finds `node_modules/` directories whose parent holds a `package.json`.
 //! Cleans by deleting the directory only — lockfiles are never touched.
 
-use super::provider::{age_suffix, dir_size, CleanupAction, Provider};
+use super::provider::{dir_size_checked, project_detail, walk_cancelled, CleanupAction, Provider};
 use devclean_core::{Resource, SafetyLevel};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 
 pub struct NodeModulesProvider;
 
@@ -20,16 +21,17 @@ impl Provider for NodeModulesProvider {
         SafetyLevel::Safe
     }
 
-    fn scan(&self, roots: &[PathBuf]) -> Vec<Resource> {
+    fn scan(&self, roots: &[PathBuf], cancel: &AtomicBool) -> Vec<Resource> {
         let mut out = Vec::new();
         for root in roots {
-            for entry in walkdir::WalkDir::new(root)
-                .follow_links(false)
-                .max_depth(6)
-                .into_iter()
-                .filter_map(|e| e.ok())
-                .filter(|e| e.file_type().is_dir() && e.file_name() == "node_modules")
-            {
+            if cancel.load(Ordering::Relaxed) {
+                break;
+            }
+            // walk_cancelled aborts promptly when `cancel` is set (G-SCAN-02).
+            walk_cancelled(root, 6, cancel, |entry| {
+                if !(entry.file_type().is_dir() && entry.file_name() == "node_modules") {
+                    return;
+                }
                 let dir = entry.path();
                 // Don't descend into nested node_modules twice.
                 if dir
@@ -37,13 +39,16 @@ impl Provider for NodeModulesProvider {
                     .map(|p| p.components().any(|c| c.as_os_str() == "node_modules"))
                     .unwrap_or(false)
                 {
-                    continue;
+                    return;
                 }
                 let project = dir.parent().unwrap_or(dir);
                 if !project.join("package.json").is_file() {
-                    continue;
+                    return;
                 }
-                let size = dir_size(dir);
+                // Skip (don't abort) entries whose size can't be measured.
+                let Some(size) = dir_size_checked(dir, cancel) else {
+                    return;
+                };
                 let project_name = project
                     .file_name()
                     .map(|s| s.to_string_lossy().into_owned())
@@ -56,9 +61,9 @@ impl Provider for NodeModulesProvider {
                     size_bytes: size,
                     reclaimable_bytes: size,
                     safety: SafetyLevel::Safe,
-                    detail: Some(format!("project: {project_name}{}", age_suffix(project))),
+                    detail: Some(project_detail(&project_name, project, size)),
                 });
-            }
+            });
         }
         out
     }
@@ -93,7 +98,8 @@ mod tests {
     #[test]
     fn finds_node_modules_with_package_json() {
         let root = fixture_root("node");
-        let found = NodeModulesProvider.scan(std::slice::from_ref(&root));
+        let cancel = AtomicBool::new(false);
+        let found = NodeModulesProvider.scan(std::slice::from_ref(&root), &cancel);
         assert_eq!(found.len(), 1, "expected exactly one hit: {found:?}");
         assert_eq!(found[0].provider, "node_modules");
         assert!(found[0].size_bytes >= 1000);

@@ -10,6 +10,7 @@ mod state;
 
 use commands::*;
 use state::AppState;
+use tauri::Manager;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -23,6 +24,10 @@ pub fn run() {
                         .build(),
                 )?;
             }
+            // Restrained notifications only (scan/cleanup completion while
+            // the window is unfocused — see commands::notify_if_background).
+            app.handle().plugin(tauri_plugin_notification::init())?;
+            setup_tray(app.handle())?;
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -34,8 +39,64 @@ pub fn run() {
             cancel_scan,
             cancel_cleanup,
             get_settings,
-            update_settings
+            update_settings,
+            get_cached_scan,
+            get_history
         ])
         .run(tauri::generate_context!())
         .expect("error while building tauri application");
+}
+
+fn show_main(app: &tauri::AppHandle) {
+    if let Some(w) = app.get_webview_window("main") {
+        let _ = w.show();
+        let _ = w.set_focus();
+    }
+}
+
+/// System tray: Show / Scan now / Quit. No autostart, no promo — the tray
+/// is quick access only (roadmap: "never adware").
+fn setup_tray(app: &tauri::AppHandle) -> tauri::Result<()> {
+    use tauri::{
+        menu::{Menu, MenuItem},
+        tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
+    };
+
+    let show = MenuItem::with_id(app, "show", "Show DevClean", true, None::<&str>)?;
+    let scan = MenuItem::with_id(app, "scan", "Scan now", true, None::<&str>)?;
+    let quit = MenuItem::with_id(app, "quit", "Quit DevClean", true, None::<&str>)?;
+    let menu = Menu::with_items(app, &[&show, &scan, &quit])?;
+    let icon = tauri::image::Image::from_bytes(include_bytes!("../icons/32x32.png"))?;
+
+    TrayIconBuilder::with_id("main")
+        .icon(icon)
+        .tooltip("DevClean")
+        .menu(&menu)
+        .show_menu_on_left_click(false)
+        .on_menu_event(|app, event| match event.id.as_ref() {
+            "show" => show_main(app),
+            "scan" => {
+                let handle = app.clone();
+                tauri::async_runtime::spawn(async move {
+                    let state: tauri::State<'_, AppState> = handle.state();
+                    if let Err(e) = run_scan(&handle, &state).await {
+                        tracing::warn!("tray scan failed: {e}");
+                    }
+                });
+            }
+            "quit" => app.exit(0),
+            _ => {}
+        })
+        .on_tray_icon_event(|tray, event| {
+            if let TrayIconEvent::Click {
+                button: MouseButton::Left,
+                button_state: MouseButtonState::Up,
+                ..
+            } = event
+            {
+                show_main(tray.app_handle());
+            }
+        })
+        .build(app)?;
+    Ok(())
 }

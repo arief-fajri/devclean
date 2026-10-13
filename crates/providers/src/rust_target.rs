@@ -1,9 +1,10 @@
 //! Rust `target/` provider. Finds `Cargo.toml` projects, then their
 //! `target/` dir. Regenerable via `cargo build`, hence `Safe`.
 
-use super::provider::{age_suffix, dir_size, CleanupAction, Provider};
+use super::provider::{dir_size_checked, project_detail, walk_cancelled, CleanupAction, Provider};
 use devclean_core::{Resource, SafetyLevel};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 
 pub struct RustTargetProvider;
 
@@ -18,24 +19,26 @@ impl Provider for RustTargetProvider {
         SafetyLevel::Safe
     }
 
-    fn scan(&self, roots: &[PathBuf]) -> Vec<Resource> {
+    fn scan(&self, roots: &[PathBuf], cancel: &AtomicBool) -> Vec<Resource> {
         let mut out = Vec::new();
         for root in roots {
-            for entry in walkdir::WalkDir::new(root)
-                .follow_links(false)
-                .max_depth(5)
-                .into_iter()
-                .filter_map(|e| e.ok())
-                .filter(|e| e.file_type().is_file() && e.file_name() == "Cargo.toml")
-            {
+            if cancel.load(Ordering::Relaxed) {
+                break;
+            }
+            walk_cancelled(root, 5, cancel, |entry| {
+                if !(entry.file_type().is_file() && entry.file_name() == "Cargo.toml") {
+                    return;
+                }
                 let project = entry.path().parent().unwrap_or(Path::new("/"));
                 let target = project.join("target");
                 if !target.is_dir() {
-                    continue;
+                    return;
                 }
-                let size = dir_size(&target);
+                let Some(size) = dir_size_checked(&target, cancel) else {
+                    return;
+                };
                 if size == 0 {
-                    continue;
+                    return;
                 }
                 let project_name = project
                     .file_name()
@@ -49,9 +52,9 @@ impl Provider for RustTargetProvider {
                     size_bytes: size,
                     reclaimable_bytes: size,
                     safety: SafetyLevel::Safe,
-                    detail: Some(format!("project: {project_name}{}", age_suffix(project))),
+                    detail: Some(project_detail(&project_name, project, size)),
                 });
-            }
+            });
         }
         out
     }

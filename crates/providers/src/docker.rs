@@ -8,6 +8,7 @@
 use super::provider::{CleanupAction, Provider};
 use devclean_core::{Resource, SafetyLevel};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 
 pub struct DockerProvider;
 
@@ -71,7 +72,10 @@ impl Provider for DockerProvider {
         SafetyLevel::Caution
     }
 
-    fn scan(&self, _roots: &[PathBuf]) -> Vec<Resource> {
+    fn scan(&self, _roots: &[PathBuf], cancel: &AtomicBool) -> Vec<Resource> {
+        if cancel.load(Ordering::Relaxed) {
+            return Vec::new();
+        }
         if !docker_available() {
             return Vec::new();
         }

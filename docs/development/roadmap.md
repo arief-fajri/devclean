@@ -37,16 +37,26 @@ build cache read (~10.8 GB). Gates: `cargo test` 13 passed, clippy 0
 warnings, fmt clean, `svelte-check` 0 errors 0 warnings, `vite build` ok.
 Contract unchanged (still 9 commands + 6 events v0.1.0).
 
-## M3 — Safety hardening + UX (later)
+## M3 — Safety hardening + UX ✅ (done)
 
 ```text
-[ ] Explicit per-provider timeouts + cancel <1s test (closes gaps G-SCAN-02/G-REL-01)
-[ ] Persistent settings + scan cache file + cleanup history (SQLite optional)
-[ ] System tray + restrained notifications (never adware)
-[ ] Final dark/light toggle, project ignore list
-[ ] More providers: npm/pnpm/yarn cache, Python, Cargo registry, Gradle, Xcode
-[ ] Smart stale detection (>90 days) — a signal only, never a safety verdict
+[x] Explicit per-provider timeouts + cancel <1s test (closes gaps G-SCAN-02/G-REL-01)
+[x] Persistent settings + scan cache file + cleanup history (JSONL, not SQLite)
+[x] System tray + restrained notifications (never adware)
+[x] Final dark/light toggle, project ignore list
+[x] More providers: npm/pnpm/yarn cache, Python, Cargo registry, Gradle, Xcode
+[x] Smart stale detection (>90 days) — a signal only, never a safety verdict
 ```
+
+Exit: no operation blocks forever, state survives restarts, 9 providers
+cover the common stacks, tray + history round out daily use.
+
+Evidence: cancel settles <1s (test), provider timeout 60s + command
+timeout 120s with kill (tests); settings/cache/history live under the
+per-platform app data dir; 9/9 providers scanned live (npm, python
+fixture with venv invisible, cargo registry ~443 MB Caution, xcode,
+gradle absent → empty); contract v0.2.0 (`+get_history`,
+`+get_cached_scan`, `Settings.theme`).
 
 ## V1.0 (recommended scope)
 

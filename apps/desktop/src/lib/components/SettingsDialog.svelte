@@ -1,5 +1,5 @@
 <script lang="ts">
-  import type { Settings } from "$lib/tauri";
+  import type { Settings, ThemeMode } from "$lib/tauri";
 
   interface Props {
     settings: Settings;
@@ -15,16 +15,21 @@
   // (dialog selalu fresh-mount via {#if}, jadi seed-once sudah benar).
   let roots = $state<string[]>([]);
   let newRoot = $state("");
+  let excluded = $state<string[]>([]);
+  let newExcluded = $state("");
   let requireConfirmation = $state(true);
   let showPreview = $state(true);
   let allowPrivileged = $state(false);
+  let theme = $state<ThemeMode>("system");
   let seeded = $state(false);
   $effect.pre(() => {
     if (!seeded) {
       roots = [...settings.scan_roots];
+      excluded = [...settings.excluded_paths];
       requireConfirmation = settings.require_confirmation;
       showPreview = settings.show_preview;
       allowPrivileged = settings.allow_privileged_operations;
+      theme = settings.theme ?? "system";
       seeded = true;
     }
   });
@@ -39,13 +44,25 @@
     roots = roots.filter((r) => r !== p);
   }
 
+  function addExcluded() {
+    const p = newExcluded.trim();
+    if (p && !excluded.includes(p)) excluded = [...excluded, p];
+    newExcluded = "";
+  }
+
+  function removeExcluded(p: string) {
+    excluded = excluded.filter((r) => r !== p);
+  }
+
   function save() {
     onSave({
       ...settings,
       scan_roots: roots,
+      excluded_paths: excluded,
       require_confirmation: requireConfirmation,
       show_preview: showPreview,
       allow_privileged_operations: allowPrivileged,
+      theme,
     });
   }
 </script>
@@ -98,7 +115,58 @@
       </button>
     </div>
 
+    <h3 class="mt-4 text-sm font-semibold text-zinc-700 dark:text-zinc-300">Ignore list</h3>
+    <p class="mt-1 text-xs text-zinc-500">
+      Project yang dilewati scan. Bukan vonis aman — validator tetap berlaku saat cleanup.
+    </p>
+    <ul class="mt-2 space-y-1.5 text-sm">
+      {#each excluded as x (x)}
+        <li
+          class="flex items-center justify-between gap-2 rounded-lg bg-zinc-100 px-2 py-1.5 font-mono text-xs dark:bg-zinc-800"
+        >
+          <span class="min-w-0 flex-1 truncate" title={x}>{x}</span>
+          <button
+            class="shrink-0 rounded px-2 py-0.5 text-xs text-red-600 hover:bg-red-50 dark:hover:bg-red-950"
+            onclick={() => removeExcluded(x)}
+            aria-label="Hapus {x} dari ignore list"
+          >
+            Hapus
+          </button>
+        </li>
+      {/each}
+    </ul>
+    <div class="mt-2 flex gap-2">
+      <input
+        type="text"
+        class="min-w-0 flex-1 rounded-lg border border-zinc-200 bg-transparent px-2 py-1.5 font-mono text-xs dark:border-zinc-700"
+        placeholder="/Users/kamu/Projects/monorepo-raksasa"
+        bind:value={newExcluded}
+        onkeydown={(e) => {
+          if (e.key === "Enter") addExcluded();
+        }}
+        aria-label="Path ignore baru"
+      />
+      <button
+        class="shrink-0 rounded-lg border border-zinc-200 px-3 py-1.5 text-sm hover:bg-zinc-100 dark:border-zinc-700 dark:hover:bg-zinc-800"
+        onclick={addExcluded}
+      >
+        + Abaikan
+      </button>
+    </div>
+
     <div class="mt-4 space-y-2 text-sm">
+      <label class="flex items-center gap-2">
+        <span class="text-zinc-700 dark:text-zinc-300">Tema</span>
+        <select
+          class="rounded-lg border border-zinc-200 bg-transparent px-2 py-1 text-sm dark:border-zinc-700"
+          bind:value={theme}
+          aria-label="Tema"
+        >
+          <option value="system">Sistem</option>
+          <option value="dark">Gelap</option>
+          <option value="light">Terang</option>
+        </select>
+      </label>
       <label class="flex items-center gap-2">
         <input type="checkbox" class="h-4 w-4 accent-emerald-600" bind:checked={requireConfirmation} />
         Minta konfirmasi sebelum cleanup (G-UI-01)
@@ -123,7 +191,7 @@
         {error}
       </p>
     {/if}
-    <p class="mt-3 text-xs text-zinc-400">Tersimpan untuk sesi ini (persistensi file = M3).</p>
+    <p class="mt-3 text-xs text-zinc-400">Tersimpan di disk, dimuat ulang saat startup.</p>
 
     <div class="mt-4 flex justify-end gap-2">
       <button

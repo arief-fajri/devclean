@@ -26,14 +26,24 @@ pub enum SafetyError {
 pub struct SafetyValidator {
     protected: Vec<PathBuf>,
     scan_roots: Vec<PathBuf>,
+    /// Provider-owned global cache dirs (e.g. `~/.cargo/registry`), declared
+    /// via `Provider::extra_allowed_roots`. Same protected-path rules apply;
+    /// only the roots check is widened. Empty for scan-root-only providers.
+    extra_roots: Vec<PathBuf>,
 }
 
 impl SafetyValidator {
     pub fn new(scan_roots: Vec<PathBuf>) -> Self {
+        Self::new_with_extra_roots(scan_roots, Vec::new())
+    }
+
+    pub fn new_with_extra_roots(scan_roots: Vec<PathBuf>, extra_roots: Vec<PathBuf>) -> Self {
         let protected = default_protected_paths();
+        let norm = |paths: Vec<PathBuf>| paths.into_iter().map(|p| normalize(&p)).collect();
         Self {
             protected,
-            scan_roots: scan_roots.into_iter().map(|p| normalize(&p)).collect(),
+            scan_roots: norm(scan_roots),
+            extra_roots: norm(extra_roots),
         }
     }
 
@@ -75,7 +85,11 @@ impl SafetyValidator {
             }
         }
 
-        let inside_root = self.scan_roots.iter().any(|r| path.starts_with(r));
+        let inside_root = self
+            .scan_roots
+            .iter()
+            .chain(self.extra_roots.iter())
+            .any(|r| path.starts_with(r));
         if !inside_root {
             return Err(SafetyError::OutsideScanRoots(path.display().to_string()));
         }
@@ -203,5 +217,22 @@ mod tests {
         // Registry claims a path outside scan roots -> rejected, not executed.
         let r = v.resolve("evil", |_| Some(PathBuf::from("/etc")));
         assert!(r.is_err());
+    }
+
+    #[test]
+    fn extra_roots_allow_only_the_declared_cache_dir() {
+        let home = home_dir().expect("test needs HOME set");
+        let registry = home.join(".cargo/registry");
+        let v = SafetyValidator::new_with_extra_roots(
+            vec![PathBuf::from("/Users/test/Projects")],
+            vec![registry.clone()],
+        );
+        // The declared global cache dir is cleanable…
+        assert!(v.validate_path(&registry).is_ok());
+        assert!(v.validate_path(&registry.join("cache/x")).is_ok());
+        // …but siblings under ~/.cargo are not (e.g. installed binaries).
+        assert!(v.validate_path(&home.join(".cargo/bin/rustc")).is_err());
+        // …and protected paths stay untouchable from any direction.
+        assert!(v.validate_path(&home.join(".ssh")).is_err());
     }
 }

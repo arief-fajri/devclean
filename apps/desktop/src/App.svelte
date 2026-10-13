@@ -1,23 +1,35 @@
 <script lang="ts">
   import { onMount } from "svelte";
   import ConfirmDialog from "$lib/components/ConfirmDialog.svelte";
+  import HistoryDialog from "$lib/components/HistoryDialog.svelte";
   import ProviderCard from "$lib/components/ProviderCard.svelte";
   import ResourceDetail from "$lib/components/ResourceDetail.svelte";
   import SettingsDialog from "$lib/components/SettingsDialog.svelte";
   import { formatBytes } from "$lib/format";
   import { cleanupStore } from "$lib/stores/cleanup.svelte";
+  import { historyStore } from "$lib/stores/history.svelte";
   import { scanStore } from "$lib/stores/scan.svelte";
   import { settingsStore } from "$lib/stores/settings.svelte";
 
   let dark = $state(false);
 
-  onMount(() => {
-    dark = window.matchMedia("(prefers-color-scheme: dark)").matches;
+  function applyTheme(theme: string | undefined) {
+    const sysDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
+    dark = theme === "dark" || (theme !== "light" && sysDark);
     document.documentElement.classList.toggle("dark", dark);
+  }
+
+  onMount(() => {
     scanStore.listen();
     cleanupStore.listen();
-    void settingsStore.load();
-    void scanStore.start();
+    // Settings first (persisted theme), then instant cache paint,
+    // then an honest background rescan.
+    void (async () => {
+      await settingsStore.load();
+      applyTheme(settingsStore.settings?.theme);
+      await scanStore.loadCached();
+      await scanStore.start();
+    })();
   });
 
   /** Clean entry point: confirmation dialog by default (G-UI-01).
@@ -32,13 +44,15 @@
   }
 
   async function handleSaveSettings(next: Parameters<typeof settingsStore.save>[0]) {
-    const rootsChanged = await settingsStore.save(next);
-    if (rootsChanged) await scanStore.start();
+    const shouldRescan = await settingsStore.save(next);
+    applyTheme(settingsStore.settings?.theme);
+    if (shouldRescan) await scanStore.start();
   }
 
   function toggleDark() {
-    dark = !dark;
-    document.documentElement.classList.toggle("dark", dark);
+    const next: "light" | "dark" = dark ? "light" : "dark";
+    applyTheme(next);
+    void settingsStore.setTheme(next);
   }
 
   const maxBytes = $derived(
@@ -71,6 +85,14 @@
     <header class="flex items-center justify-between">
       <h1 class="text-xl font-bold">DevClean</h1>
       <div class="flex items-center gap-2">
+        <button
+          class="rounded-lg border border-zinc-200 px-3 py-1.5 text-sm hover:bg-zinc-100 dark:border-zinc-700 dark:hover:bg-zinc-800"
+          onclick={() => historyStore.openDialog()}
+          aria-label="Open cleanup history"
+          title="Cleanup history"
+        >
+          🕘
+        </button>
         <button
           class="rounded-lg border border-zinc-200 px-3 py-1.5 text-sm hover:bg-zinc-100 dark:border-zinc-700 dark:hover:bg-zinc-800"
           onclick={() => settingsStore.openDialog()}
@@ -138,6 +160,9 @@
           {scanStore.summary.resources.length} projects · {scanStore.summary.providers.length} providers
           {#if scanStore.lastScannedAt}
             · Last scanned {scanStore.lastScannedAt.toLocaleTimeString()}
+          {/if}
+          {#if scanStore.fromCache && !scanStore.scanning}
+            · cached
           {/if}
         </p>
       </div>
@@ -284,7 +309,7 @@
     />
   {/if}
 
-  <!-- Settings (scan roots + toggles, in-memory until M3) -->
+  <!-- Settings (scan roots + toggles, persisted to disk since M3) -->
   {#if settingsStore.open && settingsStore.settings}
     <SettingsDialog
       settings={settingsStore.settings}
@@ -292,6 +317,17 @@
       error={settingsStore.error}
       onSave={(next) => handleSaveSettings(next)}
       onClose={() => settingsStore.close()}
+    />
+  {/if}
+
+  <!-- Cleanup history (backend JSONL log) -->
+  {#if historyStore.open}
+    <HistoryDialog
+      entries={historyStore.entries}
+      loading={historyStore.loading}
+      error={historyStore.error}
+      onRefresh={() => historyStore.refresh()}
+      onClose={() => historyStore.close()}
     />
   {/if}
 </div>

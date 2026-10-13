@@ -1,9 +1,10 @@
 //! Go cache provider. Split into build cache + module cache, cleaned via
 //! the official `go` tool — never by deleting cache internals by hand.
 
-use super::provider::{dir_size, CleanupAction, Provider};
+use super::provider::{dir_size_checked, CleanupAction, Provider};
 use devclean_core::{Resource, SafetyLevel};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 
 pub struct GoProvider;
 
@@ -29,18 +30,24 @@ impl Provider for GoProvider {
         SafetyLevel::Safe
     }
 
-    fn scan(&self, _roots: &[PathBuf]) -> Vec<Resource> {
+    fn scan(&self, _roots: &[PathBuf], cancel: &AtomicBool) -> Vec<Resource> {
         let mut out = Vec::new();
         // (label, env key, clean args) — fixed strings only (G-SAFE-02).
         for (label, key, clean_args) in [
             ("Go build cache", "GOCACHE", "go clean -cache"),
             ("Go module cache", "GOMODCACHE", "go clean -modcache"),
         ] {
+            if cancel.load(Ordering::Relaxed) {
+                break;
+            }
             if let Some(dir) = go_env(key) {
                 if !dir.is_dir() {
                     continue;
                 }
-                let size = dir_size(&dir);
+                // Skip (don't abort) caches whose size can't be measured.
+                let Some(size) = dir_size_checked(&dir, cancel) else {
+                    continue;
+                };
                 out.push(Resource {
                     id: String::new(),
                     provider: self.id().to_string(),

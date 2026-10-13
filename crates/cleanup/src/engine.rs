@@ -1,5 +1,6 @@
 use devclean_core::{
     CleanupPreview, CleanupPreviewItem, CleanupResult, CleanupStatus, Resource, SafetyValidator,
+    CLEANUP_COMMAND_TIMEOUT,
 };
 use devclean_providers::{dir_size, CleanupAction, Provider};
 use std::collections::HashMap;
@@ -7,7 +8,7 @@ use std::sync::{
     atomic::{AtomicBool, Ordering},
     Arc,
 };
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 pub struct CleanupEngine {
     cancelled: Arc<AtomicBool>,
@@ -106,7 +107,7 @@ impl CleanupEngine {
                 }
             }
             CleanupAction::RunCommand { program, args } => {
-                match std::process::Command::new(program).args(*args).output() {
+                match run_command_timeout(program, args, CLEANUP_COMMAND_TIMEOUT) {
                     Ok(o) if o.status.success() => {
                         // Re-measure: freed = before - after (0 if fully cleaned).
                         let after = lookup(id).map(|p| dir_size(&p)).unwrap_or(0);
@@ -117,7 +118,7 @@ impl CleanupEngine {
                         args.join(" "),
                         String::from_utf8_lossy(&o.stderr).trim()
                     )),
-                    Err(e) => Err(format!("could not run `{program}`: {e}")),
+                    Err(e) => Err(e),
                 }
             }
         };
@@ -176,6 +177,78 @@ fn cancelled_result(id: &str, r: Option<&Resource>) -> CleanupResult {
         status: CleanupStatus::Cancelled,
         error: None,
     }
+}
+
+/// Run an official cleanup tool with a hard wall-clock limit (G-REL-01).
+/// No shell, stdin is null, fixed `(program, args)` only (G-SAFE-02).
+/// On timeout the child is killed and an error is returned so the resource
+/// reports `Failed` with a clear message instead of hanging forever.
+fn run_command_timeout(
+    program: &str,
+    args: &[&str],
+    timeout: Duration,
+) -> Result<std::process::Output, String> {
+    use std::io::Read;
+    use std::process::Stdio;
+
+    let mut child = std::process::Command::new(program)
+        .args(args)
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|e| format!("could not run `{program}`: {e}"))?;
+
+    // Drain pipes on side threads so a chatty child can never deadlock us.
+    let out_handle = std::thread::spawn({
+        let mut pipe = child.stdout.take();
+        move || {
+            let mut buf = Vec::new();
+            if let Some(ref mut p) = pipe {
+                let _ = p.read_to_end(&mut buf);
+            }
+            buf
+        }
+    });
+    let err_handle = std::thread::spawn({
+        let mut pipe = child.stderr.take();
+        move || {
+            let mut buf = Vec::new();
+            if let Some(ref mut p) = pipe {
+                let _ = p.read_to_end(&mut buf);
+            }
+            buf
+        }
+    });
+
+    let start = Instant::now();
+    let status = loop {
+        match child
+            .try_wait()
+            .map_err(|e| format!("`{program}` failed to report: {e}"))?
+        {
+            Some(status) => break status,
+            None => {
+                if start.elapsed() > timeout {
+                    let _ = child.kill();
+                    let _ = child.wait();
+                    return Err(format!(
+                        "`{program} {}` timed out after {}s and was killed",
+                        args.join(" "),
+                        timeout.as_secs()
+                    ));
+                }
+                std::thread::sleep(Duration::from_millis(20));
+            }
+        }
+    };
+    let stdout = out_handle.join().unwrap_or_default();
+    let stderr = err_handle.join().unwrap_or_default();
+    Ok(std::process::Output {
+        status,
+        stdout,
+        stderr,
+    })
 }
 
 #[cfg(test)]
@@ -276,5 +349,25 @@ mod tests {
         assert!(results[0].error.is_some());
         assert!(target.exists(), "refused path must be untouched");
         let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn command_timeout_kills_slow_child() {
+        let t0 = Instant::now();
+        let err = run_command_timeout("sleep", &["30"], Duration::from_millis(200)).unwrap_err();
+        assert!(err.contains("timed out"), "got: {err}");
+        assert!(t0.elapsed() < Duration::from_secs(5));
+    }
+
+    #[test]
+    fn command_missing_program_is_a_clear_error() {
+        let err = run_command_timeout(
+            "devclean-definitely-missing-bin",
+            &[],
+            Duration::from_secs(5),
+        )
+        .unwrap_err();
+        assert!(err.contains("could not run"), "got: {err}");
     }
 }

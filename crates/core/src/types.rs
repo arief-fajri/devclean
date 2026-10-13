@@ -90,3 +90,19 @@ pub enum CleanupStatus {
     Failed,
     Cancelled,
 }
+
+/// One row of the cleanup history log (JSONL on disk, `get_history`
+/// over the bridge). Written after every `cleanup` call, one entry per
+/// resource — a durable mirror of [`CleanupResult`].
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct HistoryEntry {
+    /// Unix timestamp (seconds) when the cleanup finished.
+    pub finished_at_unix: u64,
+    pub resource_id: String,
+    pub provider: String,
+    pub name: String,
+    pub requested_bytes: u64,
+    pub freed_bytes: u64,
+    pub status: CleanupStatus,
+    pub error: Option<String>,
+}

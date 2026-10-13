@@ -33,7 +33,8 @@ G-SAFE-04  Protected paths are untouchable from any direction (==, inside, ances
 G-SCAN-01  Scan concurrency is bounded (max 4 providers in parallel).
            Enforcement: code — tokio Semaphore in ScanManager ✅
 G-SCAN-02  Scan & cleanup are cancellable, settling in <1s.
-           Enforcement: code — AtomicBool cancel ✅ · test (gap, M3)
+            Enforcement: code — cooperative AtomicBool checks per walk entry ✅ ·
+            test — cancel_settles_in_under_one_second ✅
 G-SCAN-03  Symlinks are never followed during traversal/measurement.
            Enforcement: code — follow_links(false) ✅
 ```
@@ -51,7 +52,9 @@ G-API-02  Cleanup status/error codes are deterministic per resource (I8).
 
 ```text
 G-REL-01  No external operation may block forever.
-           Enforcement: code — spawn_blocking + stdin-less commands ✅ · explicit timeouts (gap, M3)
+            Enforcement: code — spawn_blocking + stdin-less commands ✅ ·
+            explicit timeouts: PROVIDER_SCAN_TIMEOUT (60s) + CLEANUP_COMMAND_TIMEOUT
+            (120s, child killed) ✅ · test — provider_timeout + command_timeout ✅
 G-REL-02  Partial failure is transparent to the user.
            Enforcement: code — engine computes freed = before−after per resource ✅
 ```
@@ -76,7 +79,4 @@ G-AI-01  AI Level A is for internal & reversible changes only. Contract/security
 
 ## Open gaps
 
-| Guardrail | Missing enforcement | Target |
-|---|---|---|
-| G-SCAN-02 | cancel <1s test | M3 |
-| G-REL-01 | explicit per-provider timeouts | M3 |
+(none — G-SCAN-02 and G-REL-01 gaps closed in M3.)

@@ -2,9 +2,9 @@
 
 > The single document defining what the frontend may see. Changing this file
 > = changing the contract → requires human approval (Level B) + a regression
-> test. Version: **v0.1.0 (MVP)**.
+> test. Version: **v0.2.0 (M3)**.
 
-## Commands (9)
+## Commands (11)
 
 | Command | Args | Returns | Notes |
 |---|---|---|---|
@@ -12,11 +12,13 @@
 | `scan_provider` | `{provider: string}` | `ScanSummary` | MVP: full scan, then filter to one provider |
 | `get_resource_details` | `{id: string}` | `Resource \| null` | Drill-down for a single resource |
 | `preview_cleanup` | `{ids: string[]}` | `CleanupPreview` | Re-measures + warnings; must be called before `cleanup` when preview is ON |
-| `cleanup` | `{ids: string[]}` | `CleanupResult[]` | Emits `cleanup_started → cleanup_progress → cleanup_completed` |
+| `cleanup` | `{ids: string[]}` | `CleanupResult[]` | Emits `cleanup_started → cleanup_progress → cleanup_completed`; appends to history |
 | `cancel_scan` | — | `()` | Sets the cancel flag; settles in <1s (target) |
 | `cancel_cleanup` | — | `()` | Cancels the remaining queue; the in-flight item finishes |
-| `get_settings` | — | `Settings` | — |
-| `update_settings` | `{settings: Settings}` | `Settings` | File persistence = M3 (currently in-memory) |
+| `get_settings` | — | `Settings` | Loaded from disk at startup (M3) |
+| `update_settings` | `{settings: Settings}` | `Settings` | Persists to disk (M3) |
+| `get_cached_scan` | — | `ScanSummary \| null` | Last scan iff roots match; `null` otherwise (M3) |
+| `get_history` | `{limit?: number}` | `HistoryEntry[]` | Newest entries, oldest first; default 100, cap 1000 (M3) |
 
 ## Events (6)
 
@@ -47,7 +49,11 @@ interface CleanupResult { resource_id: string; requested_bytes: number; freed_by
   duration_ms: number; status: CleanupStatus; error?: string }
 interface Settings { scan_roots: string[]; excluded_paths: string[];
   require_confirmation: boolean; show_preview: boolean;
-  allow_privileged_operations: boolean; scan_automatically: boolean }
+  allow_privileged_operations: boolean; scan_automatically: boolean;
+  theme: "system" | "dark" | "light" }
+interface HistoryEntry { finished_at_unix: number; resource_id: string;
+  provider: string; name: string; requested_bytes: number; freed_bytes: number;
+  status: CleanupStatus; error?: string }
 ```
 
 Example request (the frontend never sends paths):
@@ -64,4 +70,7 @@ Not:
 
 ## Contract changelog
 
+- `v0.2.0` — M3: `+get_history`, `+get_cached_scan`, `Settings.theme`. Provider
+  scans are cancellable per entry with a 60s timeout; cleanup subprocesses
+  have a 120s timeout (both code+test enforced, no type changes).
 - `v0.1.0` — initial 9 commands + 6 events. `scan_provider` is still full-scan-filter (optimize in M3).

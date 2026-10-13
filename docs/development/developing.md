@@ -18,18 +18,26 @@ cd apps/desktop && npm install && cd ../..
 cargo tauri dev
 ```
 
-Open the DevClean window → click **Scan** → 4 providers appear with byte counts.
+Open the DevClean window → click **Scan** → 9 providers appear with byte counts.
 Click a provider header to expand the project drill-down (search, stale
 filter, per-provider rescan); click a project for details. Cancel works
 anytime via **Cancel ✕** (scan) or **Cancel remaining** (cleanup). Cleanup
 always goes preview → acknowledgement → result table (requested → freed
-per resource). Scan roots and toggles live under the **⚙ Settings** dialog
-(in-memory until M3; the validator still rejects anything outside roots).
+per resource). Scan roots, ignore list, and toggles live under the
+**⚙ Settings** dialog (persisted to disk since M3); past cleanups under
+**🕘 History**. The tray icon offers Show / Scan now / Quit; notifications
+fire only for completed scans/cleanups while the window is unfocused.
+
+Limits: each provider scan is bounded by 60s (`PROVIDER_SCAN_TIMEOUT`),
+each cleanup subprocess by 120s (`CLEANUP_COMMAND_TIMEOUT`, child killed
+on expiry). Cancel settles in <1s (tested).
 
 **Your setup works if:**
 
 - `cargo tauri dev` opens a window (Vite at `http://localhost:1420`)
-- No `curl` needed — verify via the UI: Scan lists `node_modules`, `Rust target`, `Go cache`, `Docker`
+- No `curl` needed — verify via the UI: Scan lists 9 providers
+  (`node_modules`, `Rust target`, `Go cache`, `Docker`, npm/pnpm/yarn,
+  Python, Cargo registry, Gradle, Xcode — absent tools simply report empty)
 - `cargo test --workspace` is green, `cargo clippy` has 0 warnings, `npm run check` has 0 errors
 
 ## Prerequisites
@@ -66,13 +74,15 @@ cargo tauri dev                         # dev mode (from the repo root)
 cargo tauri build                       # native bundle (DMG/MSI/deb)
 ```
 
-## Adding a new provider (example: Python)
+## Adding a new provider (example: Ruby gems)
 
-1. Create `crates/providers/src/python.rs` implementing the `Provider` trait
-   (`id`, `name`, `default_safety`, `scan`, `cleanup_action`).
-2. Register it in `all_providers()` + add an id prefix in `ScanManager`.
+1. Create `crates/providers/src/ruby.rs` implementing the `Provider` trait
+   (`id`, `name`, `default_safety`, `scan(roots, cancel)`, `cleanup_action`,
+   plus `extra_allowed_roots` if it owns a global cache outside scan roots).
+2. Register it in `all_providers()` + add an id prefix in `ScanManager`
+   (`short_prefix`).
 3. Write a test: dummy folder → scan finds it → `SafetyValidator` rejects
-   paths outside scan roots.
+   paths outside scan roots (and siblings of any extra root).
 4. Contract update? Not needed for a provider alone (types are unchanged) —
    but note it in the roadmap + PR.
 

@@ -20,8 +20,9 @@ tokio.workspace = true
 tracing.workspace = true
 thiserror.workspace = true
 log = "0.4"
-tauri = { version = "2" }
+tauri = { version = "2", features = ["tray-icon", "image-png"] }
 tauri-plugin-log = "2"
+tauri-plugin-notification.workspace = true
 
 devclean-core.workspace = true
 devclean-providers.workspace = true

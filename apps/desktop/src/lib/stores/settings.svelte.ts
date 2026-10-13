@@ -4,7 +4,7 @@
  * the safety validator still re-checks every path (I2, I7).
  */
 import { getSettings, updateSettings } from "$lib/tauri";
-import type { Settings } from "$lib/tauri";
+import type { Settings, ThemeMode } from "$lib/tauri";
 
 class SettingsStore {
   settings = $state<Settings | null>(null);
@@ -30,21 +30,33 @@ class SettingsStore {
     this.open = false;
   }
 
-  /** Save; returns true when scan roots changed (caller should rescan). */
+  /** Save; returns true when scan roots or exclusions changed
+   * (caller should rescan). */
   async save(next: Settings): Promise<boolean> {
     this.saving = true;
     this.error = null;
     try {
-      const before = [...(this.settings?.scan_roots ?? [])].sort().join("\n");
+      const key = (xs: string[]) => [...xs].sort().join("\n");
+      const beforeRoots = key(this.settings?.scan_roots ?? []);
+      const beforeExcluded = key(this.settings?.excluded_paths ?? []);
       this.settings = await updateSettings(next);
-      const after = [...next.scan_roots].sort().join("\n");
-      return before !== after;
+      return beforeRoots !== key(next.scan_roots) || beforeExcluded !== key(next.excluded_paths);
     } catch (e) {
       this.error = String(e);
       return false;
     } finally {
       this.saving = false;
       this.open = false;
+    }
+  }
+
+  /** Persist an explicit theme choice without touching the dialog. */
+  async setTheme(theme: ThemeMode) {
+    if (!this.settings) return;
+    try {
+      this.settings = await updateSettings({ ...this.settings, theme });
+    } catch (e) {
+      this.error = String(e);
     }
   }
 }

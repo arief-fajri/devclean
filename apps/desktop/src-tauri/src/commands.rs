@@ -5,12 +5,19 @@
 use crate::events::*;
 use crate::state::AppState;
 use devclean_core::{
-    CleanupPreview, CleanupResult, Resource, SafetyValidator, ScanSummary, Settings,
+    CleanupPreview, CleanupResult, HistoryEntry, Resource, SafetyValidator, ScanSummary, Settings,
 };
 use devclean_providers::{all_providers, Provider};
 use std::collections::HashMap;
 use std::sync::Arc;
-use tauri::{AppHandle, Emitter, State};
+use tauri::{AppHandle, Emitter, Manager, State};
+
+fn now_unix() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0)
+}
 
 fn providers_map() -> HashMap<String, Arc<dyn Provider>> {
     all_providers()
@@ -24,7 +31,16 @@ fn providers_map() -> HashMap<String, Arc<dyn Provider>> {
 /// in state for `preview_cleanup` / `cleanup`.
 #[tauri::command]
 pub async fn scan_all(app: AppHandle, state: State<'_, AppState>) -> Result<ScanSummary, String> {
-    let roots = state.settings.lock().unwrap().scan_roots.clone();
+    run_scan(&app, &state).await
+}
+
+/// Shared scan implementation, callable from the `scan_all` command and
+/// from the tray menu (M3) without going through the command layer.
+pub async fn run_scan(app: &AppHandle, state: &AppState) -> Result<ScanSummary, String> {
+    let (roots, excluded) = {
+        let s = state.settings.lock().unwrap();
+        (s.scan_roots.clone(), s.excluded_paths.clone())
+    };
     app.emit(SCAN_STARTED, ()).map_err(|e| e.to_string())?;
 
     let app2 = app.clone();
@@ -39,11 +55,65 @@ pub async fn scan_all(app: AppHandle, state: State<'_, AppState>) -> Result<Scan
         );
     });
 
-    let summary = state.scan.scan_all(roots, Some(progress)).await;
+    let summary = state.scan.scan_all(roots, &excluded, Some(progress)).await;
     state.store_resources(summary.resources.clone());
+    // Best-effort instant paint for the next startup (M3 scan cache).
+    if let Err(e) = devclean_scanner::save_cached_summary(
+        &state.scan_cache_path,
+        &state.settings.lock().unwrap().scan_roots,
+        &summary,
+    ) {
+        tracing::warn!("could not save scan cache: {e}");
+    }
     app.emit(SCAN_COMPLETED, &summary)
         .map_err(|e| e.to_string())?;
+    notify_if_background(
+        app,
+        "DevClean scan complete",
+        &format!(
+            "{} reclaimable across {} projects",
+            format_bytes(summary.reclaimable_bytes),
+            summary.resources.len()
+        ),
+    );
     Ok(summary)
+}
+
+/// Restrained notifications (never adware): only scan/cleanup completion,
+/// and only when the main window is not focused.
+fn notify_if_background(app: &AppHandle, title: &str, body: &str) {
+    use tauri_plugin_notification::NotificationExt;
+    let focused = app
+        .get_webview_window("main")
+        .and_then(|w| w.is_focused().ok())
+        .unwrap_or(true);
+    if focused {
+        return;
+    }
+    if let Err(e) = app.notification().builder().title(title).body(body).show() {
+        tracing::warn!("could not show notification: {e}");
+    }
+}
+
+fn format_bytes(bytes: u64) -> String {
+    const UNITS: [&str; 5] = ["B", "KB", "MB", "GB", "TB"];
+    if bytes == 0 {
+        return "0 B".to_string();
+    }
+    let i = ((bytes as f64).log(1000.0) as usize).min(UNITS.len() - 1);
+    let v = bytes as f64 / 1000f64.powi(i as i32);
+    format!("{v:.1} {}", UNITS[i])
+}
+
+/// Last scan, instantly, if the cache matches the current scan roots.
+/// The UI shows this first, then runs a background rescan.
+#[tauri::command]
+pub fn get_cached_scan(state: State<'_, AppState>) -> Result<Option<ScanSummary>, String> {
+    let roots = state.settings.lock().unwrap().scan_roots.clone();
+    Ok(devclean_scanner::load_cached_summary(
+        &state.scan_cache_path,
+        &roots,
+    ))
 }
 
 /// Re-scan a single provider and merge the result into the stored state.
@@ -112,11 +182,40 @@ pub fn cleanup(
     app.emit(CLEANUP_STARTED, &ids).map_err(|e| e.to_string())?;
 
     let resources = state.snapshot_resources();
-    let validator = SafetyValidator::new(settings.scan_roots.clone());
+    // Global cache dirs declared by providers (e.g. cargo registry) widen
+    // the roots check only; protected-path rules still apply (I7).
+    let extra_roots: Vec<std::path::PathBuf> = providers_map()
+        .values()
+        .flat_map(|p| p.extra_allowed_roots())
+        .collect();
+    let validator = SafetyValidator::new_with_extra_roots(settings.scan_roots.clone(), extra_roots);
     let lookup = |id: &str| resources.get(id).map(|r| r.path.clone());
     let results = state
         .cleanup
         .execute(&ids, &resources, &providers_map(), &validator, lookup);
+
+    // Durable per-resource history (M3, JSONL). Best-effort: a failed
+    // append is logged, never fatal to the cleanup itself.
+    {
+        let finished = now_unix();
+        for r in &results {
+            let src = resources.get(&r.resource_id);
+            let entry = HistoryEntry {
+                finished_at_unix: finished,
+                resource_id: r.resource_id.clone(),
+                provider: src.map(|s| s.provider.clone()).unwrap_or_default(),
+                name: src.map(|s| s.name.clone()).unwrap_or_default(),
+                requested_bytes: r.requested_bytes,
+                freed_bytes: r.freed_bytes,
+                status: r.status,
+                error: r.error.clone(),
+            };
+            if let Err(e) = devclean_cleanup::append_history_entry(&state.history_path, &entry) {
+                tracing::warn!("could not append cleanup history: {e}");
+                break;
+            }
+        }
+    }
 
     // Drop cleaned resources from state so the dashboard refreshes.
     {
@@ -141,6 +240,12 @@ pub fn cleanup(
     .map_err(|e| e.to_string())?;
     app.emit(CLEANUP_COMPLETED, &results)
         .map_err(|e| e.to_string())?;
+    let freed: u64 = results.iter().map(|r| r.freed_bytes).sum();
+    notify_if_background(
+        &app,
+        "DevClean cleanup complete",
+        &format!("{} freed", format_bytes(freed)),
+    );
     Ok(results)
 }
 
@@ -166,5 +271,17 @@ pub fn update_settings(state: State<'_, AppState>, settings: Settings) -> Result
     // Guardrail G-SAFE-03: privileged operations stay off unless the user
     // explicitly opts in — which this assignment already represents.
     *state.settings.lock().unwrap() = settings.clone();
+    state.persist_settings(&settings);
     Ok(settings)
+}
+
+/// Newest cleanup history entries, oldest first (M3). `limit` defaults
+/// to 100 and is capped at 1000.
+#[tauri::command]
+pub fn get_history(
+    state: State<'_, AppState>,
+    limit: Option<u32>,
+) -> Result<Vec<HistoryEntry>, String> {
+    let limit = limit.unwrap_or(100).clamp(1, 1000) as usize;
+    Ok(devclean_cleanup::read_history(&state.history_path, limit))
 }

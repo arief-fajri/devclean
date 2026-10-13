@@ -78,7 +78,7 @@ New AI agents / developers start at [AGENTS.md](AGENTS.md).
 ## MVP roadmap
 
 - **M0** Foundation: workspace, Tauri+Svelte running, green CI ✅
-- **M1+M2** Scanner + safe cleanup: 4 providers, dashboard, preview → confirm → cleanup → result ✅ (you are here)
-- **M3** Safety hardening + UX: tray, persistent settings, history, more providers
+- **M1+M2** Scanner + safe cleanup: 4 providers, dashboard, preview → confirm → cleanup → result ✅
+- **M3** Safety hardening + UX: timeouts, persistent settings, history, tray, 9 providers ✅ (you are here)
 
 See [docs/development/roadmap.md](docs/development/roadmap.md).

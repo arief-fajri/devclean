@@ -4,6 +4,7 @@
  */
 import {
   cancelScan,
+  getCachedScan,
   getResourceDetails,
   onCleanupCompleted,
   onScanCompleted,
@@ -25,6 +26,22 @@ class ScanStore {
   rescanning = $state<string | null>(null);
   error = $state<string | null>(null);
   lastScannedAt = $state<Date | null>(null);
+  /** True while the shown summary comes from the on-disk cache. */
+  fromCache = $state(false);
+
+  /** Instant paint from the last scan (if roots match), then the caller
+   * runs a background rescan. Never throws. */
+  async loadCached() {
+    try {
+      const s = await getCachedScan();
+      if (s) {
+        this.applySummary(s);
+        this.fromCache = true;
+      }
+    } catch {
+      // No cache — the full scan that follows covers it.
+    }
+  }
 
   resourcesByProvider(provider: string): Resource[] {
     return (this.summary?.resources ?? []).filter((r) => r.provider === provider);
@@ -108,6 +125,7 @@ class ScanStore {
     this.cancelling = false;
     this.error = null;
     this.progress = null;
+    this.fromCache = false;
     try {
       const s = await scanAll();
       this.applySummary(s);
