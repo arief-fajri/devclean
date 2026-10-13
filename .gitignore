@@ -1,0 +1,30 @@
+# Rust / Tauri
+/target/
+**/*.rs.bk
+*.pdb
+
+# Frontend
+apps/desktop/node_modules/
+apps/desktop/dist/
+apps/desktop/.svelte-kit/
+
+# Tauri bundles
+apps/desktop/src-tauri/target/
+apps/desktop/src-tauri/WixTools/
+
+# DevClean runtime
+*.log
+settings.json
+last-scan.json
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.vscode/*
+!.vscode/extensions.json
+.idea/
+
+# Env / secrets
+.env
+.env.*
+!.env.example

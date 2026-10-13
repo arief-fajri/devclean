@@ -1,0 +1,15 @@
+[package]
+name = "devclean-providers"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "CleanupProvider trait and MVP provider implementations for DevClean"
+
+[dependencies]
+devclean-core.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+walkdir.workspace = true
+tokio.workspace = true
+tracing.workspace = true
