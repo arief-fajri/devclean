@@ -5,7 +5,8 @@
 use crate::events::*;
 use crate::state::AppState;
 use devclean_core::{
-    CleanupPreview, CleanupResult, HistoryEntry, Resource, SafetyValidator, ScanSummary, Settings,
+    CleanupPreview, CleanupResult, HistoryEntry, ProviderInfo, Resource, SafetyValidator,
+    ScanSummary, Settings,
 };
 use devclean_providers::{all_providers, Provider};
 use std::collections::HashMap;
@@ -37,9 +38,13 @@ pub async fn scan_all(app: AppHandle, state: State<'_, AppState>) -> Result<Scan
 /// Shared scan implementation, callable from the `scan_all` command and
 /// from the tray menu (M3) without going through the command layer.
 pub async fn run_scan(app: &AppHandle, state: &AppState) -> Result<ScanSummary, String> {
-    let (roots, excluded) = {
+    let (roots, excluded, disabled) = {
         let s = state.settings.lock().unwrap();
-        (s.scan_roots.clone(), s.excluded_paths.clone())
+        (
+            s.scan_roots.clone(),
+            s.excluded_paths.clone(),
+            s.disabled_providers.clone(),
+        )
     };
     app.emit(SCAN_STARTED, ()).map_err(|e| e.to_string())?;
 
@@ -55,7 +60,10 @@ pub async fn run_scan(app: &AppHandle, state: &AppState) -> Result<ScanSummary, 
         );
     });
 
-    let summary = state.scan.scan_all(roots, &excluded, Some(progress)).await;
+    let summary = state
+        .scan
+        .scan_all(roots, &excluded, &disabled, Some(progress))
+        .await;
     state.store_resources(summary.resources.clone());
     // Best-effort instant paint for the next startup (M3 scan cache).
     if let Err(e) = devclean_scanner::save_cached_summary(
@@ -155,20 +163,30 @@ pub fn get_resource_details(
 
 /// Re-measure the selected ids NOW and return what would be cleaned.
 /// The UI must show this in the confirmation dialog (G-UI-01).
+/// Async + `spawn_blocking`: re-measuring walks the filesystem and must
+/// never freeze the UI before the dialog appears.
 #[tauri::command]
-pub fn preview_cleanup(
+pub async fn preview_cleanup(
     state: State<'_, AppState>,
     ids: Vec<String>,
 ) -> Result<CleanupPreview, String> {
+    let engine = state.cleanup.clone();
     let resources = state.snapshot_resources();
-    Ok(state.cleanup.preview(&ids, &resources, &providers_map()))
+    tokio::task::spawn_blocking(move || engine.preview(&ids, &resources, &providers_map()))
+        .await
+        .map_err(|e| e.to_string())
 }
 
 /// Execute cleanup behind the safety validator. Emits `cleanup_started` →
-/// `cleanup_progress` → `cleanup_completed`. Each resource reports its own
-/// status so partial failure is transparent (G-REL-02).
+/// N×`cleanup_progress` (one per finished item) → `cleanup_completed`.
+/// Each resource reports its own status so partial failure is transparent
+/// (G-REL-02).
+///
+/// Async + `spawn_blocking`: deletion + re-measurement walk the
+/// filesystem and previously froze the UI for the whole run (sync
+/// commands execute on the Tauri main thread).
 #[tauri::command]
-pub fn cleanup(
+pub async fn cleanup(
     app: AppHandle,
     state: State<'_, AppState>,
     ids: Vec<String>,
@@ -181,30 +199,50 @@ pub fn cleanup(
     }
     app.emit(CLEANUP_STARTED, &ids).map_err(|e| e.to_string())?;
 
+    // Everything the blocking task needs is owned up front so the async
+    // handler never holds a lock across the filesystem work.
+    let engine = state.cleanup.clone();
     let resources = state.snapshot_resources();
-    // Global cache dirs declared by providers (e.g. cargo registry) widen
-    // the roots check only; protected-path rules still apply (I7).
-    let extra_roots: Vec<std::path::PathBuf> = providers_map()
-        .values()
-        .flat_map(|p| p.extra_allowed_roots())
-        .collect();
-    let validator = SafetyValidator::new_with_extra_roots(settings.scan_roots.clone(), extra_roots);
-    let lookup = |id: &str| resources.get(id).map(|r| r.path.clone());
-    let results = state
-        .cleanup
-        .execute(&ids, &resources, &providers_map(), &validator, lookup);
+    let roots = settings.scan_roots.clone();
+    let progress_app = app.clone();
+    let total_ids = ids.len();
+    let results = tokio::task::spawn_blocking(move || {
+        // Global cache dirs declared by providers (e.g. cargo registry)
+        // widen the roots check only; protected-path rules still apply (I7).
+        let providers = providers_map();
+        let extra_roots: Vec<std::path::PathBuf> = providers
+            .values()
+            .flat_map(|p| p.extra_allowed_roots())
+            .collect();
+        let validator = SafetyValidator::new_with_extra_roots(roots, extra_roots);
+        let lookup = |id: &str| resources.get(id).map(|r| r.path.clone());
+        let on_progress: devclean_cleanup::CleanupProgressFn =
+            Box::new(move |done, total, _result| {
+                let _ = progress_app.emit(CLEANUP_PROGRESS, CleanupProgressPayload { done, total });
+            });
+        engine.execute(
+            &ids,
+            &resources,
+            &providers,
+            &validator,
+            lookup,
+            Some(on_progress),
+        )
+    })
+    .await
+    .map_err(|e| e.to_string())?;
 
     // Durable per-resource history (M3, JSONL). Best-effort: a failed
     // append is logged, never fatal to the cleanup itself.
     {
         let finished = now_unix();
         for r in &results {
-            let src = resources.get(&r.resource_id);
+            let src = state.resources.lock().unwrap().get(&r.resource_id).cloned();
             let entry = HistoryEntry {
                 finished_at_unix: finished,
                 resource_id: r.resource_id.clone(),
-                provider: src.map(|s| s.provider.clone()).unwrap_or_default(),
-                name: src.map(|s| s.name.clone()).unwrap_or_default(),
+                provider: src.as_ref().map(|s| s.provider.clone()).unwrap_or_default(),
+                name: src.as_ref().map(|s| s.name.clone()).unwrap_or_default(),
                 requested_bytes: r.requested_bytes,
                 freed_bytes: r.freed_bytes,
                 status: r.status,
@@ -230,11 +268,13 @@ pub fn cleanup(
         }
     }
 
+    // Progress already streamed per item; this final tick keeps the UI in
+    // sync when ids were skipped (unknown ids report nothing).
     app.emit(
         CLEANUP_PROGRESS,
         CleanupProgressPayload {
             done: results.len(),
-            total: ids.len(),
+            total: total_ids,
         },
     )
     .map_err(|e| e.to_string())?;
@@ -267,12 +307,34 @@ pub fn get_settings(state: State<'_, AppState>) -> Result<Settings, String> {
 }
 
 #[tauri::command]
-pub fn update_settings(state: State<'_, AppState>, settings: Settings) -> Result<Settings, String> {
+pub fn update_settings(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    settings: Settings,
+) -> Result<Settings, String> {
     // Guardrail G-SAFE-03: privileged operations stay off unless the user
     // explicitly opts in — which this assignment already represents.
     *state.settings.lock().unwrap() = settings.clone();
     state.persist_settings(&settings);
+    // Theme changes flow through here, so re-paint the title bar to match.
+    crate::state::apply_window_background(&app, settings.theme);
     Ok(settings)
+}
+
+/// Every registered provider with its current enabled state. The source of
+/// truth for the Settings UI — the frontend never hardcodes the list, so a
+/// provider with zero scan results is still discoverable.
+#[tauri::command]
+pub fn get_providers(state: State<'_, AppState>) -> Result<Vec<ProviderInfo>, String> {
+    let disabled = state.settings.lock().unwrap().disabled_providers.clone();
+    Ok(all_providers()
+        .iter()
+        .map(|p| ProviderInfo {
+            id: p.id().to_string(),
+            name: p.name().to_string(),
+            enabled: !disabled.contains(&p.id().to_string()),
+        })
+        .collect())
 }
 
 /// Newest cleanup history entries, oldest first (M3). `limit` defaults

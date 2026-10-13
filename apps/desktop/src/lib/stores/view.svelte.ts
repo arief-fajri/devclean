@@ -10,6 +10,7 @@ class ViewStore {
   staleOnly = $state(DEFAULT_VIEW.staleOnly);
   selectedOnly = $state(DEFAULT_VIEW.selectedOnly);
   sort = $state<SortKey>(DEFAULT_VIEW.sort);
+  showPaths = $state(DEFAULT_VIEW.showPaths);
 
   get options(): ViewOptions {
     return {
@@ -18,6 +19,7 @@ class ViewStore {
       staleOnly: this.staleOnly,
       selectedOnly: this.selectedOnly,
       sort: this.sort,
+      showPaths: this.showPaths,
     };
   }
 
@@ -31,12 +33,23 @@ class ViewStore {
     );
   }
 
+  /** Expanded provider ids. Session-only: collapsed shows the summary,
+   * expanded reveals the item rows. */
+  expanded = $state<string[]>([]);
+
+  toggleExpand(provider: string) {
+    this.expanded = this.expanded.includes(provider)
+      ? this.expanded.filter((p) => p !== provider)
+      : [...this.expanded, provider];
+  }
+
   reset() {
     this.query = DEFAULT_VIEW.query;
     this.safety = DEFAULT_VIEW.safety;
     this.staleOnly = DEFAULT_VIEW.staleOnly;
     this.selectedOnly = DEFAULT_VIEW.selectedOnly;
     this.sort = DEFAULT_VIEW.sort;
+    this.showPaths = DEFAULT_VIEW.showPaths;
   }
 }
 

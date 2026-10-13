@@ -18,7 +18,7 @@
 <div
   class="fixed inset-x-0 bottom-0 animate-rise border-t border-zinc-200 bg-white/95 p-4 backdrop-blur motion-reduce:animate-none dark:border-zinc-800 dark:bg-zinc-900/95"
 >
-  <div class="mx-auto max-w-5xl">
+  <div class="mx-auto max-w-5xl xl:max-w-7xl">
     <div class="flex flex-wrap items-center justify-between gap-3">
       <div class="min-w-0">
         <p class="text-sm font-semibold text-zinc-900 dark:text-zinc-100" aria-live="polite">

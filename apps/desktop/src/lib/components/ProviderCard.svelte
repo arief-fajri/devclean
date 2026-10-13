@@ -12,6 +12,7 @@
     selected: string[];
     /** Total reclaimable across ALL providers — the bar scale. */
     totalBytes: number;
+    showPath: boolean;
     expanded: boolean;
     rescanning: boolean;
     onToggle: (id: string) => void;
@@ -26,6 +27,7 @@
     resources,
     selected,
     totalBytes,
+    showPath,
     expanded,
     rescanning,
     onToggle,
@@ -47,11 +49,6 @@
     resources.length > 0 && resources.every((r) => selected.includes(r.id)),
   );
   const barColor = $derived(reviewCount > 0 ? "bg-amber-500" : "bg-emerald-500");
-  /** Collapsed cards preview the 3 largest rows; expand for the full list. */
-  const preview = $derived(
-    [...resources].sort((a, b) => b.reclaimable_bytes - a.reclaimable_bytes).slice(0, 3),
-  );
-  const hiddenCount = $derived(resources.length - preview.length);
 </script>
 
 <section
@@ -66,13 +63,16 @@
       aria-label="Select all {resources.length} visible in {summary.name}"
       title="Select all {resources.length} visible in {summary.name}"
     />
+    <!-- The whole summary row is ONE explicit expand control: collapsed
+         shows only the summary, expanded reveals the item rows. -->
     <button
-      class="min-w-0 flex-1 text-left"
+      class="min-w-0 flex-1 rounded-lg text-left"
       onclick={() => onExpand(summary.provider)}
       aria-expanded={expanded}
       aria-label={expanded ? `Collapse ${summary.name}` : `Expand ${summary.name}`}
+      data-testid="provider-toggle-{summary.provider}"
     >
-      <div class="flex items-center gap-3">
+      <span class="flex items-center gap-3">
         <span
           aria-hidden="true"
           class="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg {meta.tile}"
@@ -110,9 +110,12 @@
             {:else}
               · Safe to clean
             {/if}
+            {#if !expanded}
+              <span class="text-zinc-400"> — expand to see items</span>
+            {/if}
           </span>
         </span>
-        <span aria-hidden="true" class="shrink-0 text-zinc-400">
+        <span aria-hidden="true" class="flex h-8 w-8 shrink-0 items-center justify-center text-zinc-400">
           <ChevronDown
             size={18}
             class="transition-transform duration-150 motion-reduce:transition-none {expanded
@@ -120,10 +123,10 @@
               : '-rotate-90'}"
           />
         </span>
-      </div>
+      </span>
     </button>
     <button
-      class="mt-1.5 flex shrink-0 items-center justify-center rounded-lg border border-zinc-200 p-1.5 text-zinc-500 hover:bg-zinc-100 disabled:opacity-50 dark:border-zinc-700 dark:hover:bg-zinc-800"
+      class="mt-1.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-zinc-200 text-zinc-500 hover:bg-zinc-100 disabled:opacity-50 dark:border-zinc-700 dark:hover:bg-zinc-800"
       onclick={() => onRescan(summary.provider)}
       disabled={rescanning}
       aria-label="Rescan {summary.name}"
@@ -135,17 +138,17 @@
     </button>
   </div>
 
-  <ul class="mt-1 divide-y divide-zinc-100 dark:divide-zinc-800">
-    {#each (expanded ? resources : preview) as r (r.id)}
-      <ResourceRow resource={r} checked={selected.includes(r.id)} {onToggle} {onOpenDetail} />
-    {/each}
-  </ul>
-  {#if !expanded && hiddenCount > 0}
-    <button
-      class="mt-1 w-full rounded-lg py-1 text-center text-xs text-zinc-500 hover:bg-zinc-100 hover:text-zinc-700 dark:hover:bg-zinc-800 dark:hover:text-zinc-300"
-      onclick={() => onExpand(summary.provider)}
-    >
-      +{hiddenCount} more — expand to see all
-    </button>
+  {#if expanded}
+    <ul class="mt-1 divide-y divide-zinc-100 dark:divide-zinc-800">
+      {#each resources as r (r.id)}
+        <ResourceRow
+          resource={r}
+          checked={selected.includes(r.id)}
+          {showPath}
+          {onToggle}
+          {onOpenDetail}
+        />
+      {/each}
+    </ul>
   {/if}
 </section>

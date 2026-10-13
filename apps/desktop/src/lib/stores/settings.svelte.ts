@@ -3,11 +3,13 @@
  * Backend persistence is in-memory (file persistence = M3, per contract);
  * the safety validator still re-checks every path (I2, I7).
  */
-import { getSettings, updateSettings } from "$lib/tauri";
-import type { Settings, ThemeMode } from "$lib/tauri";
+import { getProviders, getSettings, updateSettings } from "$lib/tauri";
+import type { ProviderInfo, Settings, ThemeMode } from "$lib/tauri";
 
 class SettingsStore {
   settings = $state<Settings | null>(null);
+  /** Backend registry + enabled flags (contract v0.4.0 `get_providers`). */
+  providers = $state<ProviderInfo[]>([]);
   open = $state(false);
   saving = $state(false);
   error = $state<string | null>(null);
@@ -15,6 +17,7 @@ class SettingsStore {
   async load() {
     try {
       this.settings = await getSettings();
+      this.providers = await getProviders();
     } catch (e) {
       this.error = String(e);
     }
@@ -30,8 +33,8 @@ class SettingsStore {
     this.open = false;
   }
 
-  /** Save; returns true when scan roots or exclusions changed
-   * (caller should rescan). */
+  /** Save; returns true when the caller should rescan (roots, exclusions
+   * or provider set changed). */
   async save(next: Settings): Promise<boolean> {
     this.saving = true;
     this.error = null;
@@ -39,8 +42,14 @@ class SettingsStore {
       const key = (xs: string[]) => [...xs].sort().join("\n");
       const beforeRoots = key(this.settings?.scan_roots ?? []);
       const beforeExcluded = key(this.settings?.excluded_paths ?? []);
+      const beforeDisabled = key(this.settings?.disabled_providers ?? []);
       this.settings = await updateSettings(next);
-      return beforeRoots !== key(next.scan_roots) || beforeExcluded !== key(next.excluded_paths);
+      this.providers = await getProviders();
+      return (
+        beforeRoots !== key(next.scan_roots) ||
+        beforeExcluded !== key(next.excluded_paths) ||
+        beforeDisabled !== key(next.disabled_providers)
+      );
     } catch (e) {
       this.error = String(e);
       return false;

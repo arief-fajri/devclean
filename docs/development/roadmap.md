@@ -62,15 +62,40 @@ gradle absent → empty); contract v0.2.0 (`+get_history`,
 
 ```text
 [x] Summary panel (safe-to-clean split, share %, Scan again as primary) + stat tiles
-[x] lucide-svelte icon set, tabular numerals, max-w-5xl, 2-line resource rows
+[x] lucide-svelte icon set, tabular numerals, max-w-5xl (xl:max-w-7xl), 2-line resource rows
 [x] Global search/filter/sort toolbar + selection-aware cleanup bar
 [x] Resource.impact (contract v0.3.0, additive, old caches still load) +
-    grouped ConfirmDialog (review first) + ResultPanel
+    ConfirmDialog + ResultPanel
 [x] vitest: 20 frontend tests (view, format, safety, providerMeta)
 ```
 
 Evidence: `cargo test` 41 passed, clippy 0 warnings, fmt clean,
 `svelte-check` 0 errors 0 warnings, `vite build` ok, `vitest` 20 passed.
+
+## UI fixes — 12 reported issues ✅ (done)
+
+```text
+[x] History modal refresh icon → lucide; no emoji left in src/
+[x] Provider expand fixed: collapsed = summary only, real accordion toggle
+    (root cause: preview === resources made expand a visual no-op)
+[x] Removed the redundant "Up to date" pill (summary panel already shows it)
+[x] Uniform control height (.control token) so select/buttons align
+[x] Toolbar compacted from 3 rows to 2
+[x] Filesystem path shown per item (+ Paths toggle) — what actually gets deleted
+[x] Settings fully in English; guardrail codes (G-*/I*) removed from UI copy
+[x] Provider on/off toggles (contract v0.4.0: +get_providers,
+    Settings.disabled_providers, ScanManager filter)
+[x] Sticky header
+[x] Full-width content on wide windows (window default 1120x780)
+[x] Cleanup no longer freezes: cleanup + preview_cleanup are async +
+    spawn_blocking, cleanup_progress now fires per finished item
+[x] Cleanup is a single 3-phase dialog (review → running → done)
+[x] History enriched: grouped by day, totals, status filter, lucide status icons
+```
+
+Evidence: `cargo test` 46 passed (incl. progress-callback + provider-toggle
+regression tests), clippy 0 warnings, fmt clean, `svelte-check` 0 errors
+0 warnings, `vite build` ok, `vitest` 29 passed.
 
 ## V1.0 (recommended scope)
 

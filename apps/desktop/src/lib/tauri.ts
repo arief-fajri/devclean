@@ -1,6 +1,6 @@
 /**
  * Typed Tauri bridge — the ONLY module allowed to call `invoke`/`listen`.
- * Mirrors `docs/reference/tauri-contract.md` v0.3.0. Contract change here
+ * Mirrors `docs/reference/tauri-contract.md` v0.4.0. Contract change here
  * requires a contract doc update (G-API-01).
  */
 import { invoke } from "@tauri-apps/api/core";
@@ -72,6 +72,14 @@ export interface Settings {
   allow_privileged_operations: boolean;
   scan_automatically: boolean;
   theme: ThemeMode;
+  /** Provider ids skipped during scans (empty = everything active). */
+  disabled_providers: string[];
+}
+
+export interface ProviderInfo {
+  id: string;
+  name: string;
+  enabled: boolean;
 }
 
 export type ThemeMode = "system" | "dark" | "light";
@@ -115,6 +123,7 @@ export const updateSettings = (settings: Settings) =>
 export const getCachedScan = () => invoke<ScanSummary | null>("get_cached_scan");
 export const getHistory = (limit?: number) =>
   invoke<HistoryEntry[]>("get_history", { limit });
+export const getProviders = () => invoke<ProviderInfo[]>("get_providers");
 
 export const onScanProgress = (cb: (p: ScanProgress) => void): Promise<UnlistenFn> =>
   listen<ScanProgress>("scan_progress", (e) => cb(e.payload));

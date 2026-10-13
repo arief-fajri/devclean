@@ -2,6 +2,7 @@
   import { formatBytes } from "$lib/format";
   import { safetyMeta } from "$lib/safety";
   import type { Resource } from "$lib/tauri";
+  import { Check, Copy } from "lucide-svelte";
 
   interface Props {
     resource: Resource;
@@ -15,6 +16,25 @@
   const meta = $derived(safetyMeta(resource.safety));
   const Icon = $derived(meta.icon);
   const consequence = $derived(resource.impact?.consequence ?? meta.hint);
+
+  let copied = $state(false);
+  let copyTimer: ReturnType<typeof setTimeout> | null = null;
+
+  function copyPath() {
+    const done = () => {
+      copied = true;
+      if (copyTimer) clearTimeout(copyTimer);
+      copyTimer = setTimeout(() => {
+        copied = false;
+      }, 1500);
+    };
+    const text = resource.path;
+    if (navigator.clipboard?.writeText) {
+      navigator.clipboard.writeText(text).then(done, done);
+    } else {
+      done();
+    }
+  }
 </script>
 
 <div
@@ -48,6 +68,30 @@
       </p>
     {/if}
 
+    <div class="mt-4">
+      <div class="flex items-center justify-between gap-2">
+        <p class="text-xs font-semibold tracking-wide text-zinc-400 uppercase">Will be removed</p>
+        <button
+          class="inline-flex items-center gap-1 rounded-lg border border-zinc-200 px-2 py-1 text-xs text-zinc-500 hover:bg-zinc-100 dark:border-zinc-700 dark:hover:bg-zinc-800"
+          onclick={copyPath}
+          aria-label="Copy path"
+        >
+          <span aria-hidden="true" class="flex">
+            {#if copied}<Check size={12} />{:else}<Copy size={12} />{/if}
+          </span>
+          {copied ? "Copied" : "Copy"}
+        </button>
+      </div>
+      <p
+        class="mt-1.5 break-all rounded-lg bg-zinc-100 p-2 font-mono text-xs text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300"
+      >
+        {resource.path}
+      </p>
+      <p class="mt-1.5 text-xs text-zinc-400">
+        Display-only — cleanup uses the opaque id ({resource.id}).
+      </p>
+    </div>
+
     <dl class="mt-4 space-y-2 text-sm">
       <div class="flex justify-between gap-2">
         <dt class="text-zinc-500">Size</dt>
@@ -68,15 +112,6 @@
         </div>
       {/if}
     </dl>
-
-    <p
-      class="mt-3 break-all rounded-lg bg-zinc-100 p-2 font-mono text-xs text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300"
-    >
-      {resource.path}
-    </p>
-    <p class="mt-2 text-xs text-zinc-400">
-      Path is display-only — cleanup uses the opaque id ({resource.id}).
-    </p>
 
     <div class="mt-5 flex justify-end gap-2">
       <button

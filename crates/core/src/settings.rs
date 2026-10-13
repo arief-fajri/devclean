@@ -24,6 +24,11 @@ pub struct Settings {
     /// files readable (they fall back to System).
     #[serde(default)]
     pub theme: ThemeMode,
+    /// Provider ids excluded from scans (empty = everything active).
+    /// `#[serde(default)]` keeps older settings.json files readable — they
+    /// simply enable all providers. Disabled on purpose, never by default.
+    #[serde(default)]
+    pub disabled_providers: Vec<String>,
 }
 
 impl Default for Settings {
@@ -36,6 +41,7 @@ impl Default for Settings {
             allow_privileged_operations: false,
             scan_automatically: false,
             theme: ThemeMode::System,
+            disabled_providers: Vec::new(),
         }
     }
 }
@@ -74,6 +80,22 @@ mod tests {
         let loaded = Settings::load_from(&path);
         assert_eq!(loaded.theme, ThemeMode::System);
         assert!(loaded.require_confirmation);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn pre_v04_settings_file_without_disabled_providers_enables_everything() {
+        let dir = std::env::temp_dir().join(format!("devclean-set-pre4-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("settings.json");
+        std::fs::write(
+            &path,
+            r#"{"scan_roots":[],"excluded_paths":[],"require_confirmation":true,"show_preview":true,"allow_privileged_operations":false,"scan_automatically":false,"theme":"system"}"#,
+        )
+        .unwrap();
+        let loaded = Settings::load_from(&path);
+        assert!(loaded.disabled_providers.is_empty());
         let _ = std::fs::remove_dir_all(&dir);
     }
 

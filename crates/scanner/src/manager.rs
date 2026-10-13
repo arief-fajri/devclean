@@ -44,12 +44,14 @@ impl ScanManager {
         self.cancelled.store(true, Ordering::SeqCst);
     }
 
-    /// Run all providers concurrently and return the aggregated summary.
-    /// Blocking filesystem walks run on `spawn_blocking` so the async
-    /// runtime stays responsive. Each provider is bounded by
+    /// Run all enabled providers concurrently and return the aggregated
+    /// summary. Blocking filesystem walks run on `spawn_blocking` so the
+    /// async runtime stays responsive. Each provider is bounded by
     /// [`PROVIDER_SCAN_TIMEOUT`] (G-REL-01); starting a scan clears any
     /// previous cancellation so a stale flag can never poison a new run.
     ///
+    /// Providers listed in `disabled` are skipped before fan-out (they
+    /// never occupy a semaphore slot and never appear in progress totals).
     /// Resources at or under any `excluded` path are dropped (project
     /// ignore list). Exclusion only skips reporting — the safety validator
     /// still governs every deletion.
@@ -57,14 +59,20 @@ impl ScanManager {
         &self,
         roots: Vec<PathBuf>,
         excluded: &[PathBuf],
+        disabled: &[String],
         on_progress: Option<ProgressFn>,
     ) -> ScanSummary {
         self.cancelled.store(false, Ordering::SeqCst);
         let on_progress: Option<Arc<ProgressFn>> = on_progress.map(Arc::new);
         let mut handles = Vec::new();
 
-        for (idx, provider) in self.providers.iter().enumerate() {
-            let total = self.providers.len();
+        let active: Vec<&Arc<dyn Provider>> = self
+            .providers
+            .iter()
+            .filter(|p| !disabled.contains(&p.id().to_string()))
+            .collect();
+        let total = active.len();
+        for (idx, provider) in active.into_iter().enumerate() {
             let p = Arc::clone(provider);
             let roots = roots.clone();
             let sem = Arc::clone(&self.semaphore);
@@ -170,14 +178,16 @@ mod tests {
     use std::path::Path;
 
     /// Stub provider that works in small cooperative slices so cancellation
-    /// is observable, like the real filesystem providers.
+    /// is observable, like the real filesystem providers. `tag` makes each
+    /// instance distinguishable so multi-provider tests can disable one.
     struct SlowProvider {
+        tag: &'static str,
         slices: usize,
     }
 
     impl Provider for SlowProvider {
         fn id(&self) -> &'static str {
-            "slow"
+            self.tag
         }
         fn name(&self) -> &'static str {
             "Slow stub"
@@ -195,7 +205,7 @@ mod tests {
                 out.push(Resource {
                     id: String::new(),
                     provider: self.id().to_string(),
-                    name: format!("slow-{i}"),
+                    name: format!("{}-{i}", self.tag),
                     path: Path::new("/tmp").to_path_buf(),
                     size_bytes: 1,
                     reclaimable_bytes: 1,
@@ -217,14 +227,17 @@ mod tests {
 
     #[tokio::test]
     async fn cancel_settles_in_under_one_second() {
-        let slow = Arc::new(SlowProvider { slices: 500 });
+        let slow = Arc::new(SlowProvider {
+            tag: "slow",
+            slices: 500,
+        });
         let mgr = manager_with(slow, Duration::from_secs(60));
         let mgr = Arc::new(mgr);
         let mgr2 = Arc::clone(&mgr);
-        let handle =
-            tokio::spawn(
-                async move { mgr2.scan_all(vec![PathBuf::from("/tmp")], &[], None).await },
-            );
+        let handle = tokio::spawn(async move {
+            mgr2.scan_all(vec![PathBuf::from("/tmp")], &[], &[], None)
+                .await
+        });
         // Let the scan start, then cancel and measure the settle time.
         tokio::time::sleep(Duration::from_millis(100)).await;
         let t0 = std::time::Instant::now();
@@ -242,34 +255,107 @@ mod tests {
     #[tokio::test]
     async fn provider_timeout_yields_empty_without_hanging() {
         // 500 slices × 20ms = ~10s of work, timeout 100ms.
-        let slow = Arc::new(SlowProvider { slices: 500 });
+        let slow = Arc::new(SlowProvider {
+            tag: "slow",
+            slices: 500,
+        });
         let mgr = manager_with(slow, Duration::from_millis(100));
         let t0 = std::time::Instant::now();
-        let summary = mgr.scan_all(vec![PathBuf::from("/tmp")], &[], None).await;
+        let summary = mgr
+            .scan_all(vec![PathBuf::from("/tmp")], &[], &[], None)
+            .await;
         assert!(t0.elapsed() < Duration::from_secs(5));
         assert!(summary.resources.is_empty());
     }
 
     #[tokio::test]
     async fn new_scan_clears_previous_cancel() {
-        let slow = Arc::new(SlowProvider { slices: 5 });
+        let slow = Arc::new(SlowProvider {
+            tag: "slow",
+            slices: 5,
+        });
         let mgr = manager_with(slow, Duration::from_secs(60));
         mgr.cancel();
         // A fresh scan_all must not inherit the stale cancel flag.
-        let summary = mgr.scan_all(vec![PathBuf::from("/tmp")], &[], None).await;
+        let summary = mgr
+            .scan_all(vec![PathBuf::from("/tmp")], &[], &[], None)
+            .await;
         assert_eq!(summary.resources.len(), 5);
     }
 
     #[tokio::test]
     async fn excluded_paths_are_dropped() {
-        let slow = Arc::new(SlowProvider { slices: 3 });
+        let slow = Arc::new(SlowProvider {
+            tag: "slow",
+            slices: 3,
+        });
         let mgr = manager_with(slow, Duration::from_secs(60));
         // The stub reports paths under /tmp: excluding /tmp drops all.
         let summary = mgr
-            .scan_all(vec![PathBuf::from("/tmp")], &[PathBuf::from("/tmp")], None)
+            .scan_all(
+                vec![PathBuf::from("/tmp")],
+                &[PathBuf::from("/tmp")],
+                &[],
+                None,
+            )
             .await;
         assert!(summary.resources.is_empty());
-        let summary = mgr.scan_all(vec![PathBuf::from("/tmp")], &[], None).await;
+        let summary = mgr
+            .scan_all(vec![PathBuf::from("/tmp")], &[], &[], None)
+            .await;
         assert_eq!(summary.resources.len(), 3);
+    }
+
+    #[tokio::test]
+    async fn disabled_providers_are_skipped_entirely() {
+        let fast = Arc::new(SlowProvider {
+            tag: "fast",
+            slices: 3,
+        });
+        let slow = Arc::new(SlowProvider {
+            tag: "slow",
+            slices: 500,
+        });
+        let mgr = ScanManager::with_config(vec![fast, slow], Duration::from_secs(60));
+        // Disabling the expensive stub must both drop its rows and make
+        // the run finish immediately (it never occupies a semaphore slot).
+        let t0 = std::time::Instant::now();
+        let summary = mgr
+            .scan_all(
+                vec![PathBuf::from("/tmp")],
+                &[],
+                &["slow".to_string()],
+                None,
+            )
+            .await;
+        assert!(
+            t0.elapsed() < Duration::from_secs(5),
+            "disabled scan must not block"
+        );
+        assert_eq!(
+            summary.resources.len(),
+            3,
+            "only the enabled provider contributes"
+        );
+        assert!(summary.providers.iter().all(|p| p.provider != "slow"));
+    }
+
+    #[tokio::test]
+    async fn disabling_every_provider_yields_an_empty_summary() {
+        let slow = Arc::new(SlowProvider {
+            tag: "slow",
+            slices: 3,
+        });
+        let mgr = manager_with(slow, Duration::from_secs(60));
+        let summary = mgr
+            .scan_all(
+                vec![PathBuf::from("/tmp")],
+                &[],
+                &["slow".to_string()],
+                None,
+            )
+            .await;
+        assert!(summary.resources.is_empty());
+        assert!(summary.providers.is_empty());
     }
 }

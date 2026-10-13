@@ -33,10 +33,15 @@ G-SAFE-04  Protected paths are untouchable from any direction (==, inside, ances
 G-SCAN-01  Scan concurrency is bounded (max 4 providers in parallel).
            Enforcement: code — tokio Semaphore in ScanManager ✅
 G-SCAN-02  Scan & cleanup are cancellable, settling in <1s.
-            Enforcement: code — cooperative AtomicBool checks per walk entry ✅ ·
-            test — cancel_settles_in_under_one_second ✅
+             Enforcement: code — cooperative AtomicBool checks per walk entry ✅ ·
+             test — cancel_settles_in_under_one_second ✅
 G-SCAN-03  Symlinks are never followed during traversal/measurement.
-           Enforcement: code — follow_links(false) ✅
+             Enforcement: code — follow_links(false) ✅
+G-SCAN-04  The UI thread is never blocked by filesystem work (scan re-measure,
+            deletion, provider CLI). Enforcement: code — `cleanup` and
+            `preview_cleanup` are async + `spawn_blocking`, so no sync command
+            touches the Tauri main thread ✅ · manual — UI stays responsive
+            and the cleanup dialog animates progress ✅
 ```
 
 ## 3. Contract (G-API)

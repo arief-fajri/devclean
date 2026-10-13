@@ -10,6 +10,13 @@ use std::sync::{
 };
 use std::time::{Duration, Instant};
 
+/// Progress callback for [`CleanupEngine::execute`]: `(done, total,
+/// per-item result just produced)`. Invoked synchronously after EVERY
+/// item — never just once at the end — so the UI can render a live
+/// progress bar while the queue still runs.
+pub type CleanupProgressFn = Box<dyn Fn(usize, usize, &CleanupResult) + Send + Sync>;
+
+#[derive(Clone)]
 pub struct CleanupEngine {
     cancelled: Arc<AtomicBool>,
 }
@@ -54,6 +61,8 @@ impl CleanupEngine {
 
     /// Execute cleanup for the selected ids. Each resource yields its own
     /// [`CleanupResult`] so partial failure is transparent (G-REL-02).
+    /// `on_progress` fires after every completed item (including
+    /// cancelled ones); unknown ids are still skipped silently.
     pub fn execute(
         &self,
         ids: &[String],
@@ -61,20 +70,28 @@ impl CleanupEngine {
         providers: &HashMap<String, Arc<dyn Provider>>,
         validator: &SafetyValidator,
         lookup: impl Fn(&str) -> Option<std::path::PathBuf>,
+        on_progress: Option<CleanupProgressFn>,
     ) -> Vec<CleanupResult> {
         let mut out = Vec::new();
+        let total = ids.len();
+        let mut done = 0usize;
         for id in ids {
-            if self.cancelled.load(Ordering::SeqCst) {
-                out.push(cancelled_result(id, resources.get(id)));
-                continue;
+            let result = if self.cancelled.load(Ordering::SeqCst) {
+                cancelled_result(id, resources.get(id))
+            } else {
+                let Some(r) = resources.get(id) else {
+                    continue;
+                };
+                let Some(p) = providers.get(&r.provider) else {
+                    continue;
+                };
+                self.clean_one(id, r, p, validator, &lookup)
+            };
+            done += 1;
+            if let Some(cb) = &on_progress {
+                cb(done, total, &result);
             }
-            let Some(r) = resources.get(id) else {
-                continue;
-            };
-            let Some(p) = providers.get(&r.provider) else {
-                continue;
-            };
-            out.push(self.clean_one(id, r, p, validator, &lookup));
+            out.push(result);
         }
         out
     }
@@ -309,6 +326,7 @@ mod tests {
             &providers,
             &validator,
             lookup,
+            None,
         );
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].status, CleanupStatus::Success);
@@ -346,6 +364,7 @@ mod tests {
             &providers,
             &validator,
             lookup,
+            None,
         );
         assert_eq!(results[0].status, CleanupStatus::Failed);
         assert!(results[0].error.is_some());
@@ -360,6 +379,86 @@ mod tests {
         let err = run_command_timeout("sleep", &["30"], Duration::from_millis(200)).unwrap_err();
         assert!(err.contains("timed out"), "got: {err}");
         assert!(t0.elapsed() < Duration::from_secs(5));
+    }
+
+    fn resource(id: &str, target: &std::path::Path) -> Resource {
+        Resource {
+            id: id.to_string(),
+            provider: "node_modules".to_string(),
+            name: "proj/node_modules".to_string(),
+            path: target.to_path_buf(),
+            size_bytes: 2000,
+            reclaimable_bytes: 2000,
+            safety: SafetyLevel::Safe,
+            detail: None,
+            impact: None,
+        }
+    }
+
+    #[test]
+    fn progress_callback_fires_once_per_completed_item() {
+        let (root, target) = fixture("prog");
+        let (mut resources, providers) = setup();
+        resources.insert("nm:0001".to_string(), resource("nm:0001", &target));
+        let target2 = root.join("proj2/node_modules");
+        std::fs::create_dir_all(&target2).unwrap();
+        std::fs::write(target2.join("b.js"), "z".repeat(500)).unwrap();
+        resources.insert("nm:0002".to_string(), resource("nm:0002", &target2));
+        let validator = SafetyValidator::new(vec![root.clone()]);
+        let engine = CleanupEngine::default();
+        let lookup = |id: &str| resources.get(id).map(|r| r.path.clone());
+
+        let seen = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let seen_cb = std::sync::Arc::clone(&seen);
+        let cb: CleanupProgressFn = Box::new(move |done, total, r| {
+            seen_cb
+                .lock()
+                .unwrap()
+                .push((done, total, r.resource_id.clone(), r.status));
+        });
+        let ids = vec!["nm:0001".to_string(), "nm:0002".to_string()];
+        let results = engine.execute(&ids, &resources, &providers, &validator, lookup, Some(cb));
+        assert_eq!(results.len(), 2);
+        let seen = seen.lock().unwrap();
+        assert_eq!(seen.len(), 2, "one callback per item, got {seen:?}");
+        assert_eq!(
+            seen.iter().map(|(d, t, _, _)| (*d, *t)).collect::<Vec<_>>(),
+            vec![(1, 2), (2, 2)]
+        );
+        assert!(seen.iter().all(|(_, _, _, s)| *s == CleanupStatus::Success));
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn cancelled_items_still_report_progress() {
+        let (root, target) = fixture("prog-cancel");
+        let (mut resources, providers) = setup();
+        resources.insert("nm:0001".to_string(), resource("nm:0001", &target));
+        let validator = SafetyValidator::new(vec![root.clone()]);
+        let engine = CleanupEngine::default();
+        engine.cancel();
+        let lookup = |id: &str| resources.get(id).map(|r| r.path.clone());
+
+        let seen = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let seen_cb = std::sync::Arc::clone(&seen);
+        let cb: CleanupProgressFn = Box::new(move |done, total, r| {
+            seen_cb.lock().unwrap().push((done, total, r.status));
+        });
+        let results = engine.execute(
+            &["nm:0001".to_string()],
+            &resources,
+            &providers,
+            &validator,
+            lookup,
+            Some(cb),
+        );
+        assert_eq!(results[0].status, CleanupStatus::Cancelled);
+        assert_eq!(
+            *seen.lock().unwrap(),
+            vec![(1, 1, CleanupStatus::Cancelled)]
+        );
+        assert!(target.exists(), "cancelled item must be untouched");
+        let _ = std::fs::remove_dir_all(&root);
     }
 
     #[test]

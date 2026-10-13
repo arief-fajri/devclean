@@ -1,16 +1,17 @@
 <script lang="ts">
-  import { formatBytes } from "$lib/format";
+  import { formatBytes, truncateMiddle } from "$lib/format";
   import { safetyMeta } from "$lib/safety";
   import type { Resource } from "$lib/tauri";
 
   interface Props {
     resource: Resource;
     checked: boolean;
+    showPath: boolean;
     onToggle: (id: string) => void;
     onOpenDetail: (id: string) => void;
   }
 
-  let { resource: r, checked, onToggle, onOpenDetail }: Props = $props();
+  let { resource: r, checked, showPath, onToggle, onOpenDetail }: Props = $props();
 
   const meta = $derived(safetyMeta(r.safety));
   const Icon = $derived(meta.icon);
@@ -56,6 +57,15 @@
         {consequence}
       </span>
     </div>
+    {#if showPath}
+      <p
+        class="mt-0.5 truncate font-mono text-[11px] text-zinc-400"
+        title={r.path}
+        aria-label="Location: {r.path}"
+      >
+        {truncateMiddle(r.path)}
+      </p>
+    {/if}
     {#if r.impact?.cost || r.impact?.command}
       <p class="mt-0.5 truncate text-xs text-zinc-400">
         {#if r.impact.cost}{r.impact.cost}{/if}

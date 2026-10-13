@@ -19,6 +19,6 @@ pub use safety::{SafetyError, SafetyValidator};
 pub use settings::{Settings, ThemeMode};
 pub use system::{app_data_dir, default_scan_roots, platform_name};
 pub use types::{
-    CleanupPreview, CleanupPreviewItem, CleanupResult, CleanupStatus, HistoryEntry,
+    CleanupPreview, CleanupPreviewItem, CleanupResult, CleanupStatus, HistoryEntry, ProviderInfo,
     ProviderSummary, Resource, ResourceImpact, SafetyLevel, ScanSummary,
 };

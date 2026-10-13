@@ -10,5 +10,5 @@
 pub mod engine;
 pub mod history;
 
-pub use engine::CleanupEngine;
+pub use engine::{CleanupEngine, CleanupProgressFn};
 pub use history::{append_history_entry, read_history};

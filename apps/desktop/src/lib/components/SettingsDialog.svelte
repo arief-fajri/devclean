@@ -1,22 +1,29 @@
 <script lang="ts">
-  import type { Settings, ThemeMode } from "$lib/tauri";
+  import { providerMeta } from "$lib/providerMeta";
+  import { formatBytes } from "$lib/format";
+  import type { ProviderInfo, Settings, ThemeMode } from "$lib/tauri";
 
   interface Props {
     settings: Settings;
+    /** From `get_providers` — the backend registry is the source of truth. */
+    providers: ProviderInfo[];
+    /** Last scan results per provider id, for a live size hint. */
+    providerStats: Record<string, { count: number; bytes: number }>;
     saving: boolean;
     error: string | null;
     onSave: (next: Settings) => void;
     onClose: () => void;
   }
 
-  let { settings, saving, error, onSave, onClose }: Props = $props();
+  let { settings, providers, providerStats, saving, error, onSave, onClose }: Props = $props();
 
-  // Draft lokal, di-seed dari props sekali saat dialog mount
-  // (dialog selalu fresh-mount via {#if}, jadi seed-once sudah benar).
+  // Local draft, seeded from props once when the dialog mounts
+  // (the dialog always fresh-mounts via {#if}, so seed-once is correct).
   let roots = $state<string[]>([]);
   let newRoot = $state("");
   let excluded = $state<string[]>([]);
   let newExcluded = $state("");
+  let disabledProviders = $state<string[]>([]);
   let requireConfirmation = $state(true);
   let showPreview = $state(true);
   let allowPrivileged = $state(false);
@@ -26,6 +33,7 @@
     if (!seeded) {
       roots = [...settings.scan_roots];
       excluded = [...settings.excluded_paths];
+      disabledProviders = [...(settings.disabled_providers ?? [])];
       requireConfirmation = settings.require_confirmation;
       showPreview = settings.show_preview;
       allowPrivileged = settings.allow_privileged_operations;
@@ -33,6 +41,14 @@
       seeded = true;
     }
   });
+
+  function toggleProvider(id: string) {
+    disabledProviders = disabledProviders.includes(id)
+      ? disabledProviders.filter((p) => p !== id)
+      : [...disabledProviders, id];
+  }
+
+  const activeCount = $derived(providers.filter((p) => !disabledProviders.includes(p.id)).length);
 
   function addRoot() {
     const p = newRoot.trim();
@@ -59,6 +75,7 @@
       ...settings,
       scan_roots: roots,
       excluded_paths: excluded,
+      disabled_providers: disabledProviders,
       require_confirmation: requireConfirmation,
       show_preview: showPreview,
       allow_privileged_operations: allowPrivileged,
@@ -73,12 +90,67 @@
   aria-modal="true"
   aria-label="Settings"
 >
-  <div class="w-full max-w-md rounded-xl bg-white p-6 shadow-xl dark:bg-zinc-900">
+  <div class="max-h-[85vh] w-full max-w-md overflow-auto rounded-xl bg-white p-6 shadow-xl dark:bg-zinc-900">
     <h2 class="text-lg font-semibold text-zinc-900 dark:text-zinc-100">Settings</h2>
 
-    <h3 class="mt-4 text-sm font-semibold text-zinc-700 dark:text-zinc-300">Scan roots</h3>
+    <h3 class="mt-4 text-sm font-semibold text-zinc-700 dark:text-zinc-300">
+      Providers
+      <span class="ml-1 font-normal text-zinc-500">
+        {activeCount} of {providers.length} active
+      </span>
+    </h3>
     <p class="mt-1 text-xs text-zinc-500">
-      Sumber scan. Cleanup di luar roots selalu ditolak validator (I2).
+      Disabled providers are skipped during scans. Tools that are not installed simply
+      report nothing.
+    </p>
+    {#if providers.length === 0}
+      <p class="mt-2 text-sm text-zinc-500">Loading providers…</p>
+    {:else}
+      <ul class="mt-2 divide-y divide-zinc-100 dark:divide-zinc-800">
+        {#each providers as p (p.id)}
+          {@const meta = providerMeta(p.id)}
+          {@const Icon = meta.icon}
+          {@const stat = providerStats[p.id]}
+          {@const isDisabled = disabledProviders.includes(p.id)}
+          <li class="flex items-center gap-3 py-2">
+            <span
+              aria-hidden="true"
+              class="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg {meta.tile}"
+            >
+              <Icon size={16} class={meta.accent} />
+            </span>
+            <span class="min-w-0 flex-1">
+              <span class="block truncate text-sm text-zinc-700 dark:text-zinc-300">
+                {p.name}
+              </span>
+              <span class="block text-xs text-zinc-400">
+                {#if stat && stat.count > 0}
+                  {stat.count} {stat.count === 1 ? "item" : "items"} · {formatBytes(stat.bytes)}
+                {:else if isDisabled}
+                  Skipped during scans
+                {:else}
+                  Nothing found — tool may not be installed
+                {/if}
+              </span>
+            </span>
+            <label class="flex shrink-0 cursor-pointer items-center gap-1.5 text-xs text-zinc-500">
+              <input
+                type="checkbox"
+                class="h-4 w-4 accent-emerald-600"
+                checked={!isDisabled}
+                onchange={() => toggleProvider(p.id)}
+                aria-label="Scan {p.name}"
+              />
+              {isDisabled ? "Off" : "On"}
+            </label>
+          </li>
+        {/each}
+      </ul>
+    {/if}
+
+    <h3 class="mt-5 text-sm font-semibold text-zinc-700 dark:text-zinc-300">Scan roots</h3>
+    <p class="mt-1 text-xs text-zinc-500">
+      Folders to scan. Cleanup outside these roots is always rejected by the safety validator.
     </p>
     <ul class="mt-2 space-y-1.5 text-sm">
       {#each roots as r (r)}
@@ -89,9 +161,9 @@
           <button
             class="shrink-0 rounded px-2 py-0.5 text-xs text-red-600 hover:bg-red-50 dark:hover:bg-red-950"
             onclick={() => removeRoot(r)}
-            aria-label="Hapus {r}"
+            aria-label="Remove {r}"
           >
-            Hapus
+            Remove
           </button>
         </li>
       {/each}
@@ -100,24 +172,24 @@
       <input
         type="text"
         class="min-w-0 flex-1 rounded-lg border border-zinc-200 bg-transparent px-2 py-1.5 font-mono text-xs dark:border-zinc-700"
-        placeholder="/Users/kamu/Projects"
+        placeholder="/Users/you/Projects"
         bind:value={newRoot}
         onkeydown={(e) => {
           if (e.key === "Enter") addRoot();
         }}
-        aria-label="Path scan root baru"
+        aria-label="New scan root path"
       />
       <button
         class="shrink-0 rounded-lg border border-zinc-200 px-3 py-1.5 text-sm hover:bg-zinc-100 dark:border-zinc-700 dark:hover:bg-zinc-800"
         onclick={addRoot}
       >
-        + Tambah
+        + Add
       </button>
     </div>
 
     <h3 class="mt-4 text-sm font-semibold text-zinc-700 dark:text-zinc-300">Ignore list</h3>
     <p class="mt-1 text-xs text-zinc-500">
-      Project yang dilewati scan. Bukan vonis aman — validator tetap berlaku saat cleanup.
+      Projects skipped by the scan. Not a safety verdict — the validator still applies at cleanup.
     </p>
     <ul class="mt-2 space-y-1.5 text-sm">
       {#each excluded as x (x)}
@@ -128,9 +200,9 @@
           <button
             class="shrink-0 rounded px-2 py-0.5 text-xs text-red-600 hover:bg-red-50 dark:hover:bg-red-950"
             onclick={() => removeExcluded(x)}
-            aria-label="Hapus {x} dari ignore list"
+            aria-label="Remove {x} from the ignore list"
           >
-            Hapus
+            Remove
           </button>
         </li>
       {/each}
@@ -139,48 +211,48 @@
       <input
         type="text"
         class="min-w-0 flex-1 rounded-lg border border-zinc-200 bg-transparent px-2 py-1.5 font-mono text-xs dark:border-zinc-700"
-        placeholder="/Users/kamu/Projects/monorepo-raksasa"
+        placeholder="/Users/you/Projects/huge-monorepo"
         bind:value={newExcluded}
         onkeydown={(e) => {
           if (e.key === "Enter") addExcluded();
         }}
-        aria-label="Path ignore baru"
+        aria-label="New ignored path"
       />
       <button
         class="shrink-0 rounded-lg border border-zinc-200 px-3 py-1.5 text-sm hover:bg-zinc-100 dark:border-zinc-700 dark:hover:bg-zinc-800"
         onclick={addExcluded}
       >
-        + Abaikan
+        + Ignore
       </button>
     </div>
 
     <div class="mt-4 space-y-2 text-sm">
       <label class="flex items-center gap-2">
-        <span class="text-zinc-700 dark:text-zinc-300">Tema</span>
+        <span class="text-zinc-700 dark:text-zinc-300">Theme</span>
         <select
           class="rounded-lg border border-zinc-200 bg-transparent px-2 py-1 text-sm dark:border-zinc-700"
           bind:value={theme}
-          aria-label="Tema"
+          aria-label="Theme"
         >
-          <option value="system">Sistem</option>
-          <option value="dark">Gelap</option>
-          <option value="light">Terang</option>
+          <option value="system">System</option>
+          <option value="dark">Dark</option>
+          <option value="light">Light</option>
         </select>
       </label>
       <label class="flex items-center gap-2">
         <input type="checkbox" class="h-4 w-4 accent-emerald-600" bind:checked={requireConfirmation} />
-        Minta konfirmasi sebelum cleanup (G-UI-01)
+        Ask for confirmation before cleanup
       </label>
       <label class="flex items-center gap-2">
         <input type="checkbox" class="h-4 w-4 accent-emerald-600" bind:checked={showPreview} />
-        Tampilkan daftar item di dialog (I6)
+        Show the item list in the confirmation dialog
       </label>
       <label class="flex items-start gap-2">
         <input type="checkbox" class="mt-0.5 h-4 w-4 accent-red-600" bind:checked={allowPrivileged} />
         <span>
-          Operasi privileged
+          Privileged operations
           <span class="block text-xs text-amber-700 dark:text-amber-300">
-            Default OFF (G-SAFE-03). Jangan aktifkan kecuali kamu paham risikonya.
+            Off by default. Only enable if you understand the risks.
           </span>
         </span>
       </label>
@@ -191,7 +263,7 @@
         {error}
       </p>
     {/if}
-    <p class="mt-3 text-xs text-zinc-400">Tersimpan di disk, dimuat ulang saat startup.</p>
+    <p class="mt-3 text-xs text-zinc-400">Stored on disk, reloaded at startup.</p>
 
     <div class="mt-4 flex justify-end gap-2">
       <button
@@ -199,15 +271,15 @@
         onclick={onClose}
         disabled={saving}
       >
-        Batal
+        Cancel
       </button>
       <button
         class="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-700 disabled:opacity-50"
         onclick={save}
         disabled={saving || roots.length === 0}
-        title={roots.length === 0 ? "Minimal satu scan root" : ""}
+        title={roots.length === 0 ? "At least one scan root is required" : ""}
       >
-        {saving ? "Menyimpan…" : "Simpan"}
+        {saving ? "Saving…" : "Save"}
       </button>
     </div>
   </div>

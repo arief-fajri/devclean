@@ -8,11 +8,12 @@
 //! per-platform app data dir (never inside a scan root).
 
 use devclean_cleanup::CleanupEngine;
-use devclean_core::{app_data_dir, Resource, Settings};
+use devclean_core::{app_data_dir, Resource, Settings, ThemeMode};
 use devclean_scanner::ScanManager;
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
+use tauri::{AppHandle, Manager};
 
 pub struct AppState {
     pub scan: Arc<ScanManager>,
@@ -62,5 +63,46 @@ impl AppState {
         if let Err(e) = settings.save_to(&self.settings_path) {
             tracing::warn!("could not persist settings: {e}");
         }
+    }
+}
+
+/// Window background colors, mirroring the app surfaces (zinc-50 / zinc-950)
+/// so the native title bar blends into the webview instead of showing
+/// whatever is behind the window.
+const BG_LIGHT: tauri::webview::Color = tauri::webview::Color(250, 250, 250, 255);
+const BG_DARK: tauri::webview::Color = tauri::webview::Color(9, 9, 11, 255);
+
+/// Best-effort system dark-mode probe. Dependency-free: macOS reports it
+/// through the `AppleInterfaceStyle` default; elsewhere we assume light.
+pub fn system_prefers_dark() -> bool {
+    #[cfg(target_os = "macos")]
+    {
+        if let Ok(out) = std::process::Command::new("defaults")
+            .args(["read", "-g", "AppleInterfaceStyle"])
+            .stdin(std::process::Stdio::null())
+            .output()
+        {
+            if out.status.success() {
+                return String::from_utf8_lossy(&out.stdout).trim() == "Dark";
+            }
+        }
+    }
+    false
+}
+
+/// Paint the native window background so the title bar is opaque and
+/// follows the active theme. Called at startup and whenever the theme
+/// changes (theme changes always flow through `update_settings`).
+pub fn apply_window_background(app: &AppHandle, theme: ThemeMode) {
+    let dark = match theme {
+        ThemeMode::Dark => true,
+        ThemeMode::Light => false,
+        ThemeMode::System => system_prefers_dark(),
+    };
+    let Some(window) = app.get_webview_window("main") else {
+        return;
+    };
+    if let Err(e) = window.set_background_color(Some(if dark { BG_DARK } else { BG_LIGHT })) {
+        tracing::warn!("could not set window background: {e}");
     }
 }

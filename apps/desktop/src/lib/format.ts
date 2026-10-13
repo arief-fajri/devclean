@@ -39,3 +39,12 @@ export function formatPct(part: number, total: number): string {
   const s = pct >= 100 ? "100" : pct.toFixed(1).replace(/\.0$/, "");
   return `${s}%`;
 }
+
+/** Middle-truncate long paths, keeping head + tail visible:
+ * `"/Users/you/…/my-app/node_modules"`. Pure, unit-tested. */
+export function truncateMiddle(path: string, maxLen = 64): string {
+  if (path.length <= maxLen || maxLen < 8) return path;
+  const tail = Math.ceil((maxLen - 1) / 2);
+  const head = maxLen - 1 - tail;
+  return `${path.slice(0, head)}…${path.slice(path.length - tail)}`;
+}

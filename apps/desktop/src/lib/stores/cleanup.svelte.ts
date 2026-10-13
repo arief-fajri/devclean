@@ -50,7 +50,8 @@ class CleanupStore {
     } finally {
       this.cleaning = false;
       this.cancelling = false;
-      this.confirmOpen = false;
+      // NOTE: confirmOpen stays true — the flow dialog moves to its `done`
+      // phase instead of vanishing. Close via closeFlow() (Done/Rescan).
       this.progress = null;
     }
   }
@@ -80,7 +81,7 @@ class CleanupStore {
       this.results = r;
       this.cleaning = false;
       this.cancelling = false;
-      this.confirmOpen = false;
+      // confirmOpen stays true so the flow dialog shows the `done` phase.
       this.progress = null;
     });
   }
@@ -100,6 +101,13 @@ class CleanupStore {
   close() {
     this.confirmOpen = false;
     this.preview = null;
+  }
+
+  /** Close the whole flow dialog (Done/Rescan): dialog + preview + results. */
+  closeFlow() {
+    this.confirmOpen = false;
+    this.preview = null;
+    this.results = null;
   }
 
   dismissResults() {

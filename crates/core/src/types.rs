@@ -52,6 +52,17 @@ pub struct ResourceImpact {
     pub command: Option<String>,
 }
 
+/// Static provider metadata for the Settings UI (contract v0.4.0).
+/// Cheap by design: id + display name + enabled flag, never a scan.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ProviderInfo {
+    pub id: String,
+    pub name: String,
+    /// Whether the provider runs during scans
+    /// (`Settings.disabled_providers`).
+    pub enabled: bool,
+}
+
 /// Per-provider totals for the dashboard.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProviderSummary {

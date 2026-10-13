@@ -18,6 +18,8 @@ export interface ViewOptions {
   staleOnly: boolean;
   selectedOnly: boolean;
   sort: SortKey;
+  /** Display preference (not a filter): show the path line per row. */
+  showPaths: boolean;
 }
 
 export const DEFAULT_VIEW: ViewOptions = {
@@ -26,6 +28,7 @@ export const DEFAULT_VIEW: ViewOptions = {
   staleOnly: false,
   selectedOnly: false,
   sort: "largest",
+  showPaths: true,
 };
 
 export interface ProviderGroup {

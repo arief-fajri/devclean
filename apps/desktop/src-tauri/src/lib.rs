@@ -9,7 +9,7 @@ mod events;
 mod state;
 
 use commands::*;
-use state::AppState;
+use state::{apply_window_background, AppState};
 use tauri::Manager;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -17,6 +17,11 @@ pub fn run() {
     tauri::Builder::default()
         .manage(AppState::default())
         .setup(|app| {
+            // Paint the native window background (title bar) from the
+            // persisted theme before the first frame, so no unpainted
+            // transparent strip is ever visible.
+            let theme = app.state::<AppState>().settings.lock().unwrap().theme;
+            apply_window_background(app.handle(), theme);
             if cfg!(debug_assertions) {
                 app.handle().plugin(
                     tauri_plugin_log::Builder::default()
@@ -41,7 +46,8 @@ pub fn run() {
             get_settings,
             update_settings,
             get_cached_scan,
-            get_history
+            get_history,
+            get_providers
         ])
         .run(tauri::generate_context!())
         .expect("error while building tauri application");

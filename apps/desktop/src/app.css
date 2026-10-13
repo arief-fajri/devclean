@@ -21,8 +21,21 @@
   color-scheme: light dark;
 }
 
+/* Base paint: the document itself must be opaque. Without this the title
+   bar strip and any uncovered pixel stay transparent, letting whatever is
+   behind the window show through — and causing a white flash on launch.
+   Values mirror the app surfaces: zinc-50 / zinc-950. */
+html {
+  background-color: #fafafa;
+}
+
+html.dark {
+  background-color: #09090b;
+}
+
 body {
   margin: 0;
+  background-color: inherit;
   font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
   -webkit-font-smoothing: antialiased;
 }
@@ -30,6 +43,21 @@ body {
 /* Tabular numerals for byte counts + percents so columns align. */
 .tnum {
   font-variant-numeric: tabular-nums;
+}
+
+/* Shared control token: every toolbar control (select, button, toggle)
+ * shares one height + padding + radius so rows align optically.
+ * Usage: class="control" (+ color/border modifiers). */
+@layer components {
+  .control {
+    @apply inline-flex h-8 shrink-0 items-center gap-1.5 rounded-lg border border-zinc-200 px-2 text-xs font-medium text-zinc-600 dark:border-zinc-700 dark:text-zinc-300;
+  }
+  button.control:not(:disabled):hover {
+    @apply bg-zinc-100 dark:bg-zinc-800;
+  }
+  select.control {
+    @apply cursor-pointer bg-transparent;
+  }
 }
 
 /* Consistent, visible keyboard focus (a11y). */

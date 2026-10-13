@@ -10,12 +10,11 @@
     Sun,
     TriangleAlert,
   } from "lucide-svelte";
-  import ConfirmDialog from "$lib/components/ConfirmDialog.svelte";
+  import CleanupFlowDialog from "$lib/components/CleanupFlowDialog.svelte";
   import HistoryDialog from "$lib/components/HistoryDialog.svelte";
   import ListToolbar from "$lib/components/ListToolbar.svelte";
   import ProviderCard from "$lib/components/ProviderCard.svelte";
   import ResourceDetail from "$lib/components/ResourceDetail.svelte";
-  import ResultPanel from "$lib/components/ResultPanel.svelte";
   import SelectionBar from "$lib/components/SelectionBar.svelte";
   import SettingsDialog from "$lib/components/SettingsDialog.svelte";
   import StatTile from "$lib/components/StatTile.svelte";
@@ -99,9 +98,6 @@
     }
     return { safeCats, reviewCats };
   });
-  const statusLabel = $derived(
-    scanStore.scanning ? "Scanning…" : scanStore.fromCache ? "Cached" : "Up to date",
-  );
   const scanStatus = $derived(
     !scanStore.scanning
       ? null
@@ -143,12 +139,23 @@
       .map((r) => r.id),
   );
   const barBusy = $derived(scanStore.scanning || cleanupStore.cleaning);
+  /** Per-provider item count + bytes from the last scan (Settings hint). */
+  const providerStats = $derived.by(() => {
+    const out: Record<string, { count: number; bytes: number }> = {};
+    for (const p of scanStore.summary?.providers ?? []) {
+      out[p.provider] = { count: p.resource_count, bytes: p.reclaimable_bytes };
+    }
+    return out;
+  });
 </script>
 
 <div class="min-h-screen bg-zinc-50 text-zinc-900 dark:bg-zinc-950 dark:text-zinc-100">
-  <div class="mx-auto max-w-5xl px-4 pb-32 pt-6">
-    <!-- Header -->
-    <header class="flex items-center justify-between gap-3">
+  <div class="mx-auto max-w-5xl px-4 pb-32 xl:max-w-7xl">
+    <!-- Header: sticky so Scan/Settings stay reachable on long lists -->
+    <header
+      class="sticky top-0 z-30 -mx-4 border-b border-transparent bg-zinc-50/90 px-4 pt-6 pb-3 backdrop-blur dark:bg-zinc-950/90"
+    >
+      <div class="flex items-center justify-between gap-3">
       <div class="flex items-center gap-2.5">
         <span
           aria-hidden="true"
@@ -162,18 +169,6 @@
         </span>
       </div>
       <div class="flex items-center gap-2">
-        <span
-          class="mr-1 hidden items-center gap-1.5 rounded-full border border-zinc-200 px-2.5 py-1 text-xs text-zinc-500 sm:inline-flex dark:border-zinc-700"
-          role="status"
-        >
-          <span
-            aria-hidden="true"
-            class="h-1.5 w-1.5 rounded-full {scanStore.scanning
-              ? 'animate-pulse bg-amber-500'
-              : 'bg-emerald-500'}"
-          ></span>
-          {statusLabel}
-        </span>
         <button
           class={iconBtn}
           onclick={() => historyStore.openDialog()}
@@ -200,6 +195,7 @@
             {#if dark}<Sun size={16} />{:else}<Moon size={16} />{/if}
           </span>
         </button>
+      </div>
       </div>
     </header>
 
@@ -276,11 +272,12 @@
             resources={g.resources}
             selected={scanStore.selected}
             totalBytes={totalReclaimable}
-            expanded={scanStore.expanded.includes(g.summary.provider)}
+            showPath={viewStore.showPaths}
+            expanded={viewStore.expanded.includes(g.summary.provider)}
             rescanning={scanStore.rescanning === g.summary.provider}
             onToggle={(id) => scanStore.toggle(id)}
             onToggleProvider={(prov) => scanStore.toggleProvider(prov)}
-            onExpand={(prov) => scanStore.toggleExpand(prov)}
+            onExpand={(prov) => viewStore.toggleExpand(prov)}
             onRescan={(prov) => scanStore.rescanProvider(prov)}
             onOpenDetail={(id) => scanStore.openDetail(id)}
           />
@@ -339,18 +336,6 @@
       </p>
     {/if}
 
-    <!-- Result: per-resource before/after (I8, G-REL-02) -->
-    {#if cleanupStore.results}
-      <ResultPanel
-        results={cleanupStore.results}
-        requestedBytes={cleanupStore.requestedBytes()}
-        freedBytes={cleanupStore.freedBytes()}
-        scanning={scanStore.scanning}
-        nameOf={(id) => cleanupStore.nameOf(id)}
-        onRescan={() => scanStore.start()}
-        onDone={() => cleanupStore.dismissResults()}
-      />
-    {/if}
     {#if cleanupStore.error}
       <p class="mt-4 rounded-lg bg-red-50 p-3 text-sm text-red-700 dark:bg-red-950 dark:text-red-300">
         Cleanup error: {cleanupStore.error}
@@ -381,19 +366,27 @@
     />
   {/if}
 
-  <!-- Confirmation (G-UI-01) -->
-  {#if cleanupStore.confirmOpen && cleanupStore.preview}
-    <ConfirmDialog
+  <!-- Cleanup flow: review → running → done (G-UI-01, I8, G-REL-02).
+       Stays mounted through running into done; closes via Done/Rescan. -->
+  {#if cleanupStore.confirmOpen || cleanupStore.cleaning || cleanupStore.results}
+    <CleanupFlowDialog
       preview={cleanupStore.preview}
       measuredAt={cleanupStore.previewAt}
       showItems={settingsStore.settings?.show_preview ?? true}
       cleaning={cleanupStore.cleaning}
       cancelling={cleanupStore.cancelling}
       progress={cleanupStore.progress}
+      results={cleanupStore.results}
       lookupImpact={(id) => impactById.get(id) ?? undefined}
+      nameOf={(id) => cleanupStore.nameOf(id)}
       onConfirm={() => cleanupStore.execute(scanStore.selected)}
       onCancel={() => cleanupStore.close()}
       onCancelCleanup={() => cleanupStore.cancel()}
+      onRescan={() => {
+        cleanupStore.closeFlow();
+        void scanStore.start();
+      }}
+      onDone={() => cleanupStore.closeFlow()}
     />
   {/if}
 
@@ -401,6 +394,8 @@
   {#if settingsStore.open && settingsStore.settings}
     <SettingsDialog
       settings={settingsStore.settings}
+      providers={settingsStore.providers}
+      {providerStats}
       saving={settingsStore.saving}
       error={settingsStore.error}
       onSave={(next) => handleSaveSettings(next)}

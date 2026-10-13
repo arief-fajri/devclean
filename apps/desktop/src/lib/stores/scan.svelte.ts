@@ -21,7 +21,6 @@ class ScanStore {
   progress = $state<ScanProgress | null>(null);
   summary = $state<ScanSummary | null>(null);
   selected = $state<string[]>([]);
-  expanded = $state<string[]>([]);
   detail = $state<Resource | null>(null);
   rescanning = $state<string | null>(null);
   error = $state<string | null>(null);
@@ -73,12 +72,6 @@ class ScanStore {
     this.selected = all
       ? this.selected.filter((s) => !ids.includes(s))
       : [...new Set([...this.selected, ...ids])];
-  }
-
-  toggleExpand(provider: string) {
-    this.expanded = this.expanded.includes(provider)
-      ? this.expanded.filter((p) => p !== provider)
-      : [...this.expanded, provider];
   }
 
   /** Drill-down for one resource id (I1: ids only, resolved server-side). */

@@ -19,20 +19,23 @@ cargo tauri dev
 ```
 
 Open the DevClean window → the summary panel shows reclaimable storage with a
-safe-to-clean split → click **Scan again** → 9 providers appear with byte
-counts and share percentages. The toolbar above the list offers global
-search, All/Safe/Review/Stale/Selected filters, and sorting (largest first
-by default); the stat tiles toggle the safety filter. Click a provider
-header to expand the project drill-down (per-provider rescan); click a
-project for details with its cleanup consequence. Selecting items raises
-the selection bar (safe/review split, Clear, Review & clean selected).
-Cancel works anytime via **Cancel scan** or **Cancel remaining** (cleanup).
-Cleanup always goes preview (review items first) → acknowledgement →
-result panel (requested → freed per resource). Scan roots, ignore list, and
-toggles live under the Settings dialog (persisted to disk since M3); past
-cleanups under History. The tray icon offers Show / Scan now / Quit;
-notifications fire only for completed scans/cleanups while the window is
-unfocused.
+safe-to-clean split → click **Scan again** → up to 9 providers appear with
+byte counts and share percentages. Providers you switched off in Settings are
+skipped entirely. The toolbar above the list offers global search,
+All/Safe/Review/Stale/Selected filters, sorting (largest first by default),
+and a Paths toggle; the stat tiles toggle the safety filter. A provider card
+starts collapsed (summary only) — click its row to reveal the items, each
+with its cleanup consequence and filesystem path. Selecting items raises the
+selection bar (safe/review split, Clear, Review & clean selected). Cleanup
+runs in one dialog across three phases: **review** (re-measured, review items
+first, acknowledgement required) → **running** (live progress bar + per-item
+state + Cancel remaining) → **done** (freed vs requested, per-resource
+before/after). The app stays responsive throughout — `cleanup` and
+`preview_cleanup` run off the UI thread. Scan roots, ignore list, provider
+toggles, and other options live under the Settings dialog (persisted to
+disk); past cleanups under History, grouped by day. The tray icon offers
+Show / Scan now / Quit; notifications fire only for completed
+scans/cleanups while the window is unfocused.
 
 Limits: each provider scan is bounded by 60s (`PROVIDER_SCAN_TIMEOUT`),
 each cleanup subprocess by 120s (`CLEANUP_COMMAND_TIMEOUT`, child killed
@@ -41,9 +44,10 @@ on expiry). Cancel settles in <1s (tested).
 **Your setup works if:**
 
 - `cargo tauri dev` opens a window (Vite at `http://localhost:1420`)
-- No `curl` needed — verify via the UI: Scan lists 9 providers
+- No `curl` needed — verify via the UI: Scan lists the enabled providers
   (`node_modules`, `Rust target`, `Go cache`, `Docker`, npm/pnpm/yarn,
-  Python, Cargo registry, Gradle, Xcode — absent tools simply report empty)
+  Python, Cargo registry, Gradle, Xcode — absent tools simply report empty,
+  and providers disabled in Settings never appear)
 - `cargo test --workspace` is green, `cargo clippy` has 0 warnings, `npm run check` has 0 errors, `npm test` (vitest) is green
 
 ## Prerequisites

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { formatBytes, formatPct, isStaleSignal, parseAgeDays } from "./format";
+import { formatBytes, formatPct, isStaleSignal, parseAgeDays, truncateMiddle } from "./format";
 
 describe("formatBytes", () => {
   it("handles zero and invalid input", () => {
@@ -24,6 +24,25 @@ describe("formatPct", () => {
     expect(formatPct(10, 0)).toBe("0%");
     expect(formatPct(200, 100)).toBe("100%");
     expect(formatPct(NaN, 100)).toBe("0%");
+  });
+});
+
+describe("truncateMiddle", () => {
+  it("keeps short paths untouched", () => {
+    expect(truncateMiddle("/tmp/x", 64)).toBe("/tmp/x");
+  });
+
+  it("keeps the tail (the distinguishing part) visible", () => {
+    const long = "/Users/somebody/Library/Developer/Xcode/DerivedData/my-huge-app-abc123";
+    const out = truncateMiddle(long, 40);
+    expect(out.length).toBe(40);
+    expect(out.startsWith("/Users/somebody")).toBe(true);
+    expect(out).toContain("…");
+    expect(out.endsWith("my-huge-app-abc123")).toBe(true);
+  });
+
+  it("degenerates safely for impossible maxLen", () => {
+    expect(truncateMiddle("/a/b/c", 4)).toBe("/a/b/c");
   });
 });
 
