@@ -5,6 +5,11 @@
 @theme {
   --animate-rise: rise 0.2s ease-out;
 
+  /* One source of truth for the sidebar width. The shell, the two fixed bars
+     and the nav all read this token, so the bars can never end up under the
+     sidebar or drift from it (see `w-sidebar` / `left-sidebar`). */
+  --spacing-sidebar: 14rem;
+
   @keyframes rise {
     from {
       opacity: 0;

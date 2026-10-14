@@ -8,7 +8,7 @@
 //! per-platform app data dir (never inside a scan root).
 
 use devclean_cleanup::CleanupEngine;
-use devclean_core::{app_data_dir, Resource, Settings, ThemeMode};
+use devclean_core::{app_data_dir, DiskFree, Resource, Settings, ThemeMode};
 use devclean_scanner::ScanManager;
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -25,6 +25,12 @@ pub struct AppState {
     pub settings_path: PathBuf,
     pub scan_cache_path: PathBuf,
     pub history_path: PathBuf,
+    /// Free space on the data volume, measured once per scan.
+    ///
+    /// The menu bar reads this rather than calling `get_disk_free`: a probe
+    /// that spawns `df` must never run on "the user opened a menu" (G-REL-01 —
+    /// no unbounded work on a UI path).
+    pub disk_free: Mutex<DiskFree>,
 }
 
 impl Default for AppState {
@@ -40,6 +46,11 @@ impl Default for AppState {
             settings_path,
             scan_cache_path: data_dir.join("scan-cache.json"),
             history_path: data_dir.join("history.jsonl"),
+            disk_free: Mutex::new(DiskFree {
+                available_bytes: 0,
+                total_bytes: 0,
+                known: false,
+            }),
         }
     }
 }
@@ -55,6 +66,15 @@ impl AppState {
         for r in resources {
             map.insert(r.id.clone(), r);
         }
+    }
+
+    /// Record the free space measured by the latest scan, for the menu bar.
+    pub fn store_disk_free(&self, free: DiskFree) {
+        *self.disk_free.lock().unwrap() = free;
+    }
+
+    pub fn disk_free(&self) -> DiskFree {
+        *self.disk_free.lock().unwrap()
     }
 
     /// Persist settings best-effort: a failed write is logged, never fatal

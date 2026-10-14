@@ -7,11 +7,13 @@
 │                    DevClean                     │
 ├─────────────────────────────────────────────────┤
 │ Svelte 5 (runes) + Tailwind                     │
-│   stores: scan, cleanup, settings               │
+│   App.svelte shell: Sidebar + lib/routes/*      │
+│   stores: nav, scan, cleanup, settings          │
 │   bridge: lib/tauri.ts (invoke + listen, typed) │
 │        │ Tauri commands / events                │
 │        ▼                                        │
 │ src-tauri (thin): commands · events · state     │
+│        · tray (menu bar; read-only, no cleanup)  │
 │        │                                        │
 │ ┌──────┴──────┐ ┌──────────┐ ┌───────────────┐  │
 │ │ ScanManager │ │ Providers│ │ CleanupEngine │  │
@@ -42,7 +44,7 @@ Cleanup (the only door):
 
 ```text
 UI selects ids → preview_cleanup() [re-measure + warnings]
-  → ConfirmDialog → cleanup(ids)
+  → CleanupFlowDialog (the one modal, shell-mounted) → cleanup(ids)
   → resolve id→path server-side → SafetyValidator
   → RemoveDir: remove_dir_all | RunCommand: fixed (program, args)
   → freed = before − after → emit cleanup_completed → UI result

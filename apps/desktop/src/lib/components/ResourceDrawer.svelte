@@ -1,4 +1,13 @@
 <script lang="ts">
+  /**
+   * Resource drill-down, as a non-modal right-hand drawer: the list stays
+   * visible behind it, because the question "why is this 12 GB?" is always
+   * asked about a row the user is looking at.
+   *
+   * Non-modal means non-blocking — but it still owns the keyboard while it is
+   * open (Esc closes, Tab stays inside, focus returns to the opener), so it
+   * is not a keyboard trap.
+   */
   import { formatBytes } from "$lib/format";
   import { safetyMeta } from "$lib/safety";
   import type { Resource } from "$lib/tauri";
@@ -20,6 +29,18 @@
   let copied = $state(false);
   let copyTimer: ReturnType<typeof setTimeout> | null = null;
 
+  let panel = $state<HTMLElement | null>(null);
+  let opener: HTMLElement | null = null;
+
+  $effect(() => {
+    opener = (document.activeElement as HTMLElement | null) ?? null;
+    panel?.focus();
+    return () => {
+      if (copyTimer) clearTimeout(copyTimer);
+      opener?.focus?.();
+    };
+  });
+
   function copyPath() {
     const done = () => {
       copied = true;
@@ -35,41 +56,65 @@
       done();
     }
   }
+
+  const FOCUSABLE =
+    'a[href],button:not([disabled]),input:not([disabled]),select:not([disabled]),textarea:not([disabled]),[tabindex]:not([tabindex="-1"])';
+
+  function onKeydown(e: KeyboardEvent) {
+    if (e.key === "Escape") {
+      e.stopPropagation();
+      onClose();
+      return;
+    }
+    if (e.key !== "Tab" || !panel) return;
+    const items = [...panel.querySelectorAll<HTMLElement>(FOCUSABLE)].filter(
+      (el) => el.offsetParent !== null,
+    );
+    if (items.length === 0) return;
+    const first = items[0];
+    const last = items[items.length - 1];
+    if (e.shiftKey && document.activeElement === first) {
+      e.preventDefault();
+      last.focus();
+    } else if (!e.shiftKey && document.activeElement === last) {
+      e.preventDefault();
+      first.focus();
+    }
+  }
 </script>
 
-<div
-  class="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
-  role="dialog"
-  aria-modal="true"
-  aria-label="Detail {resource.name}"
->
-  <div
-    class="flex max-h-[85vh] w-full max-w-md flex-col overflow-hidden rounded-xl bg-white shadow-xl dark:bg-zinc-900"
-  >
-    <!-- Sticky header (C5): name + safety badge + X on the right. -->
-    <header
-      class="flex shrink-0 items-start gap-3 border-b border-zinc-100 px-5 py-4 dark:border-zinc-800"
-    >
-      <h2 class="min-w-0 flex-1 truncate text-lg font-semibold text-zinc-900 dark:text-zinc-100">
-        {resource.name}
-      </h2>
-      <span
-        class="inline-flex shrink-0 items-center gap-1 rounded px-1.5 py-0.5 text-[11px] font-semibold uppercase {meta.badge}"
-      >
-        <span aria-hidden="true" class="inline-flex"><Icon size={11} strokeWidth={2.5} /></span>
-        {meta.label}
-      </span>
-      <button
-        class="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-zinc-500 hover:bg-zinc-100 hover:text-zinc-900 dark:hover:bg-zinc-800 dark:hover:text-zinc-100"
-        onclick={onClose}
-        aria-label="Close detail"
-      >
-        <span aria-hidden="true" class="flex"><X size={17} /></span>
-      </button>
-    </header>
+<svelte:window onkeydown={onKeydown} />
 
-    <!-- Scrollable body -->
-    <div class="min-h-0 flex-1 overflow-y-auto px-5 py-4">
+<div
+  bind:this={panel}
+  class="fixed inset-y-0 right-0 z-40 flex w-full max-w-[420px] animate-rise flex-col border-l border-zinc-200 bg-white shadow-2xl motion-reduce:animate-none dark:border-zinc-800 dark:bg-zinc-900"
+  role="dialog"
+  aria-modal="false"
+  aria-label="Detail {resource.name}"
+  tabindex={-1}
+>
+  <header
+    class="flex shrink-0 items-start gap-3 border-b border-zinc-100 px-5 py-4 dark:border-zinc-800"
+  >
+    <h2 class="min-w-0 flex-1 truncate text-lg font-semibold text-zinc-900 dark:text-zinc-100">
+      {resource.name}
+    </h2>
+    <span
+      class="inline-flex shrink-0 items-center gap-1 rounded px-1.5 py-0.5 text-[11px] font-semibold uppercase {meta.badge}"
+    >
+      <span aria-hidden="true" class="inline-flex"><Icon size={11} strokeWidth={2.5} /></span>
+      {meta.label}
+    </span>
+    <button
+      class="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-zinc-500 hover:bg-zinc-100 hover:text-zinc-900 dark:hover:bg-zinc-800 dark:hover:text-zinc-100"
+      onclick={onClose}
+      aria-label="Close detail"
+    >
+      <span aria-hidden="true" class="flex"><X size={17} /></span>
+    </button>
+  </header>
+
+  <div class="min-h-0 flex-1 overflow-y-auto px-5 py-4">
     <p class="text-sm text-zinc-600 dark:text-zinc-300">{consequence}</p>
     {#if resource.impact?.cost || resource.impact?.command}
       <p class="mt-1 text-xs text-zinc-500">
@@ -141,29 +186,27 @@
         </div>
       {/if}
     </dl>
-    </div>
-
-    <!-- Sticky footer -->
-    <footer
-      class="flex shrink-0 justify-end gap-2 border-t border-zinc-100 px-5 py-3 dark:border-zinc-800"
-    >
-      <button
-        class="rounded-lg px-4 py-2 text-sm text-zinc-600 hover:bg-zinc-100 dark:text-zinc-300 dark:hover:bg-zinc-800"
-        onclick={onClose}
-      >
-        Close
-      </button>
-      <button
-        class="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-700 disabled:opacity-50"
-        onclick={() => {
-          onToggle(resource.id);
-          onClose();
-        }}
-        disabled={!resource.retention_eligible}
-        title={resource.retention_eligible ? "" : "Kept by your retention policy"}
-      >
-        {selected ? "Deselect" : "Select for cleanup"}
-      </button>
-    </footer>
   </div>
+
+  <footer
+    class="flex shrink-0 justify-end gap-2 border-t border-zinc-100 px-5 py-3 dark:border-zinc-800"
+  >
+    <button
+      class="rounded-lg px-4 py-2 text-sm text-zinc-600 hover:bg-zinc-100 dark:text-zinc-300 dark:hover:bg-zinc-800"
+      onclick={onClose}
+    >
+      Close
+    </button>
+    <button
+      class="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-700 disabled:opacity-50"
+      onclick={() => {
+        onToggle(resource.id);
+        onClose();
+      }}
+      disabled={!resource.retention_eligible}
+      title={resource.retention_eligible ? "" : "Kept by your retention policy"}
+    >
+      {selected ? "Deselect" : "Select for cleanup"}
+    </button>
+  </footer>
 </div>

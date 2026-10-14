@@ -106,6 +106,18 @@ G-UI-01  Significant cleanup requires a confirmation dialog + re-measured previe
            the id set with a 300s TTL; `cleanup` REFUSES without a valid one while
            `require_confirmation` is on ✅ ·
            test — authorize_rejects_missing/expired/mismatched tokens ✅
+G-UI-02  The menu bar may read and navigate, never clean. "Review safe items" opens
+           the list with a filter; it does not select, preview or delete anything.
+           Enforcement: code — `on_menu_event` refuses any id outside
+           `MENU_ACTION_IDS` (tray.rs), and the list is read-only by construction:
+           the numbers come from the scan cache, free space from one probe per scan ·
+           test — the_menu_can_only_do_the_six_reviewed_actions (Rust) and
+           keeps_destructive_calls_out_of_the_tray_module (frontend) ✅
+G-UI-03  The cleanup confirmation is an interruption, not a page. It is mounted by
+           the shell, over every page, and swallows shell shortcuts while it is open.
+           Enforcement: code — `App.svelte` blocks `resolveHotkey` while the flow is
+           open; test — keeps_destructive_calls_out_of_every_page and
+           mounts_the_confirmation_flow_from_the_shell (frontend) ✅
 ```
 
 ### What changed in v0.5.0, and why the claims above changed
@@ -116,18 +128,7 @@ previously named mechanisms that did not exist:
 | Was | Now | Trigger |
 |---|---|---|
 | "G-UI-01 enforced by code" | enforced by `preview_token` in the engine | the old enforcement was a `tracing::debug!` |
-| "G-REL-02 freed = before−after" | `before−after` for every branch, including `RunCommand` | the old code compared against a sentinel path that is never a directory, so `freed` was always the full requested figure |
-| "G-SCAN progress reports completions" | `AtomicUsize` counter | `done` was the provider's index in the list, so it could run backwards |
-
-## 6. CI & AI (G-CI / G-AI)
-
-```text
-G-CI-01  Merging requires: cargo test + clippy 0 warnings + clean fmt + svelte-check 0 errors.
-           Enforcement: CI — .github/workflows/ci.yml ✅
-G-AI-01  AI Level A is for internal & reversible changes only. Contract/security/destructive/
-          dependency changes = Level B, requiring explicit human approval. See AGENTS.md.
-           Enforcement: process ✅
-```
+| v0.7.0 UI shell revamp (G-UI-02/03) | the menu-bar id allowlist + the page-level scan of `routes/*.svelte` | converting the dialogs into pages could have put a cleanup call one click from the list |
 
 ## Open gaps
 
@@ -137,6 +138,7 @@ G-AI-01  AI Level A is for internal & reversible changes only. Contract/security
   that was never shown to the user is refused, and numbers cannot go stale
   between preview and execute. What it cannot buy is protection from a
   hostile UI, which would need an out-of-process frontend.
+
 - **G-REL-05 — scan-time CLI probes have no timeout.** `run_tool` (provider
   queries) and `go_env` spawn processes without a deadline, and
   `tokio::time::timeout` around a `spawn_blocking` task does not kill the

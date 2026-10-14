@@ -1,6 +1,6 @@
 /**
  * Typed Tauri bridge — the ONLY module allowed to call `invoke`/`listen`.
- * Mirrors `docs/reference/tauri-contract.md` v0.5.0. Contract change here
+ * Mirrors `docs/reference/tauri-contract.md` v0.7.0. Contract change here
  * requires a contract doc update (G-API-01).
  */
 import { invoke } from "@tauri-apps/api/core";
@@ -231,3 +231,13 @@ export const onCleanupProgress = (cb: (p: CleanupProgress) => void): Promise<Unl
   listen<CleanupProgress>("cleanup_progress", (e) => cb(e.payload));
 export const onCleanupCompleted = (cb: (r: CleanupResult[]) => void): Promise<UnlistenFn> =>
   listen<CleanupResult[]>("cleanup_completed", (e) => cb(e.payload));
+
+/** v0.7.0: the menu bar asking the window to show a page. `route` is checked
+ * against `$lib/nav` before use — an unknown id must never navigate. */
+export interface TrayAction {
+  route: string;
+  filter?: string;
+}
+
+export const onTrayAction = (cb: (a: TrayAction) => void): Promise<UnlistenFn> =>
+  listen<TrayAction>("tray_action", (e) => cb(e.payload));

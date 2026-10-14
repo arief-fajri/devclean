@@ -5,8 +5,8 @@
 use crate::events::*;
 use crate::state::AppState;
 use devclean_core::{
-    CleanupPreview, CleanupResult, CleanupRun, DiskFree, HistoryEntry, ProviderInfo, Resource,
-    SafetyValidator, ScanRootCandidate, ScanSummary, Settings,
+    format_bytes, CleanupPreview, CleanupResult, CleanupRun, DiskFree, HistoryEntry, ProviderInfo,
+    Resource, SafetyValidator, ScanRootCandidate, ScanSummary, Settings,
 };
 use devclean_providers::{all_providers, Provider};
 use std::collections::HashMap;
@@ -86,6 +86,13 @@ pub async fn run_scan(app: &AppHandle, state: &AppState) -> Result<ScanSummary, 
         .scan_all(roots, &excluded, &disabled, Some(progress), Some(started))
         .await;
     state.store_resources(summary.resources.clone());
+    // One free-space probe per scan, never per menu open (G-REL-01): the menu
+    // bar reads this instead of shelling out while the user is looking at it.
+    state.store_disk_free(disk_free().unwrap_or(DiskFree {
+        available_bytes: 0,
+        total_bytes: 0,
+        known: false,
+    }));
     // Best-effort instant paint for the next startup (M3 scan cache).
     if let Err(e) = devclean_scanner::save_cached_summary(
         &state.scan_cache_path,
@@ -96,6 +103,7 @@ pub async fn run_scan(app: &AppHandle, state: &AppState) -> Result<ScanSummary, 
     }
     app.emit(SCAN_COMPLETED, &summary)
         .map_err(|e| e.to_string())?;
+    crate::tray::refresh(app, state);
     notify_if_background(
         app,
         "DevClean scan complete",
@@ -122,16 +130,6 @@ fn notify_if_background(app: &AppHandle, title: &str, body: &str) {
     if let Err(e) = app.notification().builder().title(title).body(body).show() {
         tracing::warn!("could not show notification: {e}");
     }
-}
-
-fn format_bytes(bytes: u64) -> String {
-    const UNITS: [&str; 5] = ["B", "KB", "MB", "GB", "TB"];
-    if bytes == 0 {
-        return "0 B".to_string();
-    }
-    let i = ((bytes as f64).log(1000.0) as usize).min(UNITS.len() - 1);
-    let v = bytes as f64 / 1000f64.powi(i as i32);
-    format!("{v:.1} {}", UNITS[i])
 }
 
 /// Last scan, instantly, if the cache matches the current scan roots.

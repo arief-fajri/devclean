@@ -45,7 +45,8 @@ cargo tauri dev
 **Your setup works if:**
 
 - The DevClean window opens (Vite at `http://localhost:1420`)
-- The **Scan** button lists 14 providers and finds your projects without any setup (see below)
+- **Overview** shows a reclaimable total and the **Scan now** button lists 14
+  providers without any setup (see below)
 - `cargo test --workspace` is green · `cargo clippy` has 0 warnings · `npm run check` has 0 errors
 
 Full details: [docs/development/developing.md](docs/development/developing.md).
@@ -55,8 +56,8 @@ Full details: [docs/development/developing.md](docs/development/developing.md).
 ```text
 devclean/
 ├── apps/desktop/          # Tauri app: Svelte 5 UI + thin src-tauri Rust layer
-│   ├── src/               # components, stores (runes), tauri bridge
-│   └── src-tauri/src/     # main.rs, commands.rs, events.rs, state.rs
+│   ├── src/               # App shell, routes, components, stores (runes), bridge
+│   └── src-tauri/src/     # main.rs, commands.rs, events.rs, state.rs, tray.rs
 ├── crates/
 │   ├── core/              # types, SafetyValidator, settings, preview tokens
 │   ├── providers/         # Provider trait + 14 resource providers
@@ -78,6 +79,26 @@ One-way dependencies: `core ← providers ← scanner/cleanup ← src-tauri ← 
 3. **Stable contract.** Adding/changing a Tauri command or event requires a `docs/reference/tauri-contract.md` update + test.
 4. **Safety first.** Read [docs/security.md](docs/security.md) and the `G-SAFE-*` guardrails before touching cleanup code.
 5. **Numbers are measured.** `freed_bytes` is `before − after` for every branch, including subprocess-backed cleanup. When the after-state cannot be measured, the result says `0` and why — it never asserts the requested figure was freed.
+
+## The window, and what is left when you close it
+
+The app is a sidebar with four pages — **Overview** (reclaimable total, free
+space, biggest reclaimers, stale count, last cleanup), **Resources** (the
+working list), **History** and **Settings**. `⌘1`…`⌘4` switch pages,
+`⌘R` scans, `⌘F` focuses search.
+
+Closing the window does not quit. DevClean stays in the **menu bar**, where one
+click opens a menu that answers the same questions without opening the window:
+how much is reclaimable, how much retention keeps, the three biggest
+reclaimers, the stale count, and a warning when the volume drops below 10%
+free. From there: Open DevClean · Scan now · Review safe items · History ·
+Settings · Quit.
+
+**No menu item can delete anything.** A cleanup always opens the
+confirmation modal in the window, with a re-measured preview — the menu bar is
+diagnostics and navigation only, and two guardrails enforce it
+([G-UI-02](docs/development/methodology/guardrails.md),
+[G-UI-03](docs/development/methodology/guardrails.md)).
 
 ## Scan roots are detected, not typed
 

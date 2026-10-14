@@ -163,3 +163,59 @@ export function pruneExpanded(expanded: string[], present: string[]): string[] {
   const alive = new Set(present);
   return expanded.filter((p) => alive.has(p));
 }
+
+/** One line of the Overview's "Where the space is" card. */
+export interface ProviderSlice {
+  /** Provider id, or null on the aggregate row. */
+  provider: string | null;
+  label: string;
+  bytes: number;
+  resourceCount: number;
+  /** True for the trailing "everything else" row. */
+  isOther: boolean;
+}
+
+/** How many providers the Overview lists before it aggregates the rest. */
+export const OVERVIEW_PROVIDER_LIMIT = 9;
+
+/**
+ * The biggest reclaimers, capped, with everything else rolled into one honest
+ * trailing row.
+ *
+ * The cap exists because a card with five rows in a two-column grid leaves half
+ * its height empty, while an uncapped list can run to fourteen rows and push the
+ * page's other cards off the fold. Aggregating rather than truncating keeps the
+ * card's headline (`reclaimable_bytes`) reconcilable with the rows shown: the
+ * tail is named and counted, never silently dropped.
+ */
+export function topProviders(summary: ScanSummary, limit = OVERVIEW_PROVIDER_LIMIT): ProviderSlice[] {
+  const ranked = summary.providers
+    .filter((p) => p.reclaimable_bytes > 0)
+    .slice()
+    .sort((a, b) => b.reclaimable_bytes - a.reclaimable_bytes);
+
+  const head = ranked.slice(0, limit).map<ProviderSlice>((p) => ({
+    provider: p.provider,
+    label: p.name,
+    bytes: p.reclaimable_bytes,
+    resourceCount: p.resource_count,
+    isOther: false,
+  }));
+
+  const tail = ranked.slice(limit);
+  if (tail.length === 0) return head;
+
+  const providers = tail.length;
+  const label =
+    providers === 1 ? `Other · ${tail[0].name}` : `Other · ${providers} providers`;
+  return [
+    ...head,
+    {
+      provider: null,
+      label,
+      bytes: tail.reduce((acc, p) => acc + p.reclaimable_bytes, 0),
+      resourceCount: tail.reduce((acc, p) => acc + p.resource_count, 0),
+      isOther: true,
+    },
+  ];
+}

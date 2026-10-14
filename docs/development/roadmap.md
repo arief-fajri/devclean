@@ -108,8 +108,9 @@ regression tests), clippy 0 warnings, fmt clean, `svelte-check` 0 errors
 [x] Docker images/volumes behind `docker_prune_scope` + privileged opt-in
 [x] Global system caches (Chrome, Homebrew, bun, VS Code, gopls, node-gyp, uv)
 [x] Backend-enforced confirmation (preview token), not a UI checkbox
-[x] UI: 4-tab Settings, scan progress replacing the safe bar, app/tray icon,
-      sticky modal headers with a close button
+[x] UI: Settings in 4 sections, scan progress replacing the safe bar,
+      app/tray icon, sticky modal headers with a close button
+      (the modal Settings became a page in v0.7.0)
 ```
 
 Evidence: 122 Rust tests + 30 frontend tests green; clippy 0 warnings; fmt
@@ -145,6 +146,30 @@ and the SQLite cutoff computed in seconds against a millisecond column.
 Evidence: `cargo test` 46 passed (incl. the 289-vs-1 history regression),
 clippy 0 warnings, fmt clean, `svelte-check` 0 errors 0 warnings,
 `vite build` ok, `vitest` 42 passed.
+
+## M4 — UI shell revamp + menu bar quick actions ✅ (v0.7.0, done)
+
+```text
+[x] Sidebar shell replaces the header; four pages instead of four dialogs
+    (Overview · Resources · History · Settings), landing on Overview
+[x] Resource drill-down became a non-modal right-hand drawer, not a page
+[x] Cleanup confirmation deliberately stays the ONLY modal (G-UI-03)
+[x] ⌘1…⌘4 pages, ⌘R scan, ⌘, settings, ⌘F focus search, per-page scroll restore
+[x] Menu bar: one click (either button) opens a Docker-style menu with a
+    read-only info block — reclaimable, kept, top three providers, stale count,
+    low-disk warning — plus six actions, none of which can delete (G-UI-02)
+[x] Closing the window hides it; the app stays in the menu bar (Quit exits)
+[x] Tray artwork re-framed: 36×36 (18pt @2x), glyph centred at ~89% of the canvas
+[x] Free space measured once per scan — opening the menu never spawns a process
+```
+
+Fixed along the way: the tray icon was 44×44 with the glyph at 64% of the frame
+and 6px below centre (it looked small and sunken); the item was also inert —
+left-clicking a visible window only re-showed it, and closing the window exited
+the app, so no menu action was ever reachable.
+
+Evidence: 140 Rust tests + 65 frontend tests green; clippy 0 warnings; fmt
+clean; svelte-check 0 errors 0 warnings; vite build ok.
 
 ## V1.0 (recommended scope)
 

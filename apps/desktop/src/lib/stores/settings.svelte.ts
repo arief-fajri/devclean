@@ -1,5 +1,6 @@
 /**
- * Settings store: scan roots + confirmation toggles.
+ * Settings store: scan roots + confirmation toggles. Settings are a page
+ * now (v0.7.0), so there is no open/close state left to track.
  * Backend persistence is in-memory (file persistence = M3, per contract);
  * the safety validator still re-checks every path (I2, I7).
  */
@@ -16,7 +17,6 @@ class SettingsStore {
   settings = $state<Settings | null>(null);
   /** Backend registry + enabled flags (contract v0.4.0 `get_providers`). */
   providers = $state<ProviderInfo[]>([]);
-  open = $state(false);
   saving = $state(false);
   error = $state<string | null>(null);
   /** `detect_scan_roots` result (contract v0.5.0). */
@@ -58,16 +58,6 @@ class SettingsStore {
     }
   }
 
-  async openDialog() {
-    await this.load();
-    this.error = null;
-    this.open = true;
-  }
-
-  close() {
-    this.open = false;
-  }
-
   /** Save; returns true when the caller should rescan (roots, exclusions
    * or provider set changed). */
   async save(next: Settings): Promise<boolean> {
@@ -92,7 +82,6 @@ class SettingsStore {
       return false;
     } finally {
       this.saving = false;
-      this.open = false;
     }
   }
 

@@ -7,6 +7,7 @@
 //! core <- providers <- scanner / cleanup <- src-tauri <- UI
 //! ```
 
+pub mod format;
 pub mod limits;
 pub mod preview_token;
 pub mod safety;
@@ -14,6 +15,7 @@ pub mod settings;
 pub mod system;
 pub mod types;
 
+pub use format::{format_age, format_bytes};
 pub use limits::{CLEANUP_COMMAND_TIMEOUT, PROVIDER_SCAN_TIMEOUT};
 pub use preview_token::{authorize, GateError, PreviewToken, PREVIEW_TTL_SECS};
 

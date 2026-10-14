@@ -7,7 +7,9 @@ import {
   DEFAULT_VIEW,
   matchesQuery,
   needsReview,
+  OVERVIEW_PROVIDER_LIMIT,
   pruneExpanded,
+  topProviders,
   type ViewOptions,
 } from "./view";
 import type { Resource, ScanSummary } from "./tauri";
@@ -215,5 +217,96 @@ describe("pruneExpanded", () => {
 
   it("handles an empty list", () => {
     expect(pruneExpanded([], ["a"])).toEqual([]);
+  });
+});
+
+
+describe("topProviders", () => {
+  /** `n` providers of `bytes` each, named in order. */
+  function withProviders(n: number, bytes: (i: number) => number, count = 1) {
+    const providers = Array.from({ length: n }, (_, i) => ({
+      provider: `p${i}`,
+      name: `Provider ${i}`,
+      total_bytes: bytes(i),
+      reclaimable_bytes: bytes(i),
+      resource_count: count,
+    }));
+    return {
+      total_bytes: 1000,
+      reclaimable_bytes: providers.reduce((a, p) => a + p.reclaimable_bytes, 0),
+      retention_blocked_bytes: 0,
+      providers,
+      resources: [],
+    };
+  }
+
+  it("lists the biggest reclaimers first", () => {
+    const rows = topProviders(withProviders(3, (i) => (i + 1) * 100));
+    expect(rows.map((r) => r.bytes)).toEqual([300, 200, 100]);
+    expect(rows.map((r) => r.provider)).toEqual(["p2", "p1", "p0"]);
+  });
+
+  it("drops providers holding nothing reclaimable", () => {
+    const rows = topProviders(withProviders(3, (i) => (i === 0 ? 0 : 500)));
+    expect(rows.map((r) => r.provider)).toEqual(["p1", "p2"]);
+  });
+
+  it("stays within the list length the Overview was designed for", () => {
+    // Feedback round: the card must not leave half its height empty, and must
+    // not push the other cards off the fold.
+    expect(OVERVIEW_PROVIDER_LIMIT).toBeGreaterThanOrEqual(8);
+    expect(OVERVIEW_PROVIDER_LIMIT).toBeLessThanOrEqual(12);
+  });
+
+  it("caps the list and names the tail instead of hiding it", () => {
+    const n = OVERVIEW_PROVIDER_LIMIT + 4;
+    const rows = topProviders(withProviders(n, (i) => (n - i) * 100));
+    expect(rows).toHaveLength(OVERVIEW_PROVIDER_LIMIT + 1);
+    const other = rows[rows.length - 1];
+    expect(other.isOther).toBe(true);
+    expect(other.label).toBe("Other · 4 providers");
+  });
+
+  it("the aggregate reconciles with the headline", () => {
+    const n = OVERVIEW_PROVIDER_LIMIT + 4;
+    const summary = withProviders(n, (i) => (n - i) * 100);
+    const rows = topProviders(summary);
+    // every reclaimable byte is either on a row or inside "Other"
+    expect(rows.reduce((a, r) => a + r.bytes, 0)).toBe(summary.reclaimable_bytes);
+    expect(rows.slice(0, OVERVIEW_PROVIDER_LIMIT).reduce((a, r) => a + r.bytes, 0)).toBeGreaterThan(0);
+  });
+
+  it("the aggregate carries the resources it stands for", () => {
+    const n = OVERVIEW_PROVIDER_LIMIT + 3;
+    const tail = 3;
+    const rows = topProviders(withProviders(n, (i) => (n - i) * 10, 2));
+    const other = rows[rows.length - 1];
+    expect(other.isOther).toBe(true);
+    expect(other.resourceCount).toBe(2 * tail);
+  });
+
+  it("adds no aggregate when everything fits", () => {
+    const rows = topProviders(withProviders(4, (i) => (i + 1) * 10));
+    expect(rows).toHaveLength(4);
+    expect(rows.some((r) => r.isOther)).toBe(false);
+  });
+
+  it("names the single tail provider instead of counting it", () => {
+    const n = OVERVIEW_PROVIDER_LIMIT + 1;
+    const rows = topProviders(withProviders(n, (i) => (n - i) * 10));
+    const other = rows[rows.length - 1];
+    expect(other.isOther).toBe(true);
+    expect(other.label).toBe(`Other · Provider ${n - 1}`);
+    expect(other.provider).toBeNull();
+  });
+
+  it("honours an explicit limit", () => {
+    const rows = topProviders(withProviders(10, (i) => (10 - i) * 10), 3);
+    expect(rows).toHaveLength(4);
+    expect(rows.slice(0, 3).map((r) => r.provider)).toEqual(["p0", "p1", "p2"]);
+  });
+
+  it("returns nothing when the scan found nothing", () => {
+    expect(topProviders(withProviders(0, () => 0))).toEqual([]);
   });
 });

@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { navStore } from "$lib/stores/nav.svelte";
   import { viewStore } from "$lib/stores/view.svelte";
   import { Search, X, Zap } from "lucide-svelte";
 
@@ -43,6 +44,15 @@
       searchEl?.focus();
     }
   }
+
+  // ⌘F from any page lands here: consume the request once, so returning to
+  // the list later never steals focus.
+  $effect(() => {
+    if (navStore.pendingSearchFocus) {
+      navStore.pendingSearchFocus = false;
+      searchEl?.focus();
+    }
+  });
 </script>
 
 <svelte:window onkeydown={onWindowKey} />

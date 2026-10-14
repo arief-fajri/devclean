@@ -87,7 +87,15 @@ cargo tauri dev                        # run from root (frontendDist ../dist)
 - `crates/scanner/` — concurrent `ScanManager` + last-scan cache.
 - `crates/cleanup/` — `preview` + safety-validated executor.
 - `apps/desktop/src-tauri/src/` — thin layer: `commands.rs` (9 commands), `events.rs`, `state.rs`. No filesystem logic beyond wiring.
-- `apps/desktop/src/` — Svelte 5 (runes) + Tailwind only: `lib/tauri.ts`, `lib/stores/`, `lib/components/`, `App.svelte`.
+- `apps/desktop/src/` — Svelte 5 (runes) + Tailwind only:
+  - `App.svelte` — the shell: sidebar, page switch, selection bar, resource
+    drawer, and the cleanup-flow modal (the only modal; G-UI-03).
+  - `lib/routes/` — one file per page (Overview, Resources, History,
+    Settings). Pages may not call the cleanup API (`architecture.test.ts`).
+  - `lib/nav.ts` — pure page ids, titles, ⌘-shortcuts, and the validation the
+    `tray_action` event is checked against. Pure + unit-tested, like
+    `lib/view.ts`.
+  - `lib/tauri.ts`, `lib/stores/`, `lib/components/` (incl. `Sidebar`).
 
 ## Hard rules
 

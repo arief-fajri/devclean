@@ -12,17 +12,14 @@ class HistoryStore {
   runs = $state<CleanupRun[]>([]);
   /** True when the backend may have more runs than we loaded. */
   truncated = $state(false);
-  open = $state(false);
   loading = $state(false);
   error = $state<string | null>(null);
 
-  async openDialog() {
-    this.open = true;
+  /** One read per visit: the page asks for data on entry, and the Overview
+   *  only needs the newest run. */
+  async ensureLoaded() {
+    if (this.loading || this.runs.length > 0) return;
     await this.refresh();
-  }
-
-  close() {
-    this.open = false;
   }
 
   async refresh() {
@@ -31,7 +28,7 @@ class HistoryStore {
     try {
       const limit = 50;
       this.runs = await getHistoryRuns(limit);
-      // The backend caps at 200; we ask for fewer so the dialog stays
+      // The backend caps at 200; we ask for fewer so the page stays
       // scannable, and say so honestly rather than implying "everything".
       this.truncated = this.runs.length >= limit;
     } catch (e) {

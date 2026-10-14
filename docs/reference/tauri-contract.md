@@ -2,7 +2,7 @@
 
 > The single document defining what the frontend may see. Changing this file
 > = changing the contract → requires human approval (Level B) + a regression
-> test. Version: **v0.6.0 (run-level history, targeted provider scan)**.
+> test. Version: **v0.7.0 (menu bar quick actions, page navigation)**.
 
 ## Commands (15)
 
@@ -24,7 +24,7 @@
 | `get_disk_free` | — | `DiskFree` | Free/total bytes of the data volume; `known: false` when unavailable (v0.5.0) |
 | `get_history_runs` | `{limit?: number}` | `CleanupRun[]` | Newest cleanup **runs** (default 20, cap 200) with their entries attached; tail-read (v0.6.0) |
 
-## Events (7)
+## Events (8)
 
 | Event | Payload | When |
 |---|---|---|
@@ -35,6 +35,7 @@
 | `cleanup_started` | `string[]` (ids) | Cleanup begins |
 | `cleanup_progress` | `{done, total}` | One per finished item |
 | `cleanup_completed` | `CleanupResult[]` | All ids processed |
+| `tray_action` | `{route: string, filter?: string}` | The menu bar asked the window to show a page (v0.7.0). Emitted **after** the window is brought forward. The UI validates `route` against its own page table and ignores anything else |
 
 ## Types (summary; canonical in `crates/core/src/types.rs`)
 
@@ -127,9 +128,51 @@ Not:
    backwards or report `N/N` with work pending).
 3. `cleanup` returns `Err` (not a per-item failure) when a required
    `preview_token` is missing, expired, or covers a different id set.
+4. **Closing the window hides it (v0.7.0).** The app keeps running in the menu
+   bar; only `Quit DevClean` exits. Before this, closing the last window made
+   the runtime exit (`tauri-runtime-writ` exits on `RunEvent::ExitRequested`
+   when the last window is destroyed), which silently removed the tray icon
+   and made every menu action unreachable.
+5. **Navigation is frontend-local.** The page id lives in `$lib/nav` and is
+   never sent to the backend; a reload always starts on Overview. No command
+   was added to support the sidebar.
+
+## Menu bar surface (v0.7.0)
+
+Not an IPC contract, but caller-visible: the menu bar is the only part of
+DevClean a user can reach when the window is closed.
+
+| Item | Action |
+|---|---|
+| `open` | Show and focus the window |
+| `scan` | `run_scan` in the background — **never** a cleanup |
+| `review` | Show the window on the Resources page with the safe filter applied |
+| `history` | Show the window on the History page |
+| `settings` | Show the window on the Settings page |
+| `quit` | Exit the app |
+
+One click of either button opens the menu (`show_menu_on_left_click`); the
+info block above the actions is rebuilt from the on-disk scan cache, and
+`open`/`review`/`history`/`settings` additionally emit `tray_action`. There
+is no destructive item — see G-UI-02 in `docs/development/methodology/guardrails.md`.
 
 ## Contract changelog
 
+- `v0.7.0` — menu bar quick actions + page navigation. **No command was
+  added or changed.**
+  - `+tray_action` event (`{route, filter?}`), emitted only after the window
+    is shown; the frontend validates the route id.
+  - Closing the window hides it instead of exiting (behavioural note 4).
+  - Menu bar: one click opens a read-only info block (reclaimable, kept,
+    top three providers, stale count, low-disk warning) plus the six actions
+    above. Numbers come from the scan cache and from free space measured once
+    per scan — opening the menu never spawns a process or starts a scan.
+  - Regression tests: `the_menu_can_only_do_the_six_reviewed_actions`,
+    `chips_are_square_and_actually_paint_something`, `headline_reports_reclaimable_and_kept`,
+    `low_disk_only_speaks_up_when_the_disk_is_actually_low` (Rust);
+    `keeps destructive calls out of the tray module`,
+    `keeps destructive calls out of every page`, `stays out of the way while
+    the user types`, `navigates on ⌘1…⌘4` (frontend).
 - `v0.6.0` — run-level history + targeted provider scan.
   - `+get_history_runs` → `CleanupRun[]`; `HistoryEntry.run_id?`
     (`#[serde(default)]`, so every pre-v0.6 history line still reads — legacy

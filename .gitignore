@@ -4,6 +4,7 @@
 *.pdb
 
 # Frontend
+node_modules/
 apps/desktop/node_modules/
 apps/desktop/dist/
 apps/desktop/.svelte-kit/
@@ -28,3 +29,7 @@ Thumbs.db
 .env
 .env.*
 !.env.example
+
+# Python bytecode (tools/)
+__pycache__/
+*.pyc
