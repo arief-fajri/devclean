@@ -20,6 +20,11 @@ pub type ProgressFn = Box<dyn Fn(&str, usize, usize) + Send + Sync>;
 /// v0.5.0). A no-op when not supplied.
 pub type StartedFn = Box<dyn Fn(&str) + Send + Sync>;
 
+/// How many providers walk the filesystem at the same time by default
+/// (G-SCAN-01). A scan is I/O bound, so raising this is not free: it costs
+/// page cache and, on spinning disks, head thrash. `bench_scan` measures it.
+pub const DEFAULT_SCAN_CONCURRENCY: usize = 4;
+
 pub struct ScanManager {
     providers: Vec<Arc<dyn Provider>>,
     semaphore: Arc<Semaphore>,
@@ -37,13 +42,29 @@ impl Default for ScanManager {
 
 impl ScanManager {
     pub fn with_config(providers: Vec<Arc<dyn Provider>>, timeout: Duration) -> Self {
+        Self::with_concurrency(providers, timeout, DEFAULT_SCAN_CONCURRENCY)
+    }
+
+    /// Same, with the fan-out width chosen by the caller. Used by the
+    /// concurrency benchmark; the app itself always takes the default.
+    pub fn with_concurrency(
+        providers: Vec<Arc<dyn Provider>>,
+        timeout: Duration,
+        max_concurrent: usize,
+    ) -> Self {
         Self {
             providers,
-            // Bounded concurrency: at most 4 providers scan at once (G-SCAN-01).
-            semaphore: Arc::new(Semaphore::new(4)),
+            // Bounded concurrency: at most `max_concurrent` providers scan at
+            // once (G-SCAN-01). Zero would deadlock, so it is never allowed.
+            semaphore: Arc::new(Semaphore::new(max_concurrent.max(1))),
             cancelled: Arc::new(AtomicBool::new(false)),
             timeout,
         }
+    }
+
+    /// The fan-out width this manager was built with.
+    pub fn max_concurrent(&self) -> usize {
+        self.semaphore.available_permits().max(1)
     }
     pub fn cancel(&self) {
         self.cancelled.store(true, Ordering::SeqCst);
@@ -612,5 +633,34 @@ mod tests {
             seen.iter().map(|(d, _)| *d).collect::<Vec<_>>(),
             vec![1, 2, 3]
         );
+    }
+}
+
+#[cfg(test)]
+mod concurrency_tests {
+    use super::*;
+
+    /// The fan-out width is a measured decision, not a preference: changing it
+    /// silently would trade disk behaviour nobody asked for. This pins the
+    /// default so a change has to be deliberate (and benchmarked).
+    #[test]
+    fn the_default_fan_out_is_four() {
+        assert_eq!(DEFAULT_SCAN_CONCURRENCY, 4);
+        assert_eq!(ScanManager::default().max_concurrent(), 4);
+    }
+
+    #[test]
+    fn a_zero_width_would_deadlock_and_is_clamped_away() {
+        let m = ScanManager::with_concurrency(all_providers(), Duration::from_secs(1), 0);
+        assert!(
+            m.max_concurrent() >= 1,
+            "a semaphore of 0 would never let a provider scan"
+        );
+    }
+
+    #[test]
+    fn the_width_is_whatever_the_caller_asked_for() {
+        let m = ScanManager::with_concurrency(all_providers(), Duration::from_secs(1), 8);
+        assert_eq!(m.max_concurrent(), 8);
     }
 }

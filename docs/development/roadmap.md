@@ -212,45 +212,4 @@ cleanup history, dark mode, tray, Windows + macOS + Linux.
 
 Scheduled cleanup, Docker image analysis, duplicate detection, disk trend,
 scheduled recommendations. Monetization (Pro: analytics/scheduled/rules) only
-after product-market fit — never put a subscription into core cleanup.## v0.7.1 — UI polish (done)
-
-```text
-[x] Overview: "Where the space is" lists up to OVERVIEW_PROVIDER_LIMIT providers
-    with the tail aggregated as a named "Other · N providers" row, and the CTA
-    pinned to the card's bottom edge. Sorting, capping and the aggregate live in
-    `topProviders` (view.ts), unit-tested — including a check that the rows
-    always reconcile with the headline figure.
-[x] Settings: sections are a horizontal tab strip again (roving tabindex, arrow /
-    Home / End keys), and the Save bar is `fixed` instead of `sticky` — `sticky`
-    only pins while the page is taller than the window, so on a short section
-    the bar floated in the middle of the window.
-[x] One `--spacing-sidebar` token now drives the sidebar and both fixed bars, so
-    they cannot drift; the selection bar no longer runs underneath the sidebar.
-[x] Tray icon rewritten: the PNG had been written as greyscale *without* an alpha
-    channel, and macOS paints a template image from alpha — the menu bar showed a
-    solid white square. Now a bolder, simplified sprout, generated together with
-    its SVG by tools/make_tray_icon.py, and guarded by tray-icon.test.ts (G-UI-04).
-```
-
-## M5 — UI regression coverage (not started)
-
-```text
-[ ] Component tests for the shell: sidebar navigation, page switch, drawer
-    focus/close, cleanup-flow keyboard blocking.
-    Blocked on: a DOM environment (jsdom / @testing-library/svelte). v0.7.0 kept
-    the dependency surface unchanged and moved the rules that could be tested
-    without a DOM into `lib/nav.ts` and `architecture.test.ts`, but a visual
-    regression (a stretched icon, a collapsed row) is still invisible to CI.
-```
-
-## V1.0 (recommended scope)
-
-Dashboard, filesystem scanner, node_modules, npm/pnpm cache, Go cache,
-Docker build cache, Rust target, scan progress, cleanup preview, safe cleanup,
-cleanup history, dark mode, tray, Windows + macOS + Linux.
-
-## V2.0 (ideas, not committed)
-
-Scheduled cleanup, Docker image analysis, duplicate detection, disk trend,
-scheduled recommendations. Monetization (Pro: analytics/scheduled/rules) only
 after product-market fit — never put a subscription into core cleanup.

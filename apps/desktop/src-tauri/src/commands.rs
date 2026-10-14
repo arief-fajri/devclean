@@ -3,10 +3,11 @@
 //! beyond wiring crates together. See `docs/reference/tauri-contract.md`.
 
 use crate::events::*;
+use crate::metrics::MemSample;
 use crate::state::AppState;
 use devclean_core::{
     format_bytes, CleanupPreview, CleanupResult, CleanupRun, DiskFree, HistoryEntry, ProviderInfo,
-    Resource, SafetyValidator, ScanRootCandidate, ScanSummary, Settings,
+    Resource, SafetyValidator, ScanRootCandidate, ScanSummary, Settings, PREVIEW_TIMEOUT,
 };
 use devclean_providers::{all_providers, Provider};
 use std::collections::HashMap;
@@ -54,6 +55,7 @@ pub async fn scan_all(app: AppHandle, state: State<'_, AppState>) -> Result<Scan
 /// Shared scan implementation, callable from the `scan_all` command and
 /// from the tray menu (M3) without going through the command layer.
 pub async fn run_scan(app: &AppHandle, state: &AppState) -> Result<ScanSummary, String> {
+    let mem_before = MemSample::capture();
     let (roots, excluded, disabled) = {
         let s = state.settings.lock().unwrap();
         (
@@ -103,6 +105,7 @@ pub async fn run_scan(app: &AppHandle, state: &AppState) -> Result<ScanSummary, 
     }
     app.emit(SCAN_COMPLETED, &summary)
         .map_err(|e| e.to_string())?;
+    tracing::info!("{}", MemSample::capture().delta_line(&mem_before, "scan"));
     crate::tray::refresh(app, state);
     notify_if_background(
         app,
@@ -136,11 +139,23 @@ fn notify_if_background(app: &AppHandle, title: &str, body: &str) {
 /// The UI shows this first, then runs a background rescan.
 #[tauri::command]
 pub fn get_cached_scan(state: State<'_, AppState>) -> Result<Option<ScanSummary>, String> {
+    cached_scan(&state)
+}
+
+/// Shared body of [`get_cached_scan`], separable so it can be tested without a
+/// Tauri `State` (which only exists inside a running app).
+fn cached_scan(state: &AppState) -> Result<Option<ScanSummary>, String> {
     let roots = state.settings.lock().unwrap().scan_roots.clone();
-    Ok(devclean_scanner::load_cached_summary(
-        &state.scan_cache_path,
-        &roots,
-    ))
+    let cached = devclean_scanner::load_cached_summary(&state.scan_cache_path, &roots);
+    if let Some(summary) = &cached {
+        // Seed the id registry from the cache too. Without this the window can
+        // show resources (from the cache) while the backend still knows none of
+        // them, and a cleanup started in that window re-measures to an empty
+        // preview — "Clean 0 B from 0 resources?". A full scan replaces all of
+        // this anyway; this only closes the window between launch and scan.
+        state.store_resources(summary.resources.clone());
+    }
+    Ok(cached)
 }
 
 /// Re-scan a single provider and merge the result into the stored state.
@@ -215,11 +230,62 @@ pub async fn preview_cleanup(
     state: State<'_, AppState>,
     ids: Vec<String>,
 ) -> Result<CleanupPreview, String> {
+    let started = std::time::Instant::now();
+    let before = MemSample::capture();
+    let requested = ids.len();
     let engine = state.cleanup.clone();
     let resources = state.snapshot_resources();
-    tokio::task::spawn_blocking(move || engine.preview(&ids, &resources, &providers_map()))
-        .await
-        .map_err(|e| e.to_string())
+    let result = bounded_preview(engine, ids, resources, PREVIEW_TIMEOUT).await;
+
+    match &result {
+        Ok(preview) => tracing::info!(
+            "preview_cleanup: {requested} ids -> {} resolved in {:?} · {}",
+            preview.items.len(),
+            started.elapsed(),
+            MemSample::capture().delta_line(&before, "preview")
+        ),
+        Err(e) => tracing::warn!(
+            "preview_cleanup: {requested} ids failed after {:?}: {e}",
+            started.elapsed()
+        ),
+    }
+    result
+}
+
+/// The re-measure, under a deadline (G-REL-01).
+///
+/// `preview_cleanup` walks every selected path; without the bound a large
+/// selection could leave the dialog waiting forever with nothing to show the
+/// user.
+async fn bounded_preview(
+    engine: devclean_cleanup::CleanupEngine,
+    ids: Vec<String>,
+    resources: HashMap<String, Resource>,
+    limit: std::time::Duration,
+) -> Result<CleanupPreview, String> {
+    let work =
+        tokio::task::spawn_blocking(move || engine.preview(&ids, &resources, &providers_map()));
+    bounded(work, limit).await
+}
+
+/// Run `work` under a deadline, turning an overrun into an explanation.
+///
+/// Split out from [`bounded_preview`] so the deadline itself can be tested
+/// with a deliberately slow future — testing it through a real preview would
+/// be a race against the machine's speed.
+async fn bounded<F, T, E>(work: F, limit: std::time::Duration) -> Result<T, String>
+where
+    F: std::future::Future<Output = Result<T, E>>,
+    E: std::fmt::Display,
+{
+    match tokio::time::timeout(limit, work).await {
+        Ok(Ok(value)) => Ok(value),
+        Ok(Err(e)) => Err(format!("preview failed to complete: {e}")),
+        Err(_) => Err(format!(
+            "Re-measuring took longer than {}s — try selecting fewer items.",
+            limit.as_secs()
+        )),
+    }
 }
 
 /// Execute cleanup behind the safety validator. Emits `cleanup_started` →
@@ -248,6 +314,7 @@ pub async fn cleanup(
     ids: Vec<String>,
     preview_token: Option<String>,
 ) -> Result<Vec<CleanupResult>, String> {
+    let mem_before = MemSample::capture();
     let settings = state.settings.lock().unwrap().clone();
 
     // Gate 1 — backend-enforced confirmation (G-UI-01).
@@ -323,6 +390,13 @@ pub async fn cleanup(
             }
         }
     }
+
+    // The child's peak is the interesting half here: `docker builder prune`
+    // and friends are where the memory actually goes, not this process.
+    tracing::info!(
+        "{}",
+        MemSample::capture().delta_line(&mem_before, "cleanup")
+    );
 
     // Drop cleaned resources from state so the dashboard refreshes.
     {
@@ -487,4 +561,129 @@ fn home_for_df() -> String {
     devclean_core::home_dir()
         .map(|p| p.display().to_string())
         .unwrap_or_else(|| "/".to_string())
+}
+
+#[cfg(test)]
+mod preview_deadline_tests {
+    use super::*;
+    use std::time::Duration;
+
+    #[tokio::test]
+    async fn work_that_overruns_its_budget_fails_instead_of_hanging() {
+        let slow = async {
+            tokio::time::sleep(Duration::from_secs(30)).await;
+            Ok::<u8, String>(1)
+        };
+        let err = bounded(slow, Duration::from_millis(20))
+            .await
+            .expect_err("an overrun must not succeed");
+        assert!(err.contains("longer than"), "unhelpful message: {err}");
+        assert!(err.contains("fewer items"), "should say what to do: {err}");
+    }
+
+    #[tokio::test]
+    async fn work_that_finishes_in_time_is_returned_untouched() {
+        let quick = async { Ok::<u8, String>(7) };
+        assert_eq!(bounded(quick, Duration::from_secs(30)).await.unwrap(), 7);
+    }
+
+    #[tokio::test]
+    async fn a_failed_preview_reports_its_own_error() {
+        let broken = async { Err::<u8, String>("disk went away".into()) };
+        let err = bounded(broken, Duration::from_secs(30))
+            .await
+            .expect_err("the worker's error must surface");
+        assert!(err.contains("disk went away"), "{err}");
+    }
+
+    #[tokio::test]
+    async fn a_preview_within_budget_returns_a_preview() {
+        // The real call path, with a generous budget so timing is irrelevant.
+        let engine = devclean_cleanup::CleanupEngine::default();
+        let ids = vec!["nm:does-not-matter".to_string()];
+        let resources: HashMap<String, Resource> = HashMap::new();
+        let preview = bounded_preview(engine, ids, resources, Duration::from_secs(30))
+            .await
+            .expect("an empty selection must preview fine");
+        assert!(preview.items.is_empty(), "unknown ids resolve to nothing");
+        assert!(
+            !preview.preview_token.is_empty(),
+            "a token is still issued for the requested id set"
+        );
+    }
+
+    #[test]
+    fn the_preview_budget_is_named_in_the_contract() {
+        // v0.7.2: the deadline is caller-visible behaviour, so it is asserted
+        // here rather than only documented.
+        assert_eq!(PREVIEW_TIMEOUT, Duration::from_secs(120));
+    }
+
+    #[test]
+    fn the_cached_summary_seeds_the_id_registry() {
+        // Reproduces the launch window: the window paints from the cache
+        // before the first scan fills `AppState::resources`. If the cache did
+        // not seed it, a cleanup started in that window resolves nothing.
+        let dir = std::env::temp_dir().join(format!("devclean-cache-seed-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).expect("temp dir");
+        let cache_path = dir.join("scan-cache.json");
+        let settings_path = dir.join("settings.json");
+        let history_path = dir.join("history.jsonl");
+
+        let summary = ScanSummary {
+            total_bytes: 10,
+            reclaimable_bytes: 10,
+            retention_blocked_bytes: 0,
+            providers: vec![devclean_core::ProviderSummary {
+                provider: "node_modules".into(),
+                name: "node_modules".into(),
+                total_bytes: 10,
+                reclaimable_bytes: 10,
+                resource_count: 1,
+            }],
+            resources: vec![Resource {
+                id: "nm:1".into(),
+                provider: "node_modules".into(),
+                name: "app/node_modules".into(),
+                path: "/tmp/app/node_modules".into(),
+                size_bytes: 10,
+                reclaimable_bytes: 10,
+                safety: devclean_core::SafetyLevel::Safe,
+                detail: None,
+                impact: None,
+                age_days: None,
+                retention_eligible: true,
+            }],
+        };
+        devclean_scanner::save_cached_summary(&cache_path, &["/tmp".into()], &summary)
+            .expect("cache");
+
+        let state = AppState {
+            scan: std::sync::Arc::new(devclean_scanner::ScanManager::default()),
+            cleanup: devclean_cleanup::CleanupEngine::default(),
+            resources: std::sync::Mutex::new(HashMap::new()),
+            settings: std::sync::Mutex::new(devclean_core::Settings {
+                scan_roots: vec!["/tmp".into()],
+                ..Default::default()
+            }),
+            settings_path,
+            scan_cache_path: cache_path,
+            history_path,
+            disk_free: std::sync::Mutex::new(DiskFree {
+                available_bytes: 0,
+                total_bytes: 0,
+                known: false,
+            }),
+        };
+
+        let cached = cached_scan(&state).expect("cached scan");
+        assert!(cached.is_some(), "the cache should have loaded");
+        assert_eq!(
+            state.snapshot_resources().len(),
+            1,
+            "the cached ids must be resolvable before the first scan finishes"
+        );
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 }

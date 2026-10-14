@@ -6,6 +6,7 @@
 
 mod commands;
 mod events;
+mod metrics;
 mod state;
 mod tray;
 

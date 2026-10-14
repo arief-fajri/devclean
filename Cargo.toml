@@ -24,6 +24,10 @@ tauri-plugin-notification = "2"
 # opencode.db cleanup. `bundled` compiles SQLite from source so there is
 # no system-library dependency; statements are always fixed constants.
 rusqlite = { version = "0.32", features = ["bundled"] }
+# `getrusage` for the memory numbers in the app log (see src-tauri/src/metrics.rs).
+# Already in the lockfile via tauri; declared here so the measurement is not
+# hand-rolled FFI.
+libc = "0.2"
 
 devclean-core = { path = "crates/core" }
 devclean-providers = { path = "crates/providers" }

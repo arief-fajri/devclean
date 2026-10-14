@@ -16,6 +16,7 @@ tauri-build = { version = "2", features = [] }
 [dependencies]
 serde.workspace = true
 serde_json.workspace = true
+libc.workspace = true
 tokio.workspace = true
 tracing.workspace = true
 thiserror.workspace = true

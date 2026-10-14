@@ -152,8 +152,4 @@ previously named mechanisms that did not exist:
   queries) and `go_env` spawn processes without a deadline, and
   `tokio::time::timeout` around a `spawn_blocking` task does not kill the
   blocking thread — it only stops awaiting. Bounded in practice by
-  `PROVIDER_SCAN_TIMEOUT` returning, but a hung probe leaves a thread parked.- **G-REL-05 — scan-time CLI probes have no timeout.** `run_tool` (provider
-  queries) and `go_env` spawn processes without a deadline, and
-  `tokio::time::timeout` around a `spawn_blocking` task does not kill the
-  blocking thread — it only stops awaiting. Bounded in practice by
   `PROVIDER_SCAN_TIMEOUT` returning, but a hung probe leaves a thread parked.

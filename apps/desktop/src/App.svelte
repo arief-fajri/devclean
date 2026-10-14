@@ -127,9 +127,10 @@
   });
 
   const barBusy = $derived(scanStore.scanning || cleanupStore.cleaning);
-  const flowOpen = $derived(
-    cleanupStore.confirmOpen || cleanupStore.cleaning || cleanupStore.results !== null,
-  );
+  // The flow dialog owns the whole path: it opens when the user asks for a
+  // review, stays open through the re-measure and any failure, and closes only
+  // on Done/Rescan.
+  const flowOpen = $derived(cleanupStore.confirmOpen);
 
   function onKeydown(e: KeyboardEvent) {
     const action = resolveHotkey(e);
@@ -225,9 +226,12 @@
 
 <!-- Cleanup flow: review → running → done (G-UI-01, I8, G-REL-02).
      Stays mounted through running into done; closes via Done/Rescan. -->
-{#if cleanupStore.confirmOpen || cleanupStore.cleaning || cleanupStore.results}
+{#if flowOpen}
   <CleanupFlowDialog
     preview={cleanupStore.preview}
+    previewing={cleanupStore.previewing}
+    previewError={cleanupStore.previewError}
+    selectedCount={scanStore.selected.length}
     measuredAt={cleanupStore.previewAt}
     showItems={settingsStore.settings?.show_preview ?? true}
     cleaning={cleanupStore.cleaning}
@@ -239,6 +243,11 @@
     nameOf={(id) => cleanupStore.nameOf(id)}
     onConfirm={handleConfirmClean}
     onCancel={() => cleanupStore.close()}
+    onRetry={() => cleanupStore.retryPreview(scanStore.selected)}
+    onRescanFromPreview={() => {
+      cleanupStore.close();
+      void scanStore.start();
+    }}
     onCancelCleanup={() => cleanupStore.cancel()}
     onRescan={handleRescanAfterCleanup}
     onDone={() => cleanupStore.closeFlow()}

@@ -1,6 +1,10 @@
 /**
- * Cleanup store: preview → confirm → execute → result.
- * The confirmation dialog (G-UI-01) is driven by `confirmOpen` + `preview`.
+ * Cleanup store: measure → confirm → execute → result.
+ *
+ * The dialog (G-UI-01) is open from the moment `openConfirm` is called, not
+ * from the moment the preview returns — `previewing` covers the re-measure,
+ * `previewError` keeps a failure inside the dialog where the user can read it
+ * and retry. Which phase is showing is decided by `$lib/cleanup-view`.
  */
 import {
   cancelCleanup,
@@ -16,6 +20,13 @@ class CleanupStore {
   cleaning = $state(false);
   cancelling = $state(false);
   confirmOpen = $state(false);
+  /** `preview_cleanup` is re-measuring every selected path. The dialog is
+   *  open during this: without it, clicking "clean" looks dead. */
+  previewing = $state(false);
+  /** The re-measure failed. Shown INSIDE the dialog, never swallowed. */
+  previewError = $state<string | null>(null);
+  /** Guards against a cancelled preview landing after a newer one started. */
+  previewRun = 0;
   preview = $state<CleanupPreview | null>(null);
   previewAt = $state<Date | null>(null);
   /** Proof the backend issued for this id set (v0.5.0). `cleanup` refuses
@@ -31,18 +42,44 @@ class CleanupStore {
   touchedProviders = $state<string[]>([]);
   error = $state<string | null>(null);
 
+  /**
+   * Open the confirmation and start re-measuring.
+   *
+   * The dialog opens *before* the await: `preview_cleanup` walks the selected
+   * paths, which can take a while, and showing nothing during that time is
+   * what made this flow feel broken. The dialog then shows the re-measure
+   * phase, and settles into review or into an error it can display.
+   */
   async openConfirm(ids: string[]) {
+    const run = ++this.previewRun;
     this.error = null;
     this.results = null;
+    this.preview = null;
+    this.previewAt = null;
+    this.previewToken = null;
+    this.previewError = null;
+    this.previewing = true;
+    this.confirmOpen = true;
     try {
-      this.preview = await previewCleanup(ids);
+      const preview = await previewCleanup(ids);
+      // A cancelled or superseded preview must not resurrect stale state.
+      if (run !== this.previewRun) return;
+      this.preview = preview;
       this.previewAt = new Date();
-      this.previewToken = this.preview.preview_token;
-      this.names = Object.fromEntries(this.preview.items.map((i) => [i.resource_id, i.name]));
-      this.confirmOpen = true;
+      this.previewToken = preview.preview_token;
+      this.names = Object.fromEntries(preview.items.map((i) => [i.resource_id, i.name]));
     } catch (e) {
-      this.error = String(e);
+      if (run !== this.previewRun) return;
+      this.previewError = String(e);
+    } finally {
+      if (run === this.previewRun) this.previewing = false;
     }
+  }
+
+  /** Re-measure the same selection after a failure, without closing first. */
+  async retryPreview(ids: string[]) {
+    this.confirmOpen = true;
+    await this.openConfirm(ids);
   }
 
   async execute(ids: string[]) {
@@ -108,14 +145,21 @@ class CleanupStore {
   }
 
   close() {
+    // Bump the run so an in-flight preview landing afterwards is dropped.
+    this.previewRun += 1;
     this.confirmOpen = false;
+    this.previewing = false;
+    this.previewError = null;
     this.preview = null;
     this.previewToken = null;
   }
 
   /** Close the whole flow dialog (Done/Rescan): dialog + preview + results. */
   closeFlow() {
+    this.previewRun += 1;
     this.confirmOpen = false;
+    this.previewing = false;
+    this.previewError = null;
     this.preview = null;
     this.previewToken = null;
     this.results = null;

@@ -2,7 +2,7 @@
 
 > The single document defining what the frontend may see. Changing this file
 > = changing the contract → requires human approval (Level B) + a regression
-> test. Version: **v0.7.0 (menu bar quick actions, page navigation)**.
+> test. Version: **v0.7.2 (bounded cleanup preview)**.
 
 ## Commands (15)
 
@@ -11,13 +11,13 @@
 | `scan_all` | — | `ScanSummary` | Scans every enabled provider (4 concurrent); emits `scan_started → scan_provider_started* → scan_progress* → scan_completed` |
 | `scan_provider` | `{provider: string}` | `ScanSummary` | Scans **only** that provider; merges into state so other providers' ids still resolve (v0.6.0) |
 | `get_resource_details` | `{id: string}` | `Resource \| null` | Drill-down for a single resource |
-| `preview_cleanup` | `{ids: string[]}` | `CleanupPreview` | Re-measures via the provider and issues a `preview_token`; **must** be called before `cleanup` when confirmation is on |
+| `preview_cleanup` | `{ids: string[]}` | `CleanupPreview` | Re-measures via the provider and issues a `preview_token`; **must** be called before `cleanup` when confirmation is on. **Fails after `PREVIEW_TIMEOUT` (120s)** instead of blocking (v0.7.2); ids the backend does not resolve are omitted from `items`, which the UI reports rather than presenting as "0 B" |
 | `cleanup` | `{ids: string[], preview_token?: string}` | `CleanupResult[]` | Refuses without a valid token when `require_confirmation`; emits `cleanup_started → cleanup_progress* → cleanup_completed`; appends to history |
 | `cancel_scan` | — | `()` | Sets the cancel flag; settles in <1s |
 | `cancel_cleanup` | — | `()` | Cancels the remaining queue; the in-flight item finishes |
 | `get_settings` | — | `Settings` | Loaded from disk at startup; empty `scan_roots` are re-seeded from the defaults |
 | `update_settings` | `{settings: Settings}` | `Settings` | Persists to disk |
-| `get_cached_scan` | — | `ScanSummary \| null` | Last scan iff roots match; `null` otherwise |
+| `get_cached_scan` | — | `ScanSummary \| null` | Last scan iff roots match; `null` otherwise. Also seeds the id registry from the cache, so a cleanup started before the first scan finishes still resolves its ids (v0.7.2) |
 | `get_history` | `{limit?: number}` | `HistoryEntry[]` | Newest entries, oldest first; default 100, cap 1000 |
 | `get_providers` | — | `ProviderInfo[]` | Every registered provider + its enabled state |
 | `detect_scan_roots` | — | `ScanRootCandidate[]` | Candidate folders under `$HOME`, largest cache first (v0.5.0) |
@@ -128,12 +128,19 @@ Not:
    backwards or report `N/N` with work pending).
 3. `cleanup` returns `Err` (not a per-item failure) when a required
    `preview_token` is missing, expired, or covers a different id set.
-4. **Closing the window hides it (v0.7.0).** The app keeps running in the menu
+4. **`preview_cleanup` is bounded (v0.7.2).** Re-measuring walks every
+   selected path; over 120s it fails with an explanation instead of leaving the
+   dialog waiting forever (G-REL-01, which previously covered scans and
+   subprocesses but not this).
+5. **A partial preview is reported, not hidden.** `preview_cleanup` silently
+   omitted ids it could not resolve; the UI now shows how many of the selected
+   resources were found, and refuses to present an empty preview as work.
+6. **Closing the window hides it (v0.7.0).** The app keeps running in the menu
    bar; only `Quit DevClean` exits. Before this, closing the last window made
    the runtime exit (`tauri-runtime-writ` exits on `RunEvent::ExitRequested`
    when the last window is destroyed), which silently removed the tray icon
    and made every menu action unreachable.
-5. **Navigation is frontend-local.** The page id lives in `$lib/nav` and is
+7. **Navigation is frontend-local.** The page id lives in `$lib/nav` and is
    never sent to the backend; a reload always starts on Overview. No command
    was added to support the sidebar.
 
@@ -158,6 +165,21 @@ is no destructive item — see G-UI-02 in `docs/development/methodology/guardrai
 
 ## Contract changelog
 
+- `v0.7.2` — bounded cleanup preview. **No command added, removed or
+  re-typed.**
+  - `preview_cleanup` now fails with an explanation after `PREVIEW_TIMEOUT`
+    (120s) rather than blocking indefinitely; `PREVIEW_TIMEOUT` is a new
+    `devclean_core::limits` constant.
+  - `get_cached_scan` seeds the id registry from the cache, so the launch
+    window between the cached paint and the first scan can no longer produce
+    an empty preview.
+  - Regression tests: `work_that_overruns_its_budget_fails_instead_of_hanging`,
+    `work_that_finishes_in_time_is_returned_untouched`,
+    `a_failed_preview_reports_its_own_error`,
+    `the_cached_summary_seeds_the_id_registry` (Rust);
+    `previewPhase`/`previewCoverage`/`coverageNote` (frontend).
+  - G-REL-01's "no external operation may block forever" now covers the
+    preview as well as scans and cleanup subprocesses.
 - `v0.7.0` — menu bar quick actions + page navigation. **No command was
   added or changed.**
   - `+tray_action` event (`{route, filter?}`), emitted only after the window

@@ -762,6 +762,7 @@ dependencies = [
  "devclean-core",
  "devclean-providers",
  "devclean-scanner",
+ "libc",
  "log",
  "serde",
  "serde_json",

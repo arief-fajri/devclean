@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { coverageNote, previewCoverage, previewPhase } from "$lib/cleanup-view";
   import { formatBytes, truncateMiddle } from "$lib/format";
   import { safetyMeta } from "$lib/safety";
   import type {
@@ -11,8 +12,18 @@
   import { LoaderCircle, TriangleAlert, X } from "lucide-svelte";
 
   interface Props {
-    /** Null when cleanup started without confirmation. */
+    /** Null while re-measuring, and when the re-measure failed. */
     preview: CleanupPreview | null;
+    /** `preview_cleanup` is walking the selected paths right now. */
+    previewing?: boolean;
+    /** Why the re-measure failed — rendered inside the dialog. */
+    previewError?: string | null;
+    /** How many resources the user selected, for honest coverage wording. */
+    selectedCount?: number;
+    /** Re-measure the same selection after a failure. */
+    onRetry?: () => void;
+    /** Start a fresh scan, for a preview that resolved nothing. */
+    onRescanFromPreview?: () => void;
     measuredAt: Date | null;
     showItems: boolean;
     cleaning: boolean;
@@ -34,6 +45,11 @@
 
   let {
     preview,
+    previewing = false,
+    previewError = null,
+    selectedCount = 0,
+    onRetry = () => {},
+    onRescanFromPreview = () => {},
     measuredAt,
     showItems,
     cleaning,
@@ -50,8 +66,24 @@
     onDone,
   }: Props = $props();
 
-  type Phase = "review" | "running" | "done";
-  const phase: Phase = $derived(results ? "done" : cleaning ? "running" : "review");
+  // Which phase is showing is decided by state in `$lib/cleanup-view`, so the
+  // dialog cannot render a review over a preview that never arrived.
+  const phase = $derived(
+    previewPhase({
+      previewing,
+      cleaning,
+      hasResults: results !== null,
+      previewFailed: previewError !== null,
+    }),
+  );
+  /** What the preview actually resolved, and what to say about it. */
+  const coverage = $derived(
+    previewCoverage(preview?.items.length ?? 0, selectedCount || preview?.items.length || 0),
+  );
+  const coverageText = $derived(coverageNote(coverage));
+  const nothingToClean = $derived(phase === "review" && coverage.kind === "empty");
+  /** Nothing can be confirmed until a preview exists with something in it. */
+  const canConfirm = $derived(preview !== null && coverage.kind !== "empty");
 
   // Explicit understanding gate (G-UI-01). Resets for every new preview.
   let acknowledged = $state(false);
@@ -85,9 +117,10 @@
 
   function onWindowKey(e: KeyboardEvent) {
     // Never dismiss mid-run; `done` closes like `Done`.
+    // Never dismiss mid-run; every other phase closes like its own button.
     if (e.key === "Escape" && phase !== "running") {
-      if (phase === "review" && !cleaning) onCancel();
-      else onDone();
+      if (phase === "done") onDone();
+      else onCancel();
     }
   }
 
@@ -168,17 +201,21 @@
   aria-modal="true"
   aria-label={phase === "review"
     ? "Confirm cleanup"
-    : phase === "running"
-      ? "Cleaning in progress"
-      : "Cleanup result"}
+    : phase === "measuring"
+      ? "Re-measuring selected resources"
+      : phase === "error"
+        ? "Could not prepare the cleanup"
+        : phase === "running"
+          ? "Cleaning in progress"
+          : "Cleanup result"}
   tabindex={-1}
 >
   <button
     class="absolute inset-0 cursor-default bg-black/50"
     aria-label="Close dialog"
     onclick={() => {
-      if (phase === "review" && !cleaning) onCancel();
-      else if (phase === "done") onDone();
+      if (phase === "done") onDone();
+      else if (phase !== "running") onCancel();
     }}
     disabled={phase === "running"}
   ></button>
@@ -202,6 +239,19 @@
             {/if}
             (scan numbers can go stale)
           </p>
+        {:else if phase === "measuring"}
+          <h2 class="text-lg font-semibold text-zinc-900 dark:text-zinc-100">
+            Re-measuring…
+          </h2>
+          <p class="mt-0.5 text-sm text-zinc-500">
+            Checking what is actually on disk for {selectedCount}
+            {selectedCount === 1 ? "resource" : "resources"}.
+          </p>
+        {:else if phase === "error"}
+          <h2 class="text-lg font-semibold text-zinc-900 dark:text-zinc-100">
+            Could not prepare the cleanup
+          </h2>
+          <p class="mt-0.5 text-sm text-zinc-500">Nothing was deleted.</p>
         {:else if phase === "running"}
           <h2 class="text-lg font-semibold text-zinc-900 dark:text-zinc-100">Cleaning…</h2>
         {:else}
@@ -213,8 +263,8 @@
       <button
         class="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-zinc-500 hover:bg-zinc-100 hover:text-zinc-900 disabled:opacity-40 dark:hover:bg-zinc-800 dark:hover:text-zinc-100"
         onclick={() => {
-          if (phase === "review" && !cleaning) onCancel();
-          else if (phase === "done") onDone();
+          if (phase === "done") onDone();
+          else if (phase !== "running") onCancel();
         }}
         disabled={phase === "running"}
         aria-label="Close dialog"
@@ -225,7 +275,67 @@
 
     <!-- Body + footer are emitted per phase: each phase owns a scroll area
          so its footer can stay pinned while its content scrolls. -->
-    {#if phase === "review" && preview}
+    {#if phase === "measuring"}
+      <div class="min-h-0 flex-1 overflow-y-auto px-5 py-4" aria-live="polite">
+        <div class="flex items-center gap-3">
+          <span aria-hidden="true" class="flex animate-spin text-emerald-600"
+            ><LoaderCircle size={18} /></span
+          >
+          <p class="text-sm text-zinc-700 dark:text-zinc-300">
+            Walking {selectedCount}
+            {selectedCount === 1 ? "path" : "paths"} to get current sizes.
+          </p>
+        </div>
+        <p class="mt-3 text-xs text-zinc-500">
+          This is the re-measure step behind the confirmation (G-UI-01): sizes shown by a scan can
+          be stale, so every selected path is measured again before you are asked to confirm.
+          A large selection can take a while.
+        </p>
+        <p class="mt-2 text-xs text-zinc-500">Nothing has been deleted.</p>
+      </div>
+      <footer
+        class="flex shrink-0 justify-end border-t border-zinc-100 px-5 py-3 dark:border-zinc-800"
+      >
+        <button
+          class="rounded-lg px-4 py-2 text-sm text-zinc-600 hover:bg-zinc-100 dark:text-zinc-300 dark:hover:bg-zinc-800"
+          onclick={onCancel}
+        >
+          Cancel
+        </button>
+      </footer>
+    {:else if phase === "error"}
+      <div class="min-h-0 flex-1 overflow-y-auto px-5 py-4">
+        <div
+          class="flex items-start gap-2 rounded-lg bg-red-50 p-3 text-sm text-red-700 dark:bg-red-950/40 dark:text-red-300"
+          role="alert"
+        >
+          <span aria-hidden="true" class="mt-0.5 flex shrink-0"
+            ><TriangleAlert size={15} /></span
+          >
+          <span class="min-w-0 break-words">{previewError}</span>
+        </div>
+        <p class="mt-3 text-xs text-zinc-500">
+          A large selection can outlast the re-measure budget. Selecting fewer items, or rescanning
+          first, usually fixes it.
+        </p>
+      </div>
+      <footer
+        class="flex shrink-0 justify-end gap-2 border-t border-zinc-100 px-5 py-3 dark:border-zinc-800"
+      >
+        <button
+          class="rounded-lg px-4 py-2 text-sm text-zinc-600 hover:bg-zinc-100 dark:text-zinc-300 dark:hover:bg-zinc-800"
+          onclick={onCancel}
+        >
+          Cancel
+        </button>
+        <button
+          class="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-700"
+          onclick={onRetry}
+        >
+          Try again
+        </button>
+      </footer>
+    {:else if phase === "review" && preview && !nothingToClean}
       <div class="min-h-0 flex-1 overflow-y-auto px-5 py-4">
       {#if showItems}
         <div class="mt-3 max-h-64 space-y-3 overflow-auto text-sm">
@@ -264,6 +374,16 @@
       {/if}
 
 
+      {#if coverageText}
+        <p
+          class="mt-3 flex items-start gap-1.5 rounded-lg bg-amber-50 px-2.5 py-2 text-xs text-amber-800 dark:bg-amber-950/40 dark:text-amber-200"
+          role="note"
+        >
+          <span aria-hidden="true" class="mt-0.5 flex shrink-0"><TriangleAlert size={13} /></span>
+          <span>{coverageText}</span>
+        </p>
+      {/if}
+
       <label class="mt-3 flex items-start gap-2 text-sm text-zinc-700 dark:text-zinc-300">
         <input
           type="checkbox"
@@ -288,10 +408,38 @@
         <button
           class="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-700 disabled:opacity-50"
           onclick={onConfirm}
-          disabled={cleaning || !acknowledged}
+          disabled={cleaning || !acknowledged || !canConfirm}
           title={acknowledged ? "" : "Check the understanding statement first"}
         >
           {cleaning ? "Cleaning…" : `Clean ${formatBytes(preview.total_bytes)}`}
+        </button>
+      </footer>
+    {:else if phase === "review" && nothingToClean}
+      <!-- The backend resolved none of the selected ids. Saying "0 B" here
+           reads as a bug; the ids are simply unknown now. -->
+      <div class="min-h-0 flex-1 overflow-y-auto px-5 py-4">
+        <div
+          class="flex items-start gap-2 rounded-lg bg-amber-50 p-3 text-sm text-amber-800 dark:bg-amber-950/40 dark:text-amber-200"
+          role="note"
+        >
+          <span aria-hidden="true" class="mt-0.5 flex shrink-0"><TriangleAlert size={15} /></span>
+          <span>{coverageText}</span>
+        </div>
+      </div>
+      <footer
+        class="flex shrink-0 justify-end gap-2 border-t border-zinc-100 px-5 py-3 dark:border-zinc-800"
+      >
+        <button
+          class="rounded-lg px-4 py-2 text-sm text-zinc-600 hover:bg-zinc-100 dark:text-zinc-300 dark:hover:bg-zinc-800"
+          onclick={onCancel}
+        >
+          Cancel
+        </button>
+        <button
+          class="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-700"
+          onclick={onRescanFromPreview}
+        >
+          Rescan
         </button>
       </footer>
     {:else if phase === "running"}

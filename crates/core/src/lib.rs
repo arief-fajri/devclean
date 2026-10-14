@@ -16,7 +16,7 @@ pub mod system;
 pub mod types;
 
 pub use format::{format_age, format_bytes};
-pub use limits::{CLEANUP_COMMAND_TIMEOUT, PROVIDER_SCAN_TIMEOUT};
+pub use limits::{CLEANUP_COMMAND_TIMEOUT, PREVIEW_TIMEOUT, PROVIDER_SCAN_TIMEOUT};
 pub use preview_token::{authorize, GateError, PreviewToken, PREVIEW_TTL_SECS};
 
 pub use safety::{SafetyError, SafetyValidator};
