@@ -84,8 +84,8 @@ and [CONTRIBUTING.md](CONTRIBUTING.md) for the rules a change has to follow.
 
 | Platform | Status |
 |---|---|
-| **macOS** | **Tested.** The shipped build target (`app`, `dmg`), and the only platform in CI. |
-| Linux | **Not tested.** The code paths are Unix-shaped (allocated blocks, `~/.Trash`), but nothing builds or runs it. |
+| **macOS** | **Tested.** The shipped build target (`app`, `dmg`), and where the full workspace runs in CI. |
+| Linux | **Builds and tests; not shipped.** CI compiles the whole workspace and runs the full test suite on Ubuntu, so the Unix-specific code — allocated-block sizing, `statvfs`, `rusage`, the Trash implementation — is exercised on a second OS. No bundle is built for it and it is not supported. |
 | Windows | **Not tested.** Not a build target. Path handling, Trash and block sizing are all unverified there. |
 
 This table is enforced: `apps/desktop/src/lib/platform-claim.test.ts` fails if

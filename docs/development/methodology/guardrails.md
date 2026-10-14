@@ -176,6 +176,25 @@ G-REL-06  Nothing on the boot path may spawn a process without a deadline.
            substitute honest against the `df` it replaced ✅
 ```
 
+## 7. CI & AI (G-CI / G-AI)
+
+```text
+G-CI-01  Merging requires: cargo test + clippy 0 warnings + clean fmt +
+           svelte-check 0 errors + vitest.
+           Enforcement: CI — .github/workflows/ci.yml runs all of them on
+           macOS and Ubuntu ✅
+G-CI-02  Every guardrail enforced by a test must run in CI. A test nobody runs
+           is a suggestion.
+           Enforcement: CI — the `frontend` job runs `npm test`, so
+           G-UI-02/03/04/05 and G-PUB-01/04 are actually executed ✅ ·
+           test — platform-claim.test.ts asserts that `npm test` is in the
+           workflow ✅
+G-AI-01  AI Level A is for internal & reversible changes only. Contract/security/
+           destructive/dependency changes = Level B, requiring explicit human
+           approval. See AGENTS.md.
+           Enforcement: process ✅
+```
+
 ### What changed in v0.5.0, and why the claims above changed
 
 Every entry above names a mechanism that a test can fail against. Three of them
@@ -198,6 +217,16 @@ backed by a mechanism a test can fail against:
 | `freed_bytes` for command-backed cleanup always equalled `requested` | `before − after`, both measured; unmeasurable reports 0 with a reason | `runcommand_freed_bytes_is_measured_not_assumed` |
 | the Trash mode did not exist, so every delete was permanent | `delete_mode` defaults to `trash`; `freed_bytes` is 0 for a trashed artifact | `trash_mode_moves_aside_and_reports_pending_not_freed` |
 | 102 frontend tests — including G-UI-02/03/05 — were never run by CI | the `frontend` job runs `npm test` | `platform-claim.test.ts` asserts it |
+
+### G-CI-01 and G-AI-01 were missing, not absent
+
+Both were dropped by the v0.7.0 UI-shell commit while the file was
+restructured, and nothing noticed — a guardrail document is not covered by a
+test that fails when an entry disappears. They are restored above.
+
+That is the same failure class as everything else in this file: a control that
+existed only as prose stopped existing, and the only reason it was found is
+that a CI job failed and sent someone looking.
 
 ## Open gaps
 

@@ -53,13 +53,35 @@ describe("G-PUB-01 — platform claims match reality", () => {
     expect(claimed).toEqual(["macOS"]);
   });
 
-  it("says so explicitly for the untested platforms", () => {
-    // Silence is not a claim. The README must state that they are untested,
-    // so a reader cannot infer support from an omission.
-    for (const platform of ["Linux", "Windows"]) {
-      const row = new RegExp(`\\|\\s*${platform}\\s*\\|\\s*\\*\\*Not tested\\.`, "i");
-      expect(readme, `${platform} must be marked "Not tested"`).toMatch(row);
-    }
+  it("marks Windows as not tested, because no job runs it", () => {
+    // Silence is not a claim. The README must state that Windows is untested,
+    // so a reader cannot infer support from an omission — and the absence of a
+    // runner is what makes that statement true.
+    expect(ci, "a Windows runner exists but the README does not claim Windows").not.toMatch(
+      /runs-on:\s*windows/i,
+    );
+    expect(readme, "Windows must be marked Not tested").toMatch(
+      /\|\s*Windows\s*\|\s*\*\*Not tested\./i,
+    );
+  });
+
+  it("describes Linux as exercised by CI, not as untested", () => {
+    // Linux HAS a job, so "Not tested" would now be the lie — in the other
+    // direction. The README must say what is true: the workspace builds and
+    // the suite runs there, and nothing is shipped for it.
+    //
+    // Match `runs-on: ubuntu...`, not the bare word: the workflow's comments
+    // mention Ubuntu, and a substring check would pass with no Linux runner at
+    // all. This assertion was written that way first and caught here.
+    expect(ci, "no Linux runner, so the README's Linux row is wrong").toMatch(
+      /runs-on:\s*ubuntu/i,
+    );
+    expect(readme, 'Linux must not be marked "Not tested" while a job runs it').not.toMatch(
+      /\|\s*Linux\s*\|\s*\*\*Not tested\./i,
+    );
+    expect(readme, "Linux must state that it builds and tests").toMatch(
+      /\|\s*Linux\s*\|[^|]*(build|test)/i,
+    );
   });
 
   it("builds no artifact for a platform it does not test", () => {

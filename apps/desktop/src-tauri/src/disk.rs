@@ -262,7 +262,25 @@ mod tests {
             data.display(),
             home.display()
         );
-        assert_eq!(imp::mount(&home), imp::mount(&data));
+
+        // `app_data_dir()` need not exist yet. On a machine that has never run
+        // DevClean — a fresh CI runner, for instance — the directory is absent,
+        // and `mount()` probes the filesystem, so it answers `None`. This test
+        // used to fail there, which meant it was really asserting "this machine
+        // has run the app before", not the property it names.
+        //
+        // The question is which volume the data *will* land on, and any
+        // existing ancestor answers it: `ancestors()` bottoms out at `$HOME`,
+        // which always exists.
+        let existing = data
+            .ancestors()
+            .find(|p| p.exists())
+            .expect("$HOME exists, so an ancestor always does");
+        assert_eq!(
+            imp::mount(&home),
+            imp::mount(existing),
+            "app data will land on a different volume than home"
+        );
     }
 
     #[cfg(target_os = "macos")]
