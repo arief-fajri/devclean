@@ -118,6 +118,14 @@ G-UI-03  The cleanup confirmation is an interruption, not a page. It is mounted 
            Enforcement: code — `App.svelte` blocks `resolveHotkey` while the flow is
            open; test — keeps_destructive_calls_out_of_every_page and
            mounts_the_confirmation_flow_from_the_shell (frontend) ✅
+G-UI-04  The menu bar icon is a real template image: it must carry an alpha
+           channel, stay centred, and never fill its frame. macOS paints a
+           template image from alpha alone — a PNG without one is a solid block,
+           which is exactly how the tray icon shipped as a white square.
+           Enforcement: asset — `tools/make_tray_icon.py` writes the PNG *and* the
+           SVG from one geometry, so they cannot drift;
+           test — tray-icon.test.ts decodes the shipped PNG and asserts an alpha
+           channel, transparent corners, a non-slab coverage, fill and centring ✅
 ```
 
 ### What changed in v0.5.0, and why the claims above changed
@@ -129,6 +137,7 @@ previously named mechanisms that did not exist:
 |---|---|---|
 | "G-UI-01 enforced by code" | enforced by `preview_token` in the engine | the old enforcement was a `tracing::debug!` |
 | v0.7.0 UI shell revamp (G-UI-02/03) | the menu-bar id allowlist + the page-level scan of `routes/*.svelte` | converting the dialogs into pages could have put a cleanup call one click from the list |
+| v0.7.1 tray icon showed a white square (G-UI-04) | the asset is now decoded and measured in CI, and generated from one geometry | the earlier PNG was written as greyscale *without* an alpha channel, so macOS painted the whole frame; nothing in Rust, the build or a screenshot diff had caught it |
 
 ## Open gaps
 
@@ -140,6 +149,10 @@ previously named mechanisms that did not exist:
   hostile UI, which would need an out-of-process frontend.
 
 - **G-REL-05 — scan-time CLI probes have no timeout.** `run_tool` (provider
+  queries) and `go_env` spawn processes without a deadline, and
+  `tokio::time::timeout` around a `spawn_blocking` task does not kill the
+  blocking thread — it only stops awaiting. Bounded in practice by
+  `PROVIDER_SCAN_TIMEOUT` returning, but a hung probe leaves a thread parked.- **G-REL-05 — scan-time CLI probes have no timeout.** `run_tool` (provider
   queries) and `go_env` spawn processes without a deadline, and
   `tokio::time::timeout` around a `spawn_blocking` task does not kill the
   blocking thread — it only stops awaiting. Bounded in practice by
