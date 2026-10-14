@@ -189,6 +189,15 @@
                       {#if run.partial > 0}· {run.partial} partial{/if}
                       {#if run.failed > 0}· {run.failed} failed{/if}
                       {#if run.cancelled > 0}· {run.cancelled} cancelled{/if}
+                      {#if run.pre_allocated_sizing}
+                        <span
+                          class="ml-1 rounded bg-zinc-200 px-1 py-0.5 text-[10px] text-zinc-600 dark:bg-zinc-700 dark:text-zinc-300"
+                          title="Recorded before 0.1.0, when sizes summed file lengths instead of allocated blocks. Not comparable with newer runs."
+                          data-testid="pre-allocated-sizing"
+                        >
+                          before 0.1.0
+                        </span>
+                      {/if}
                       {#if run.providers.length > 0}
                         · {run.providers.join(", ")}
                       {/if}

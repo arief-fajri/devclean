@@ -524,11 +524,13 @@ mod tests {
                     path: format!("/tmp/{i}").into(),
                     size_bytes: 10,
                     reclaimable_bytes: 10,
+                    apparent_bytes: None,
                     safety: devclean_core::SafetyLevel::Safe,
                     detail: Some("· 143 days stale · npm".into()),
                     impact: None,
                     age_days: Some(143),
-                    retention_eligible: true,
+                    blocked_reason: None,
+                    blocked_detail: None,
                 })
                 .collect(),
         }

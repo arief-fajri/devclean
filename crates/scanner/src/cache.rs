@@ -10,7 +10,13 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
-const CACHE_VERSION: u32 = 1;
+/// Bumped when the meaning of a cached field changes, not just its shape.
+///
+/// `2` — `Resource.size_bytes` moved from logical (sum of file lengths) to
+/// allocated blocks. A v1 cache holds numbers that are up to 19% low, so it
+/// must be rejected rather than shown: a stale dashboard that quietly
+/// disagrees with `du` is worse than a rescan.
+const CACHE_VERSION: u32 = 2;
 
 #[derive(Debug, Serialize, Deserialize)]
 struct CachedScan {
@@ -82,11 +88,13 @@ mod tests {
                 path: PathBuf::from("/tmp/x"),
                 size_bytes: 10,
                 reclaimable_bytes: 10,
+                apparent_bytes: None,
                 safety: SafetyLevel::Safe,
                 detail: None,
                 impact: None,
                 age_days: None,
-                retention_eligible: true,
+                blocked_reason: None,
+                blocked_detail: None,
             }],
         }
     }
@@ -124,6 +132,29 @@ mod tests {
         assert!(load_cached_summary(&path, &[]).is_none());
         std::fs::write(&path, r#"{"version":999,"roots":[],"saved_at_unix":0,"summary":{"total_bytes":0,"reclaimable_bytes":0,"providers":[],"resources":[]}}"#).unwrap();
         assert!(load_cached_summary(&path, &[]).is_none());
+        let _ = std::fs::remove_file(&path);
+    }
+
+    /// A v1 cache holds `size_bytes` computed as a sum of file LENGTHS, which
+    /// reads up to 19% below what deleting the tree actually frees. Showing
+    /// it after the upgrade would put a number on the dashboard that quietly
+    /// disagrees with `du` — worse than a rescan.
+    #[test]
+    fn a_v1_cache_with_logical_sizes_is_rejected() {
+        let path = cache_path("v1");
+        let _ = std::fs::remove_file(&path);
+        let v1 = r#"{"version":1,"roots":[],"saved_at_unix":0,"summary":{
+            "total_bytes":10,"reclaimable_bytes":10,"retention_blocked_bytes":0,
+            "providers":[],"resources":[]}}"#;
+        std::fs::write(&path, v1).unwrap();
+        assert!(
+            load_cached_summary(&path, &[]).is_none(),
+            "a pre-allocated-sizing cache must never be shown"
+        );
+
+        // …and the current version still round-trips.
+        save_cached_summary(&path, &[], &summary()).unwrap();
+        assert!(load_cached_summary(&path, &[]).is_some());
         let _ = std::fs::remove_file(&path);
     }
 }

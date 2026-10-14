@@ -4,8 +4,8 @@
 //! Cleans by deleting the directory only — lockfiles are never touched.
 
 use super::provider::{
-    age_days, dir_size_checked, impact, measure_dir, project_detail, walk_cancelled, CleanupAction,
-    Provider,
+    age_days, dir_size_detail_checked, impact, measure_dir, project_detail, walk_cancelled,
+    CleanupAction, Provider,
 };
 use devclean_core::{Resource, SafetyLevel};
 use std::path::{Path, PathBuf};
@@ -49,7 +49,7 @@ impl Provider for NodeModulesProvider {
                     return;
                 }
                 // Skip (don't abort) entries whose size can't be measured.
-                let Some(size) = dir_size_checked(dir, cancel) else {
+                let Some(size) = dir_size_detail_checked(dir, cancel) else {
                     return;
                 };
                 let project_name = project
@@ -61,12 +61,14 @@ impl Provider for NodeModulesProvider {
                     provider: self.id().to_string(),
                     name: format!("{project_name}/node_modules"),
                     path: dir.to_path_buf(),
-                    size_bytes: size,
-                    reclaimable_bytes: size,
+                    size_bytes: size.allocated,
+                    reclaimable_bytes: size.allocated,
+                    apparent_bytes: size.apparent_if_material(),
                     safety: SafetyLevel::Safe,
-                    detail: Some(project_detail(&project_name, project, size)),
+                    detail: Some(project_detail(&project_name, project, size.allocated)),
                     age_days: age_days(project),
-                    retention_eligible: true,
+                    blocked_reason: None,
+                    blocked_detail: None,
                     impact: impact(
                         "Dependencies are reinstalled from the lockfile; source code is untouched.",
                         Some("Next install re-downloads packages"),

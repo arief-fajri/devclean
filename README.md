@@ -51,6 +51,19 @@ cargo tauri dev
 
 Full details: [docs/development/developing.md](docs/development/developing.md).
 
+## Platform support
+
+| Platform | Status |
+|---|---|
+| **macOS** | **Tested.** The shipped build target (`app`, `dmg`), and the only platform in CI. |
+| Linux | **Not tested.** The code paths are Unix-shaped (allocated blocks, `~/.Trash`), but nothing builds or runs it. |
+| Windows | **Not tested.** Not a build target. Path handling, Trash and block sizing are all unverified there. |
+
+This table is enforced: `apps/desktop/src/lib/platform-claim.test.ts` fails if
+the README claims a platform that has no CI job, or if `tauri.conf.json`
+declares a bundle target for one. It exists because a support matrix drifts
+away from reality the moment nothing checks it.
+
 ## Repo layout
 
 ```text

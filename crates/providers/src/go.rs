@@ -1,7 +1,7 @@
 //! Go cache provider. Split into build cache + module cache, cleaned via
 //! the official `go` tool — never by deleting cache internals by hand.
 
-use super::provider::{dir_size_checked, impact, measure_dir, CleanupAction, Provider};
+use super::provider::{dir_size_detail_checked, impact, measure_dir, CleanupAction, Provider};
 use devclean_core::{Resource, SafetyLevel};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -58,7 +58,7 @@ impl Provider for GoProvider {
                     continue;
                 }
                 // Skip (don't abort) caches whose size can't be measured.
-                let Some(size) = dir_size_checked(&dir, cancel) else {
+                let Some(size) = dir_size_detail_checked(&dir, cancel) else {
                     continue;
                 };
                 out.push(Resource {
@@ -66,12 +66,14 @@ impl Provider for GoProvider {
                     provider: self.id().to_string(),
                     name: label.to_string(),
                     path: dir,
-                    size_bytes: size,
-                    reclaimable_bytes: size,
+                    size_bytes: size.allocated,
+                    reclaimable_bytes: size.allocated,
+                    apparent_bytes: size.apparent_if_material(),
                     safety: SafetyLevel::Safe,
                     detail: None,
                     age_days: None,
-                    retention_eligible: true,
+                    blocked_reason: None,
+                    blocked_detail: None,
                     impact: impact(consequence, Some(cost), Some(clean_args)),
                 });
             }

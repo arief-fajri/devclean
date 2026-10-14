@@ -1,0 +1,10 @@
+# Pinned on purpose. CI and local builds must agree, and a cleanup tool that
+# stops compiling because of an unrelated compiler release is worse than one
+# that is a version behind. `cargo` reads this file automatically.
+#
+# Keep in sync with `rust-version` in apps/desktop/src-tauri/Cargo.toml and the
+# `msrv` job in .github/workflows/ci.yml.
+[toolchain]
+channel = "1.90"
+components = ["rustfmt", "clippy"]
+profile = "minimal"

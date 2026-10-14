@@ -19,7 +19,7 @@
 //! validator keeps applying the protected-path rules (I2, I7) — nothing
 //! under `~/Documents` or `~/.ssh` can be reached from here.
 
-use super::provider::{dir_size, home_dir, impact, measure_dir, CleanupAction, Provider};
+use super::provider::{dir_size_detail, home_dir, impact, measure_dir, CleanupAction, Provider};
 use devclean_core::{Resource, SafetyLevel};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::AtomicBool;
@@ -116,8 +116,8 @@ impl Provider for GlobalCacheProvider {
             .iter()
             .filter_map(|t| {
                 let dir = path_for(t)?;
-                let size = dir_size(&dir);
-                if size == 0 {
+                let size = dir_size_detail(&dir);
+                if size.allocated == 0 {
                     return None;
                 }
                 Some(Resource {
@@ -125,12 +125,14 @@ impl Provider for GlobalCacheProvider {
                     provider: self.id().to_string(),
                     name: t.label.to_string(),
                     path: dir,
-                    size_bytes: size,
-                    reclaimable_bytes: size,
+                    size_bytes: size.allocated,
+                    reclaimable_bytes: size.allocated,
+                    apparent_bytes: size.apparent_if_material(),
                     safety: SafetyLevel::Caution,
                     detail: None,
                     age_days: None,
-                    retention_eligible: true,
+                    blocked_reason: None,
+                    blocked_detail: None,
                     impact: impact(
                         t.regenerates,
                         Some("The tool rebuilds this; nothing is re-downloaded for nothing."),

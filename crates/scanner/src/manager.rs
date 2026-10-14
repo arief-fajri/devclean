@@ -1,6 +1,9 @@
 //! Scan orchestration: fan out to providers, aggregate, register ids.
 
-use devclean_core::{ProviderSummary, Resource, ScanSummary, PROVIDER_SCAN_TIMEOUT};
+use devclean_core::{
+    stamp_blocked_reason, PolicyInputs, ProviderSummary, Resource, ScanSummary,
+    PROVIDER_SCAN_TIMEOUT,
+};
 use devclean_providers::{all_providers, Provider, ProviderRegistry};
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -19,6 +22,19 @@ pub type ProgressFn = Box<dyn Fn(&str, usize, usize) + Send + Sync>;
 /// one is running rather than only which ones are already done (contract
 /// v0.5.0). A no-op when not supplied.
 pub type StartedFn = Box<dyn Fn(&str) + Send + Sync>;
+
+/// Everything one fan-out needs. Bundled so the internal `run` keeps a
+/// readable signature as scan options accumulate.
+struct ScanRequest<'a> {
+    /// Restrict to a single provider id; `None` runs every enabled one.
+    only: Option<&'a str>,
+    roots: Vec<PathBuf>,
+    excluded: &'a [PathBuf],
+    disabled: &'a [String],
+    policy: PolicyInputs,
+    on_progress: Option<ProgressFn>,
+    on_started: Option<StartedFn>,
+}
 
 /// How many providers walk the filesystem at the same time by default
 /// (G-SCAN-01). A scan is I/O bound, so raising this is not free: it costs
@@ -86,11 +102,20 @@ impl ScanManager {
         roots: Vec<PathBuf>,
         excluded: &[PathBuf],
         disabled: &[String],
+        policy: PolicyInputs,
         on_progress: Option<ProgressFn>,
         on_started: Option<StartedFn>,
     ) -> ScanSummary {
-        self.run(None, roots, excluded, disabled, on_progress, on_started)
-            .await
+        self.run(ScanRequest {
+            only: None,
+            roots,
+            excluded,
+            disabled,
+            policy,
+            on_progress,
+            on_started,
+        })
+        .await
     }
 
     /// Scan exactly one provider. The others are never walked, never occupy
@@ -102,31 +127,34 @@ impl ScanManager {
         provider: &str,
         roots: Vec<PathBuf>,
         excluded: &[PathBuf],
+        policy: PolicyInputs,
         on_progress: Option<ProgressFn>,
         on_started: Option<StartedFn>,
     ) -> ScanSummary {
-        self.run(
-            Some(provider),
+        self.run(ScanRequest {
+            only: Some(provider),
             roots,
             excluded,
-            &[],
+            disabled: &[],
+            policy,
             on_progress,
             on_started,
-        )
+        })
         .await
     }
 
     /// Shared fan-out. `only` restricts the run to a single provider id;
     /// `None` runs every provider that is not in `disabled`.
-    async fn run(
-        &self,
-        only: Option<&str>,
-        roots: Vec<PathBuf>,
-        excluded: &[PathBuf],
-        disabled: &[String],
-        on_progress: Option<ProgressFn>,
-        on_started: Option<StartedFn>,
-    ) -> ScanSummary {
+    async fn run(&self, req: ScanRequest<'_>) -> ScanSummary {
+        let ScanRequest {
+            only,
+            roots,
+            excluded,
+            disabled,
+            policy,
+            on_progress,
+            on_started,
+        } = req;
         self.cancelled.store(false, Ordering::SeqCst);
         let on_progress: Option<Arc<ProgressFn>> = on_progress.map(Arc::new);
         let on_started: Option<Arc<StartedFn>> = on_started.map(Arc::new);
@@ -201,6 +229,24 @@ impl ScanManager {
         }
         resources.retain(|r| !is_excluded(&r.path, excluded));
 
+        // Stamp WHY anything is held back, here at scan time, so the UI can
+        // explain a resource before the user tries to select it. The engine
+        // re-derives the same verdict from the same function, so the
+        // explanation and the enforcement cannot drift apart (I11).
+        let by_id: HashMap<&str, &Arc<dyn Provider>> =
+            self.providers.iter().map(|p| (p.id(), p)).collect();
+        for r in &mut resources {
+            let provider = by_id.get(r.provider.as_str());
+            stamp_blocked_reason(
+                r,
+                PolicyInputs {
+                    is_user_data: provider.is_some_and(|p| p.is_user_data()),
+                    required_docker_scope: provider.and_then(|p| p.required_docker_scope()),
+                    ..policy
+                },
+            );
+        }
+
         aggregate(resources)
     }
 }
@@ -255,7 +301,7 @@ fn aggregate(resources: Vec<Resource>) -> ScanSummary {
         reclaimable_bytes: resources.iter().map(|r| r.reclaimable_bytes).sum(),
         retention_blocked_bytes: resources
             .iter()
-            .filter(|r| !r.retention_eligible)
+            .filter(|r| r.blocked_reason.is_some())
             .map(|r| r.reclaimable_bytes)
             .sum(),
         providers: summaries,
@@ -301,11 +347,13 @@ mod tests {
                     path: Path::new("/tmp").to_path_buf(),
                     size_bytes: 1,
                     reclaimable_bytes: 1,
+                    apparent_bytes: None,
                     safety: SafetyLevel::Safe,
                     detail: None,
                     impact: None,
                     age_days: None,
-                    retention_eligible: true,
+                    blocked_reason: None,
+                    blocked_detail: None,
                 });
             }
             out
@@ -315,6 +363,18 @@ mod tests {
         }
         fn cleanup_action(&self, path: &Path) -> devclean_providers::CleanupAction {
             devclean_providers::CleanupAction::RemoveDir(path.to_path_buf())
+        }
+    }
+
+    /// Nothing blocked: tests exercise discovery, not policy.
+    fn permissive() -> devclean_core::PolicyInputs {
+        devclean_core::PolicyInputs {
+            is_user_data: false,
+            required_docker_scope: None,
+            retention_days: None,
+            docker_prune_scope: devclean_core::DockerPruneScope::BuildCache,
+            allow_privileged_operations: true,
+            ai_cleanup_enabled: true,
         }
     }
 
@@ -332,8 +392,15 @@ mod tests {
         let mgr = Arc::new(mgr);
         let mgr2 = Arc::clone(&mgr);
         let handle = tokio::spawn(async move {
-            mgr2.scan_all(vec![PathBuf::from("/tmp")], &[], &[], None, None)
-                .await
+            mgr2.scan_all(
+                vec![PathBuf::from("/tmp")],
+                &[],
+                &[],
+                permissive(),
+                None,
+                None,
+            )
+            .await
         });
         // Let the scan start, then cancel and measure the settle time.
         tokio::time::sleep(Duration::from_millis(100)).await;
@@ -359,7 +426,14 @@ mod tests {
         let mgr = manager_with(slow, Duration::from_millis(100));
         let t0 = std::time::Instant::now();
         let summary = mgr
-            .scan_all(vec![PathBuf::from("/tmp")], &[], &[], None, None)
+            .scan_all(
+                vec![PathBuf::from("/tmp")],
+                &[],
+                &[],
+                permissive(),
+                None,
+                None,
+            )
             .await;
         assert!(t0.elapsed() < Duration::from_secs(5));
         assert!(summary.resources.is_empty());
@@ -375,7 +449,14 @@ mod tests {
         mgr.cancel();
         // A fresh scan_all must not inherit the stale cancel flag.
         let summary = mgr
-            .scan_all(vec![PathBuf::from("/tmp")], &[], &[], None, None)
+            .scan_all(
+                vec![PathBuf::from("/tmp")],
+                &[],
+                &[],
+                permissive(),
+                None,
+                None,
+            )
             .await;
         assert_eq!(summary.resources.len(), 5);
     }
@@ -393,13 +474,21 @@ mod tests {
                 vec![PathBuf::from("/tmp")],
                 &[PathBuf::from("/tmp")],
                 &[],
+                permissive(),
                 None,
                 None,
             )
             .await;
         assert!(summary.resources.is_empty());
         let summary = mgr
-            .scan_all(vec![PathBuf::from("/tmp")], &[], &[], None, None)
+            .scan_all(
+                vec![PathBuf::from("/tmp")],
+                &[],
+                &[],
+                permissive(),
+                None,
+                None,
+            )
             .await;
         assert_eq!(summary.resources.len(), 3);
     }
@@ -423,6 +512,7 @@ mod tests {
                 vec![PathBuf::from("/tmp")],
                 &[],
                 &["slow".to_string()],
+                permissive(),
                 None,
                 None,
             )
@@ -451,6 +541,7 @@ mod tests {
                 vec![PathBuf::from("/tmp")],
                 &[],
                 &["slow".to_string()],
+                permissive(),
                 None,
                 None,
             )
@@ -488,11 +579,13 @@ mod tests {
                     path: Path::new("/tmp").to_path_buf(),
                     size_bytes: 1,
                     reclaimable_bytes: 1,
+                    apparent_bytes: None,
                     safety: SafetyLevel::Safe,
                     detail: None,
                     impact: None,
                     age_days: None,
-                    retention_eligible: true,
+                    blocked_reason: None,
+                    blocked_detail: None,
                 })
                 .collect()
         }
@@ -542,8 +635,15 @@ mod tests {
         let cb: ProgressFn = Box::new(move |_p, done, total| {
             sink.lock().unwrap().push((done, total));
         });
-        mgr.scan_all(vec![PathBuf::from("/tmp")], &[], &[], Some(cb), None)
-            .await;
+        mgr.scan_all(
+            vec![PathBuf::from("/tmp")],
+            &[],
+            &[],
+            permissive(),
+            Some(cb),
+            None,
+        )
+        .await;
 
         let seen = seen.lock().unwrap().clone();
         assert_eq!(seen.len(), 5, "one callback per provider, got {seen:?}");
@@ -587,6 +687,7 @@ mod tests {
             vec![PathBuf::from("/tmp")],
             &[],
             &["s1".to_string()],
+            permissive(),
             None,
             Some(cb),
         )
@@ -624,7 +725,14 @@ mod tests {
             sink.lock().unwrap().push((done, total));
         });
         runner
-            .scan_all(vec![PathBuf::from("/tmp")], &[], &[], Some(cb), None)
+            .scan_all(
+                vec![PathBuf::from("/tmp")],
+                &[],
+                &[],
+                permissive(),
+                Some(cb),
+                None,
+            )
             .await;
 
         let seen = seen.lock().unwrap().clone();

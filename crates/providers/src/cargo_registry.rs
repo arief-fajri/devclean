@@ -7,7 +7,7 @@
 //! so this provider declares [`Provider::extra_allowed_roots`] — the
 //! validator still enforces protected paths and the exact dir (I2, I7).
 
-use super::provider::{dir_size, home_dir, impact, measure_dir, CleanupAction, Provider};
+use super::provider::{dir_size_detail, home_dir, impact, measure_dir, CleanupAction, Provider};
 use devclean_core::{Resource, SafetyLevel};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::AtomicBool;
@@ -34,8 +34,8 @@ impl Provider for CargoRegistryProvider {
         let Some(dir) = registry_dir() else {
             return Vec::new();
         };
-        let size = dir_size(&dir);
-        if size == 0 {
+        let size = dir_size_detail(&dir);
+        if size.allocated == 0 {
             return Vec::new();
         }
         vec![Resource {
@@ -43,12 +43,14 @@ impl Provider for CargoRegistryProvider {
             provider: self.id().to_string(),
             name: "Cargo registry".to_string(),
             path: dir,
-            size_bytes: size,
-            reclaimable_bytes: size,
+            size_bytes: size.allocated,
+            reclaimable_bytes: size.allocated,
+            apparent_bytes: size.apparent_if_material(),
             safety: SafetyLevel::Caution,
             detail: None,
             age_days: None,
-            retention_eligible: true,
+            blocked_reason: None,
+            blocked_detail: None,
             impact: impact(
                 "Crates are re-downloaded from crates.io on the next build.",
                 Some("Requires network · slow on metered connections"),

@@ -237,14 +237,59 @@ clean; svelte-check 0 errors 0 warnings; vite build ok.
     regression (a stretched icon, a collapsed row) is still invisible to CI.
 ```
 
+## v0.8.0 — honest sizes, recoverable deletes, real gates ✅
+
+```text
+[x] size_bytes = allocated blocks (st_blocks*512), hard links counted once
+[x] apparent_bytes reported only for sparse files; scan cache v1 -> v2
+[x] delete_mode defaults to Trash; freed_bytes is 0 for a trashed artifact
+[x] blocked_reason replaces retention_eligible, stamped at scan time
+[x] ai_cleanup_enabled (default off) — AI history is report-only
+[x] HistoryEntry.sizing labels pre-0.1.0 rows
+[x] Platform support table + tauri targets restricted to macOS
+[x] CI: npm test, rust matrix (macOS + Ubuntu), msrv job, pinned toolchain
+```
+
+Evidence: 188 Rust tests + 123 frontend tests green; clippy 0 warnings; fmt
+clean; svelte-check 0 errors 0 warnings; vite build ok.
+
+Four controls were found claiming enforcement they did not have — the most
+serious being `Settings.retention_days`, which had a UI control, a contract
+field and an ADR but **no effect on any cleanup**. Measured before/after:
+
+| | before | after |
+|---|---|---|
+| `v3-web/node_modules` | 0.95 GB | **1.17 GB** (= `du`) |
+| `target/` (Rust) | 26.6 GB | **10.78 GB** (= `du`) |
+| resources blocked by a 10-year policy | **0** | **106 of 106** |
+
 ## V1.0 (recommended scope)
 
 Dashboard, filesystem scanner, node_modules, npm/pnpm cache, Go cache,
 Docker build cache, Rust target, scan progress, cleanup preview, safe cleanup,
-cleanup history, dark mode, tray, Windows + macOS + Linux.
+cleanup history, dark mode, tray. **macOS only** — see
+[Platform support](../../README.md#platform-support). Linux and Windows are
+not claimed and not tested; adding either is a project, not a build flag.
 
 ## V2.0 (ideas, not committed)
 
 Scheduled cleanup, Docker image analysis, duplicate detection, disk trend,
 scheduled recommendations. Monetization (Pro: analytics/scheduled/rules) only
 after product-market fit — never put a subscription into core cleanup.
+
+## Non-goals
+
+Things this project will deliberately not do, so they are not re-litigated:
+
+- **Permanent deletion by default.** `trash` is the default; `permanent` is an
+  explicit opt-out. A cleanup tool that cannot be undone is one mistake away
+  from losing a week of work.
+- **Deleting AI conversation history by default.** It is reported with its
+  size but stays unselectable until the user enables it in Settings.
+- **Deleting a database it cannot take exclusively.** No `VACUUM` on a file
+  another process holds open.
+- **Touching config or credentials.** `history.jsonl`, `settings.json`,
+  `auth.json` and friends are hard-preserved, whatever pattern matches them.
+- **Reporting a number it did not measure.** `freed_bytes` is `before − after`;
+  when the after-state is unmeasurable the result says `0` and why.
+- **Claiming a platform it does not test.** See the support table above.

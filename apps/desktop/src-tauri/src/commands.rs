@@ -57,12 +57,22 @@ pub async fn scan_all(app: AppHandle, state: State<'_, AppState>) -> Result<Scan
 /// from the tray menu (M3) without going through the command layer.
 pub async fn run_scan(app: &AppHandle, state: &AppState) -> Result<ScanSummary, String> {
     let mem_before = MemSample::capture();
-    let (roots, excluded, disabled) = {
+    let (roots, excluded, disabled, policy) = {
         let s = state.settings.lock().unwrap();
         (
             s.scan_roots.clone(),
             s.excluded_paths.clone(),
             s.disabled_providers.clone(),
+            devclean_core::PolicyInputs {
+                // Per-provider flags are filled in by the scanner; these are
+                // the user's settings.
+                is_user_data: false,
+                required_docker_scope: None,
+                retention_days: s.retention_days,
+                docker_prune_scope: s.docker_prune_scope,
+                allow_privileged_operations: s.allow_privileged_operations,
+                ai_cleanup_enabled: s.ai_cleanup_enabled,
+            },
         )
     };
     app.emit(SCAN_STARTED, ()).map_err(|e| e.to_string())?;
@@ -86,7 +96,14 @@ pub async fn run_scan(app: &AppHandle, state: &AppState) -> Result<ScanSummary, 
 
     let summary = state
         .scan
-        .scan_all(roots, &excluded, &disabled, Some(progress), Some(started))
+        .scan_all(
+            roots,
+            &excluded,
+            &disabled,
+            policy,
+            Some(progress),
+            Some(started),
+        )
         .await;
     state.store_resources(summary.resources.clone());
     // One free-space probe per scan, never per menu open (G-REL-01): the menu
@@ -167,9 +184,20 @@ pub async fn scan_provider(
     state: State<'_, AppState>,
     provider: String,
 ) -> Result<ScanSummary, String> {
-    let (roots, excluded) = {
+    let (roots, excluded, policy) = {
         let s = state.settings.lock().unwrap();
-        (s.scan_roots.clone(), s.excluded_paths.clone())
+        (
+            s.scan_roots.clone(),
+            s.excluded_paths.clone(),
+            devclean_core::PolicyInputs {
+                is_user_data: false,
+                required_docker_scope: None,
+                retention_days: s.retention_days,
+                docker_prune_scope: s.docker_prune_scope,
+                allow_privileged_operations: s.allow_privileged_operations,
+                ai_cleanup_enabled: s.ai_cleanup_enabled,
+            },
+        )
     };
     app.emit(SCAN_STARTED, ()).map_err(|e| e.to_string())?;
 
@@ -191,7 +219,14 @@ pub async fn scan_provider(
 
     let one = state
         .scan
-        .scan_one(&provider, roots, &excluded, Some(progress), Some(started))
+        .scan_one(
+            &provider,
+            roots,
+            &excluded,
+            policy,
+            Some(progress),
+            Some(started),
+        )
         .await;
 
     // Merge into the existing registry instead of replacing it: a targeted
@@ -331,6 +366,9 @@ pub async fn cleanup(
     let roots = settings.scan_roots.clone();
     let privileged = settings.allow_privileged_operations;
     let scope = settings.docker_prune_scope;
+    let delete_mode = settings.delete_mode;
+    let ai_cleanup_enabled = settings.ai_cleanup_enabled;
+    let retention_days = settings.retention_days;
     let progress_app = app.clone();
     let total_ids = ids.len();
     let results = tokio::task::spawn_blocking(move || {
@@ -357,6 +395,11 @@ pub async fn cleanup(
             &devclean_cleanup::CleanupPolicy {
                 allow_privileged_operations: privileged,
                 docker_prune_scope: scope,
+                delete_mode,
+                // The app always uses the platform Trash (~/.Trash).
+                trash_dir: None,
+                ai_cleanup_enabled,
+                retention_days,
             },
         )
     })
@@ -378,6 +421,8 @@ pub async fn cleanup(
                 name: src.as_ref().map(|s| s.name.clone()).unwrap_or_default(),
                 requested_bytes: r.requested_bytes,
                 freed_bytes: r.freed_bytes,
+                moved_to_trash: r.moved_to_trash,
+                sizing: devclean_core::Sizing::Allocated,
                 status: r.status,
                 error: r.error.clone(),
             };
@@ -630,11 +675,13 @@ mod preview_deadline_tests {
                 path: "/tmp/app/node_modules".into(),
                 size_bytes: 10,
                 reclaimable_bytes: 10,
+                apparent_bytes: None,
                 safety: devclean_core::SafetyLevel::Safe,
                 detail: None,
                 impact: None,
                 age_days: None,
-                retention_eligible: true,
+                blocked_reason: None,
+                blocked_detail: None,
             }],
         };
         devclean_scanner::save_cached_summary(&cache_path, &["/tmp".into()], &summary)

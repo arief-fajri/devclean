@@ -6,6 +6,17 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 
+export {
+  BLOCK_REASON_HINTS,
+  BLOCK_REASON_LABELS,
+  blockHint,
+  blockLabel,
+  blockedBytes,
+  isSelectable,
+  type BlockReason,
+} from "./blocked";
+import type { BlockReason } from "./blocked";
+
 export type SafetyLevel = "safe" | "caution" | "dangerous";
 export type CleanupStatus = "success" | "partial" | "failed" | "cancelled";
 
@@ -20,17 +31,23 @@ export interface Resource {
   provider: string;
   name: string;
   path: string;
+  /** What deleting this frees: allocated blocks, not a sum of file lengths. */
   size_bytes: number;
   reclaimable_bytes: number;
+  /** Logical size, present only when materially LARGER than `size_bytes`
+   * (sparse files). Absent for ordinary trees. */
+  apparent_bytes?: number | null;
   safety: SafetyLevel;
   detail?: string;
   impact?: ResourceImpact;
   /** Age of the item in whole days. Null for global caches, whose age is
    * meaningless — that is why retention never holds them back. */
   age_days?: number | null;
-  /** False when the retention policy keeps this resource. Reported, but
-   * the backend refuses it even if its id is sent directly. */
-  retention_eligible: boolean;
+  /** Why this resource cannot be selected, or null when it can. The backend
+   * refuses any resource carrying a reason, even if its id is sent directly. */
+  blocked_reason?: BlockReason | null;
+  /** One sentence explaining `blocked_reason`. */
+  blocked_detail?: string | null;
 }
 
 export interface ProviderSummary {
@@ -71,7 +88,11 @@ export interface CleanupPreview {
 export interface CleanupResult {
   resource_id: string;
   requested_bytes: number;
+  /** Bytes returned to the filesystem NOW. Zero when the artifact went to
+   * the Trash — the space comes back when you empty it. */
   freed_bytes: number;
+  /** True when the artifact was moved to the Trash rather than removed. */
+  moved_to_trash: boolean;
   duration_ms: number;
   status: CleanupStatus;
   error?: string;
@@ -79,6 +100,20 @@ export interface CleanupResult {
 
 /** How far Docker cleanup may go. Anything past `build-cache` also
  * requires `allow_privileged_operations`. */
+/** How a cleanup removes a whole artifact. */
+export type DeleteMode = "trash" | "permanent";
+
+export const DELETE_MODE_LABELS: Record<DeleteMode, string> = {
+  trash: "Move to Trash",
+  permanent: "Delete permanently",
+};
+
+export const DELETE_MODE_CONSEQUENCE: Record<DeleteMode, string> = {
+  trash:
+    "Recoverable. The space comes back when you empty the Trash, so the summary reports what was moved rather than what was freed.",
+  permanent: "Not recoverable. Space is freed immediately, and there is no undo.",
+};
+
 export type DockerPruneScope =
   | "off"
   | "build-cache"
@@ -123,6 +158,10 @@ export interface Settings {
   /** Copy the AI database aside before a destructive SQL cleanup. Needs
    * roughly the database size in free space. Default off. */
   sqlite_backup: boolean;
+  /** How a cleanup removes a whole artifact. Defaults to `trash`. */
+  delete_mode: DeleteMode;
+  /** Allow cleanup of AI conversation history. Default false. */
+  ai_cleanup_enabled: boolean;
 }
 
 /** A folder DevClean suggests as a scan root. */
@@ -163,6 +202,11 @@ export interface HistoryEntry {
   name: string;
   requested_bytes: number;
   freed_bytes: number;
+  /** True when this entry's artifact was moved to the Trash. */
+  moved_to_trash?: boolean;
+  /** Which sizing convention produced these figures. Absent = "apparent"
+   * (every line written before v0.8.0). */
+  sizing?: "apparent" | "allocated";
   status: CleanupStatus;
   error?: string;
 }
@@ -170,6 +214,8 @@ export interface HistoryEntry {
 /** One cleanup run aggregated over its per-resource entries. The primary
  * unit of the history UI — a single run can be hundreds of resources. */
 export interface CleanupRun {
+  /** True when any entry used the pre-0.1.0 sizing convention. */
+  pre_allocated_sizing: boolean;
   run_id: string;
   finished_at_unix: number;
   entry_count: number;

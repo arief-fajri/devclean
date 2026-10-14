@@ -2,6 +2,7 @@
   import ResourceRow from "$lib/components/ResourceRow.svelte";
   import { formatBytes, formatPct, isStaleSignal } from "$lib/format";
   import { providerMeta } from "$lib/providerMeta";
+  import { blockLabel } from "$lib/tauri";
   import type { ProviderSummary, Resource } from "$lib/tauri";
   import { ChevronDown, LoaderCircle, Lock, RotateCw } from "lucide-svelte";
 
@@ -59,7 +60,7 @@
   );
   const barColor = $derived(reviewCount > 0 ? "bg-amber-500" : "bg-emerald-500");
   /** Held back by the retention policy: visible, but not selectable. */
-  const blockedCount = $derived(resources.filter((r) => !r.retention_eligible).length);
+  const blockedCount = $derived(resources.filter((r) => r.blocked_reason != null).length);
 </script>
 
 <section
@@ -118,8 +119,8 @@
                 </span>
               {/if}
               {#if blockedCount > 0}
-                <span class="ml-1 font-normal text-zinc-400">
-                  · {blockedCount} kept by retention
+                <span class="ml-1 font-normal text-zinc-400" data-testid="blocked-count">
+                  · {blockedCount} not selectable
                 </span>
               {/if}
               {#if active}
@@ -182,7 +183,9 @@
         <ResourceRow
           resource={r}
           checked={selected.includes(r.id)}
-          locked={!r.retention_eligible}
+          locked={r.blocked_reason != null}
+          lockedDetail={r.blocked_detail}
+          lockedLabel={blockLabel(r)}
           disabled={scanning}
           {showPath}
           {onToggle}

@@ -183,13 +183,16 @@ fn unhex(s: &str) -> Option<[u8; 8]> {
     Some(out)
 }
 
-/// Ids that the retention policy (`Settings.retention_days`) keeps out of
-/// cleanup. The cleanup engine refuses these even when a caller sends their
-/// ids directly, so the age policy is not a UI suggestion (I9).
-pub fn retention_blocked(resources: &HashMap<String, crate::Resource>) -> HashSet<String> {
+/// Ids the backend will refuse to clean, whatever the frontend sends (I11).
+///
+/// Superseded `retention_blocked`: it covered only the age policy, so a
+/// resource held back for any other reason (AI report-only, a missing
+/// privileged opt-in, the Docker scope, git protection) was refused by the
+/// engine but invisible here.
+pub fn blocked_ids(resources: &HashMap<String, crate::Resource>) -> HashSet<String> {
     resources
         .values()
-        .filter(|r| !r.retention_eligible)
+        .filter(|r| r.blocked_reason.is_some())
         .map(|r| r.id.clone())
         .collect()
 }
@@ -289,10 +292,10 @@ mod tests {
     }
 
     #[test]
-    fn retention_blocked_ids_are_collected_for_the_engine() {
+    fn blocked_ids_are_collected_for_the_engine() {
         use crate::{Resource, SafetyLevel};
         use std::path::PathBuf;
-        let mk = |id: &str, eligible: bool| {
+        let mk = |id: &str, blocked: Option<crate::BlockReason>| {
             (
                 id.to_string(),
                 Resource {
@@ -302,16 +305,21 @@ mod tests {
                     path: PathBuf::from("/tmp/x"),
                     size_bytes: 1,
                     reclaimable_bytes: 1,
+                    apparent_bytes: None,
                     safety: SafetyLevel::Safe,
                     detail: None,
                     impact: None,
                     age_days: Some(3),
-                    retention_eligible: eligible,
+                    blocked_reason: blocked,
+                    blocked_detail: None,
                 },
             )
         };
-        let m: HashMap<String, Resource> = [mk("a", true), mk("b", false)].into_iter().collect();
-        let blocked = retention_blocked(&m);
+        let m: HashMap<String, Resource> =
+            [mk("a", None), mk("b", Some(crate::BlockReason::Retention))]
+                .into_iter()
+                .collect();
+        let blocked = blocked_ids(&m);
         assert!(!blocked.contains("a"));
         assert!(blocked.contains("b"));
     }

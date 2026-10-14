@@ -14,9 +14,12 @@
   import { addableCandidates, alreadyAddedCount } from "$lib/view";
   import {
     DOCKER_SCOPE_CONSEQUENCE,
-    DOCKER_SCOPE_LABELS,
+    DELETE_MODE_CONSEQUENCE,
+  DELETE_MODE_LABELS,
+  DOCKER_SCOPE_LABELS,
     DOCKER_SCOPE_NEEDS_PRIVILEGED,
-    type DockerPruneScope,
+    type DeleteMode,
+  type DockerPruneScope,
     type ProviderInfo,
     type ScanRootCandidate,
     type Settings,
@@ -68,6 +71,8 @@
   let retentionDays = $state<number | null>(null);
   let dockerScope = $state<DockerPruneScope>("build-cache");
   let sqliteBackup = $state(false);
+  let deleteMode = $state<DeleteMode>("trash");
+  let aiCleanup = $state(false);
   let scanAutomatically = $state(false);
   let seeded = $state(false);
 
@@ -83,6 +88,8 @@
     retentionDays = settings.retention_days ?? null;
     dockerScope = settings.docker_prune_scope ?? "build-cache";
     sqliteBackup = settings.sqlite_backup ?? false;
+    deleteMode = settings.delete_mode ?? "trash";
+    aiCleanup = settings.ai_cleanup_enabled ?? false;
     scanAutomatically = settings.scan_automatically ?? false;
     void settingsStore.refreshCandidates();
   }
@@ -120,6 +127,8 @@
       retentionDays !== (settings.retention_days ?? null) ||
       dockerScope !== (settings.docker_prune_scope ?? "build-cache") ||
       sqliteBackup !== (settings.sqlite_backup ?? false) ||
+      deleteMode !== (settings.delete_mode ?? "trash") ||
+      aiCleanup !== (settings.ai_cleanup_enabled ?? false) ||
       scanAutomatically !== (settings.scan_automatically ?? false)
     );
   });
@@ -162,6 +171,8 @@
     retentionDays = null;
     dockerScope = "build-cache";
     sqliteBackup = false;
+    deleteMode = "trash";
+    aiCleanup = false;
     scanAutomatically = false;
     newRoot = "";
     newExcluded = "";
@@ -206,6 +217,8 @@
       retention_days: retentionDays,
       docker_prune_scope: dockerScope,
       sqlite_backup: sqliteBackup,
+      delete_mode: deleteMode,
+      ai_cleanup_enabled: aiCleanup,
     });
   }
 </script>
@@ -509,6 +522,39 @@
           cache has no meaningful age.
         </p>
 
+        <h3 class="mt-6 text-sm font-semibold text-zinc-900 dark:text-zinc-100">
+          When something is cleaned
+        </h3>
+        <p class="mt-1 text-xs text-zinc-500">
+          Applies to whole artifacts that are deleted by path. Vendor commands and database
+          cleanups cannot be undone either way, and always say so.
+        </p>
+        <div class="mt-2 flex flex-wrap gap-2" role="radiogroup" aria-label="Delete mode">
+          {#each Object.entries(DELETE_MODE_LABELS) as [value, label] (value)}
+            <button
+              role="radio"
+              aria-checked={deleteMode === value}
+              data-testid="delete-mode-{value}"
+              class="rounded-lg border px-3 py-1.5 text-sm {deleteMode === value
+                ? 'border-emerald-600 bg-emerald-50 font-medium text-emerald-800 dark:bg-emerald-950 dark:text-emerald-200'
+                : 'border-zinc-200 hover:bg-zinc-100 dark:border-zinc-700 dark:hover:bg-zinc-800'}"
+              onclick={() => (deleteMode = value as DeleteMode)}
+            >
+              {label}
+            </button>
+          {/each}
+        </div>
+        <p class="mt-1.5 text-xs text-zinc-500">{DELETE_MODE_CONSEQUENCE[deleteMode]}</p>
+        {#if deleteMode === "permanent"}
+          <p
+            class="mt-2 rounded-lg bg-amber-50 px-2.5 py-2 text-xs text-amber-800 dark:bg-amber-950/40 dark:text-amber-200"
+            data-testid="permanent-warning"
+          >
+            Permanent deletion has no undo. Reclaiming disk space immediately is the only reason
+            to choose it.
+          </p>
+        {/if}
+
         <h3 class="mt-6 text-sm font-semibold text-zinc-900 dark:text-zinc-100">Docker</h3>
         <label class="mt-2 block text-sm">
           <span class="sr-only">Docker cleanup scope</span>
@@ -557,8 +603,33 @@
         {/if}
 
         <h3 class="mt-6 text-sm font-semibold text-zinc-900 dark:text-zinc-100">
-          AI history safety
+          AI history
         </h3>
+        <label class="mt-2 flex items-start gap-2 text-sm">
+          <input
+            type="checkbox"
+            class="mt-0.5 h-4 w-4 accent-emerald-600"
+            bind:checked={aiCleanup}
+            data-testid="ai-cleanup-enabled"
+          />
+          <span>
+            Allow cleaning AI conversation history
+            <span class="block text-xs text-zinc-500">
+              Off by default. Session transcripts, project memory and agent state cannot be
+              regenerated, so they are reported with their sizes but stay unselectable until you
+              turn this on. Nothing is deleted by enabling it — it only makes those rows
+              selectable.
+            </span>
+          </span>
+        </label>
+        {#if !aiCleanup}
+          <p
+            class="mt-2 rounded-lg bg-zinc-100 px-2.5 py-2 text-xs text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300"
+            data-testid="ai-report-only"
+          >
+            AI history is currently <strong class="font-medium">report only</strong>.
+          </p>
+        {/if}
         <label class="mt-2 flex items-start gap-2 text-sm">
           <input
             type="checkbox"

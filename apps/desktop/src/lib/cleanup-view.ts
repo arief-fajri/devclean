@@ -71,3 +71,58 @@ export function coverageNote(c: PreviewCoverage): string | null {
   }
   return null;
 }
+/** What a finished cleanup actually achieved. */
+export interface CleanupOutcome {
+  /** Bytes returned to the filesystem now. */
+  freed: number;
+  /** Bytes sitting in the Trash — recoverable until the user empties it. */
+  pending: number;
+  /** How many items were moved to the Trash. */
+  trashed: number;
+  /** Bytes the user asked to reclaim. */
+  requested: number;
+  /**
+   * Which sentence the summary must use:
+   * - `freed`   — everything was removed outright
+   * - `trashed` — everything went to the Trash, nothing is freed yet
+   * - `mixed`   — some of both
+   * - `nothing` — nothing succeeded
+   */
+  headline: "freed" | "trashed" | "mixed" | "nothing";
+}
+
+/**
+ * Summarise a finished run honestly.
+ *
+ * Under the default Trash mode `freed_bytes` is 0 by design, so a summary
+ * that only reads `freed_bytes` would report "0 B freed" after successfully
+ * moving 12 GB aside — indistinguishable from a total failure. This splits
+ * the two figures so the UI can say which one it means.
+ */
+export function cleanupOutcome(
+  results: { freed_bytes: number; requested_bytes: number; moved_to_trash: boolean; status: string }[],
+): CleanupOutcome {
+  let freed = 0;
+  let pending = 0;
+  let trashed = 0;
+  let requested = 0;
+  let succeeded = 0;
+
+  for (const r of results) {
+    requested += r.requested_bytes;
+    if (r.status !== "success" && r.status !== "partial") continue;
+    succeeded += 1;
+    if (r.moved_to_trash) {
+      trashed += 1;
+      // A trashed item frees nothing yet; its whole size is pending.
+      pending += r.requested_bytes;
+    } else {
+      freed += r.freed_bytes;
+    }
+  }
+
+  const headline: CleanupOutcome["headline"] =
+    succeeded === 0 ? "nothing" : trashed === 0 ? "freed" : freed > 0 ? "mixed" : "trashed";
+
+  return { freed, pending, trashed, requested, headline };
+}

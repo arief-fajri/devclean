@@ -11,7 +11,7 @@
 //! - Config and credentials are never prune targets (I10).
 
 use super::ai_guard;
-use super::provider::{dir_size, home_dir, impact, project_detail, CleanupAction, Provider};
+use super::provider::{dir_size_detail, home_dir, impact, project_detail, CleanupAction, Provider};
 use devclean_core::{Resource, SafetyLevel};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::AtomicBool;
@@ -63,8 +63,8 @@ impl Provider for OpencodeFsProvider {
                 if !dir.is_dir() {
                     return None;
                 }
-                let size = dir_size(&dir);
-                if size == 0 {
+                let size = dir_size_detail(&dir);
+                if size.allocated == 0 {
                     return None;
                 }
                 Some(Resource {
@@ -72,8 +72,9 @@ impl Provider for OpencodeFsProvider {
                     provider: self.id().to_string(),
                     name: format!("opencode {label}"),
                     path: dir.clone(),
-                    size_bytes: size,
-                    reclaimable_bytes: size,
+                    size_bytes: size.allocated,
+                    reclaimable_bytes: size.allocated,
+                    apparent_bytes: size.apparent_if_material(),
                     safety: SafetyLevel::Caution,
                     detail: Some(if running {
                         "opencode is running — cleanup will be skipped".to_string()
@@ -81,7 +82,8 @@ impl Provider for OpencodeFsProvider {
                         detail_for(&dir)
                     }),
                     age_days: super::provider::age_days(&dir),
-                    retention_eligible: true,
+                    blocked_reason: None,
+                    blocked_detail: None,
                     impact: impact(
                         if running {
                             "opencode is running right now, so this is skipped. \
@@ -121,6 +123,10 @@ impl Provider for OpencodeFsProvider {
     /// opencode keeps a single `log/` dir rather than per-item history, so
     /// a whole-directory age is the only signal available. It still counts:
     /// a log dir untouched for months is safe to clear.
+    fn is_user_data(&self) -> bool {
+        true
+    }
+
     fn retention_days(&self) -> Option<u32> {
         Some(30)
     }

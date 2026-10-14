@@ -7,7 +7,7 @@
 //! Lives outside scan roots → declares
 //! [`Provider::extra_allowed_roots`]; protected-path rules still apply.
 
-use super::provider::{dir_size, home_dir, impact, measure_dir, CleanupAction, Provider};
+use super::provider::{dir_size_detail, home_dir, impact, measure_dir, CleanupAction, Provider};
 use devclean_core::{Resource, SafetyLevel};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::AtomicBool;
@@ -34,8 +34,8 @@ impl Provider for GradleCacheProvider {
         let Some(dir) = gradle_caches_dir() else {
             return Vec::new();
         };
-        let size = dir_size(&dir);
-        if size == 0 {
+        let size = dir_size_detail(&dir);
+        if size.allocated == 0 {
             return Vec::new();
         }
         vec![Resource {
@@ -43,12 +43,14 @@ impl Provider for GradleCacheProvider {
             provider: self.id().to_string(),
             name: "Gradle caches".to_string(),
             path: dir,
-            size_bytes: size,
-            reclaimable_bytes: size,
+            size_bytes: size.allocated,
+            reclaimable_bytes: size.allocated,
+            apparent_bytes: size.apparent_if_material(),
             safety: SafetyLevel::Caution,
             detail: None,
             age_days: None,
-            retention_eligible: true,
+            blocked_reason: None,
+            blocked_detail: None,
             impact: impact(
                 "Gradle re-downloads dependencies on the next sync.",
                 Some("Requires network · cold syncs are slow"),

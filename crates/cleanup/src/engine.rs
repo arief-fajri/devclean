@@ -1,10 +1,10 @@
 use devclean_core::{
-    CleanupPreview, CleanupPreviewItem, CleanupResult, CleanupStatus, DockerPruneScope, Resource,
-    SafetyValidator, CLEANUP_COMMAND_TIMEOUT,
+    CleanupPreview, CleanupPreviewItem, CleanupResult, CleanupStatus, DeleteMode, DockerPruneScope,
+    Resource, SafetyValidator, CLEANUP_COMMAND_TIMEOUT,
 };
 use devclean_providers::{CleanupAction, Provider};
 use std::collections::HashMap;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::{
     atomic::{AtomicBool, Ordering},
     Arc,
@@ -17,56 +17,52 @@ use std::time::{Duration, Instant};
 /// progress bar while the queue still runs.
 pub type CleanupProgressFn = Box<dyn Fn(usize, usize, &CleanupResult) + Send + Sync>;
 
-/// Backend-enforced limits that are NOT about path safety (G-SAFE-03, I9).
+/// Backend-enforced limits that are NOT about path safety (G-SAFE-03, I9,
+/// I11).
 ///
-/// Everything here is checked by the engine before a resource is touched,
-/// so sending a forbidden id straight to the `cleanup` command is refused
+/// Everything here is checked by the engine before a resource is touched, so
+/// sending a forbidden id straight to the `cleanup` command is refused
 /// exactly as if the user had clicked the button.
-#[derive(Debug, Clone, Copy, Default)]
+#[derive(Debug, Clone, Default)]
 pub struct CleanupPolicy {
     /// The user unlocked destructive-but-requested operations in Settings.
     pub allow_privileged_operations: bool,
     /// How far Docker pruning may go.
     pub docker_prune_scope: DockerPruneScope,
+    /// Trash or permanent for whole-artifact removal (`RemoveDir`).
+    /// Command- and SQL-backed actions cannot be trashed — a vendor prune or
+    /// a `DELETE FROM` has no undo — so this only governs path removal.
+    pub delete_mode: DeleteMode,
+    /// Where Trash moves land. `None` uses the platform default (`~/.Trash`).
+    /// Overridable so tests never touch the user's real Trash, and so a user
+    /// can redirect it.
+    pub trash_dir: Option<PathBuf>,
+    /// `Settings.ai_cleanup_enabled`. Off by default: AI conversation history
+    /// is reported but not cleanable until the user opts in.
+    pub ai_cleanup_enabled: bool,
+    /// `Settings.retention_days`, re-checked here so a setting changed after
+    /// the scan cannot be bypassed by a stale resource.
+    pub retention_days: Option<u32>,
 }
 
-/// Why a resource was refused before any action ran.
+/// Why a resource was refused before any action ran: the machine-readable
+/// reason plus the sentence the UI shows.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum Refusal {
-    /// `Settings.retention_days` keeps this resource (I9).
-    RetentionKept {
-        age_days: Option<u64>,
-        keep_days: u32,
-    },
-    /// The action goes past build-cache pruning without the user opting in.
-    PrivilegedLocked { consequence: String },
-    /// `DockerPruneScope::Off`.
-    DockerDisabled,
+pub struct Refusal {
+    pub reason: devclean_core::BlockReason,
+    pub detail: String,
 }
 
-impl std::fmt::Display for Refusal {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::RetentionKept {
-                age_days: Some(d),
-                keep_days,
-            } => write!(
-                f,
-                "kept by your {keep_days}-day retention policy (this is {d}d old)"
-            ),
-            Self::RetentionKept { keep_days, .. } => {
-                write!(f, "kept by your {keep_days}-day retention policy")
-            }
-            Self::PrivilegedLocked { consequence } => write!(
-                f,
-                "needs Privileged operations in Settings > Cleanup ({consequence})"
-            ),
-            Self::DockerDisabled => {
-                write!(f, "Docker cleanup is off in Settings > Cleanup")
-            }
-        }
-    }
-}
+/// The ungated [`CleanupEngine::execute`] path removes outright. Kept as a
+/// named constant so the reason is visible at the call site.
+const PERMANENT: CleanupPolicy = CleanupPolicy {
+    allow_privileged_operations: false,
+    docker_prune_scope: DockerPruneScope::Off,
+    delete_mode: DeleteMode::Permanent,
+    trash_dir: None,
+    ai_cleanup_enabled: true,
+    retention_days: None,
+};
 
 #[derive(Clone)]
 pub struct CleanupEngine {
@@ -152,7 +148,7 @@ impl CleanupEngine {
                 // Gates run BEFORE any measurement or filesystem access.
                 match refusal_for(r, p, policy) {
                     Some(reason) => refused_result(id, r, reason),
-                    None => self.clean_one(id, r, p, validator, &lookup),
+                    None => self.clean_one(id, r, p, validator, &lookup, policy),
                 }
             };
             done += 1;
@@ -193,7 +189,9 @@ impl CleanupEngine {
                 let Some(p) = providers.get(&r.provider) else {
                     continue;
                 };
-                self.clean_one(id, r, p, validator, &lookup)
+                // The ungated primitive removes outright: it exists for unit
+                // tests that exercise measurement, not for user-facing runs.
+                self.clean_one(id, r, p, validator, &lookup, &PERMANENT)
             };
             done += 1;
             if let Some(cb) = &on_progress {
@@ -211,6 +209,7 @@ impl CleanupEngine {
         provider: &Arc<dyn Provider>,
         validator: &SafetyValidator,
         lookup: &dyn Fn(&str) -> Option<std::path::PathBuf>,
+        policy: &CleanupPolicy,
     ) -> CleanupResult {
         let start = Instant::now();
         // Resolve the authoritative path server-side (I1).
@@ -220,16 +219,30 @@ impl CleanupEngine {
         let before = provider.measure(&path);
 
         let action = provider.cleanup_action(&path);
-        let outcome: Result<u64, String> = match &action {
+        let outcome: Result<Outcome, String> = match &action {
             CleanupAction::RemoveDir(path) => {
                 // I2: validate before touching anything.
                 if let Err(e) = validator.validate_path(path) {
                     return failed(id, before, provider, path, start, e.to_string());
                 }
-                match std::fs::remove_dir_all(path) {
-                    Ok(()) => Ok(provider.measure(path).map_or(before.unwrap_or(0), |after| {
-                        before.unwrap_or(0).saturating_sub(after)
-                    })),
+                match remove_path(path, policy.delete_mode, policy.trash_dir.as_deref()) {
+                    Ok(()) => {
+                        let moved = !policy.delete_mode.frees_space_immediately();
+                        // Under Trash the bytes are still on disk, so `freed`
+                        // must be 0: the space returns when the user empties
+                        // the Trash, and claiming it now would be a lie.
+                        let freed = if moved {
+                            0
+                        } else {
+                            provider.measure(path).map_or(before.unwrap_or(0), |after| {
+                                before.unwrap_or(0).saturating_sub(after)
+                            })
+                        };
+                        Ok(Outcome {
+                            freed,
+                            moved_to_trash: moved,
+                        })
+                    }
                     Err(e) => Err(format!("could not remove {}: {e}", path.display())),
                 }
             }
@@ -245,7 +258,7 @@ impl CleanupEngine {
                         match provider.measure(&path) {
                             Some(after) => {
                                 let b = before.unwrap_or(0);
-                                Ok(b.saturating_sub(after))
+                                Ok(Outcome::freed(b.saturating_sub(after)))
                             }
                             None => Err(format!(
                                 "{cmd} completed, but the freed space could not be \
@@ -273,13 +286,13 @@ impl CleanupEngine {
                 if let Err(e) = validator.validate_path(dir) {
                     return failed(id, before, provider, dir, start, e.to_string());
                 }
-                Ok(crate::retention::prune(
+                Ok(Outcome::freed(crate::retention::prune(
                     dir,
                     *min_age_days,
                     pattern,
                     *prune_empty_dirs,
                     skip_names,
-                ))
+                )))
             }
             CleanupAction::RunSql {
                 db,
@@ -303,17 +316,22 @@ impl CleanupEngine {
                     *vacuum,
                     *require_idle,
                 )
+                .map(Outcome::freed)
             }
         };
 
-        let (status, freed, error) = match outcome {
-            Ok(freed) => (CleanupStatus::Success, freed, None),
-            Err(error) => Self::failed_outcome(before, provider, &path, error),
+        let (status, freed, moved_to_trash, error) = match outcome {
+            Ok(o) => (CleanupStatus::Success, o.freed, o.moved_to_trash, None),
+            Err(error) => {
+                let (status, freed, error) = Self::failed_outcome(before, provider, &path, error);
+                (status, freed, false, error)
+            }
         };
         CleanupResult {
             resource_id: id.to_string(),
             requested_bytes: r.reclaimable_bytes,
             freed_bytes: freed,
+            moved_to_trash,
             duration_ms: start.elapsed().as_millis() as u64,
             status,
             error,
@@ -352,9 +370,49 @@ fn failed(
         resource_id: id.to_string(),
         requested_bytes: 0,
         freed_bytes: freed,
+        moved_to_trash: false,
         duration_ms: start.elapsed().as_millis() as u64,
         status,
         error,
+    }
+}
+
+/// What a successful action produced.
+#[derive(Debug, Clone, Copy)]
+struct Outcome {
+    /// Bytes returned to the filesystem right now.
+    freed: u64,
+    /// True when the artifact went to the Trash instead of being removed, so
+    /// `freed` is 0 and the space is pending.
+    moved_to_trash: bool,
+}
+
+impl Outcome {
+    fn freed(freed: u64) -> Self {
+        Self {
+            freed,
+            moved_to_trash: false,
+        }
+    }
+}
+
+/// Remove a validated path, honouring the delete mode.
+///
+/// `Trash` goes through the OS Trash (macOS) / freedesktop trash (Linux), so
+/// the artifact is recoverable. `Permanent` removes it outright. A failure
+/// from `trash` is NOT silently downgraded to a permanent delete — losing the
+/// undo is exactly what the user asked to avoid.
+fn remove_path(path: &Path, mode: DeleteMode, trash_dir: Option<&Path>) -> Result<(), String> {
+    match mode {
+        DeleteMode::Trash => {
+            let dir = match trash_dir {
+                Some(d) => d.to_path_buf(),
+                None => crate::trash::default_trash_dir()
+                    .ok_or_else(|| "no HOME, so there is no Trash to move into".to_string())?,
+            };
+            crate::trash::move_to_trash(path, &dir).map(|_| ())
+        }
+        DeleteMode::Permanent => std::fs::remove_dir_all(path).map_err(|e| e.to_string()),
     }
 }
 
@@ -364,26 +422,62 @@ fn failed(
 /// rather than pattern-matching provider ids, so a new provider is gated
 /// automatically instead of needing an `if` here (P1).
 fn refusal_for(r: &Resource, p: &Arc<dyn Provider>, policy: &CleanupPolicy) -> Option<Refusal> {
-    // 1. Retention (I9). Enforced here, not in the UI, so a direct call to
-    //    `cleanup` cannot bypass the age policy.
-    if !r.retention_eligible {
-        return Some(Refusal::RetentionKept {
-            age_days: r.age_days,
-            keep_days: p.retention_days().unwrap_or(0),
+    use devclean_core::BlockReason;
+
+    // 1. A reason stamped at scan time. This is the SAME value the UI shows,
+    //    so the explanation the user read is the explanation the engine
+    //    enforces (I11) — they cannot drift apart.
+    if let Some(reason) = r.blocked_reason {
+        return Some(Refusal {
+            reason,
+            detail: r
+                .blocked_detail
+                .clone()
+                .unwrap_or_else(|| reason.label().to_string()),
         });
     }
 
-    // 2/3. Privileged operations + Docker scope (G-SAFE-03). Only providers
-    //      that declare a Docker scope are subject to these gates; every
-    //      other provider returns `None` here and passes straight through.
-    let required = p.required_docker_scope()?;
-    if policy.docker_prune_scope == DockerPruneScope::Off {
-        return Some(Refusal::DockerDisabled);
-    }
-    if required.requires_privileged() && !policy.allow_privileged_operations {
-        return Some(Refusal::PrivilegedLocked {
-            consequence: required.consequence().to_string(),
+    // 2. Re-derive from the LIVE policy. Settings can change between the scan
+    //    that stamped nothing and this call, and a stale "allowed" must not
+    //    become a way past the gate.
+    if p.is_user_data() && !policy.ai_cleanup_enabled {
+        return Some(Refusal {
+            reason: BlockReason::AiReadOnly,
+            detail: "AI history is report-only until you enable it in Settings > Cleanup"
+                .to_string(),
         });
+    }
+    if let Some(required) = p.required_docker_scope() {
+        if policy.docker_prune_scope == DockerPruneScope::Off {
+            return Some(Refusal {
+                reason: BlockReason::DockerScope,
+                detail: "Docker cleanup is off in Settings > Cleanup".to_string(),
+            });
+        }
+        if required.requires_privileged() && !policy.allow_privileged_operations {
+            return Some(Refusal {
+                reason: BlockReason::PrivilegedRequired,
+                detail: format!(
+                    "needs Privileged operations in Settings > Cleanup ({})",
+                    required.consequence()
+                ),
+            });
+        }
+    }
+
+    // 3. Retention, when nothing else already blocked it.
+    if let Some(keep) = policy.retention_days {
+        if r.age_days.is_none_or(|d| d <= u64::from(keep)) {
+            return Some(Refusal {
+                reason: BlockReason::Retention,
+                detail: match r.age_days {
+                    Some(d) => {
+                        format!("kept by your {keep}-day retention policy (this is {d}d old)")
+                    }
+                    None => format!("kept by your {keep}-day retention policy (age unknown)"),
+                },
+            });
+        }
     }
     None
 }
@@ -393,9 +487,10 @@ fn refused_result(id: &str, r: &Resource, reason: Refusal) -> CleanupResult {
         resource_id: id.to_string(),
         requested_bytes: r.reclaimable_bytes,
         freed_bytes: 0,
+        moved_to_trash: false,
         duration_ms: 0,
         status: CleanupStatus::Failed,
-        error: Some(reason.to_string()),
+        error: Some(reason.detail),
     }
 }
 
@@ -412,6 +507,7 @@ fn cancelled_result(id: &str, r: Option<&Resource>) -> CleanupResult {
         resource_id: id.to_string(),
         requested_bytes: r.map(|r| r.reclaimable_bytes).unwrap_or(0),
         freed_bytes: 0,
+        moved_to_trash: false,
         duration_ms: 0,
         status: CleanupStatus::Cancelled,
         error: None,
@@ -530,11 +626,13 @@ mod tests {
                 path: target.clone(),
                 size_bytes: 2000,
                 reclaimable_bytes: 2000,
+                apparent_bytes: None,
                 safety: SafetyLevel::Safe,
                 detail: None,
                 impact: None,
                 age_days: None,
-                retention_eligible: true,
+                blocked_reason: None,
+                blocked_detail: None,
             },
         );
         let validator = SafetyValidator::new(vec![root.clone()]);
@@ -573,11 +671,13 @@ mod tests {
                 path: target.clone(),
                 size_bytes: 2000,
                 reclaimable_bytes: 2000,
+                apparent_bytes: None,
                 safety: SafetyLevel::Safe,
                 detail: None,
                 impact: None,
                 age_days: None,
-                retention_eligible: true,
+                blocked_reason: None,
+                blocked_detail: None,
             },
         );
         // Validator rooted elsewhere: the same path must be refused.
@@ -616,11 +716,13 @@ mod tests {
             path: target.to_path_buf(),
             size_bytes: 2000,
             reclaimable_bytes: 2000,
+            apparent_bytes: None,
             safety: SafetyLevel::Safe,
             detail: None,
             impact: None,
             age_days: None,
-            retention_eligible: true,
+            blocked_reason: None,
+            blocked_detail: None,
         }
     }
 
@@ -761,11 +863,13 @@ mod tests {
             path: PathBuf::from("__sentinel__/cache"),
             size_bytes: before_bytes,
             reclaimable_bytes: before_bytes,
+            apparent_bytes: None,
             safety: SafetyLevel::Safe,
             detail: None,
             impact: None,
             age_days: None,
-            retention_eligible: true,
+            blocked_reason: None,
+            blocked_detail: None,
         };
         let mut resources = HashMap::new();
         resources.insert(id.clone(), r);
@@ -803,11 +907,13 @@ mod tests {
             path: PathBuf::from("__sentinel__/cache"),
             size_bytes: n,
             reclaimable_bytes: n,
+            apparent_bytes: None,
             safety: SafetyLevel::Safe,
             detail: None,
             impact: None,
             age_days: None,
-            retention_eligible: true,
+            blocked_reason: None,
+            blocked_detail: None,
         };
         let mut resources = HashMap::new();
         resources.insert(id.clone(), r);
@@ -861,11 +967,13 @@ mod tests {
             path: PathBuf::from("__virtual__/thing"),
             size_bytes: 5_000_000_000,
             reclaimable_bytes: 5_000_000_000,
+            apparent_bytes: None,
             safety: SafetyLevel::Safe,
             detail: None,
             impact: None,
             age_days: None,
-            retention_eligible: true,
+            blocked_reason: None,
+            blocked_detail: None,
         };
         let mut resources = HashMap::new();
         resources.insert(id.clone(), r);
@@ -902,11 +1010,13 @@ mod tests {
                 path: target.clone(),
                 size_bytes: 2000,
                 reclaimable_bytes: 2000,
+                apparent_bytes: None,
                 safety: SafetyLevel::Safe,
                 detail: None,
                 impact: None,
                 age_days: None,
-                retention_eligible: true,
+                blocked_reason: None,
+                blocked_detail: None,
             },
         );
         let providers: HashMap<String, Arc<dyn Provider>> = HashMap::from([(
@@ -934,6 +1044,134 @@ mod tests {
         let _ = std::fs::remove_dir_all(&root);
     }
 
+    // ------------------------------------------------------------- trash
+
+    /// `Trash` must move the artifact aside, not remove it, and must NOT
+    /// claim the space back: the bytes are still on disk until the user
+    /// empties the Trash. Reporting `freed > 0` here would be a lie, and it
+    /// is exactly the class of bug G-REL-03 exists to prevent.
+    #[test]
+    fn trash_mode_moves_aside_and_reports_pending_not_freed() {
+        let (root, target) = fixture("trash");
+        let (mut resources, providers) = setup();
+        resources.insert("nm:0200".to_string(), resource("nm:0200", &target));
+        let validator = SafetyValidator::new(vec![root.clone()]);
+        let lookup = |id: &str| resources.get(id).map(|x| x.path.clone());
+
+        let out = CleanupEngine::default().execute_gated(
+            &["nm:0200".to_string()],
+            &resources,
+            &providers,
+            &validator,
+            lookup,
+            None,
+            &CleanupPolicy {
+                delete_mode: DeleteMode::Trash,
+                ..CleanupPolicy::default()
+            },
+        );
+
+        assert_eq!(out[0].status, CleanupStatus::Success, "{:?}", out[0].error);
+        assert!(
+            out[0].moved_to_trash,
+            "the result must say it went to Trash"
+        );
+        assert_eq!(
+            out[0].freed_bytes, 0,
+            "space held by the Trash has not been returned yet"
+        );
+        assert!(
+            !target.exists(),
+            "the artifact must no longer be at its original path"
+        );
+
+        // Clean up the Trash entry this test created.
+        if let Ok(home) = std::env::var("HOME") {
+            let name = target.file_name().unwrap().to_string_lossy().into_owned();
+            let _ = std::fs::remove_dir_all(std::path::Path::new(&home).join(".Trash").join(&name));
+        }
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// `Permanent` is the explicit opt-out: it removes outright and may claim
+    /// the space back, because the space really is back.
+    #[test]
+    fn permanent_mode_removes_and_reports_freed() {
+        let (root, target) = fixture("perm");
+        let (mut resources, providers) = setup();
+        resources.insert("nm:0201".to_string(), resource("nm:0201", &target));
+        let validator = SafetyValidator::new(vec![root.clone()]);
+        let lookup = |id: &str| resources.get(id).map(|x| x.path.clone());
+
+        let out = CleanupEngine::default().execute_gated(
+            &["nm:0201".to_string()],
+            &resources,
+            &providers,
+            &validator,
+            lookup,
+            None,
+            &CleanupPolicy {
+                delete_mode: DeleteMode::Permanent,
+                ..CleanupPolicy::default()
+            },
+        );
+
+        assert_eq!(out[0].status, CleanupStatus::Success, "{:?}", out[0].error);
+        assert!(!out[0].moved_to_trash);
+        assert!(out[0].freed_bytes > 0, "permanent removal frees space now");
+        assert!(!target.exists());
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// A vendor command or a SQL DELETE has no undo, so the delete mode must
+    /// not be read as applying to them — otherwise a user who chose Trash
+    /// would believe `docker builder prune` was recoverable.
+    #[test]
+    fn command_backed_actions_are_never_marked_as_trashed() {
+        let id = "sn:trash".to_string();
+        let r = Resource {
+            id: id.clone(),
+            provider: "sentinel".to_string(),
+            name: "Virtual cache".to_string(),
+            path: PathBuf::from("__sentinel__/cache"),
+            size_bytes: 1000,
+            reclaimable_bytes: 1000,
+            apparent_bytes: None,
+            safety: SafetyLevel::Safe,
+            detail: None,
+            impact: None,
+            age_days: None,
+            blocked_reason: None,
+            blocked_detail: None,
+        };
+        let mut resources = HashMap::new();
+        resources.insert(id.clone(), r);
+        let providers: HashMap<String, Arc<dyn Provider>> = HashMap::from([(
+            "sentinel".to_string(),
+            Arc::new(SentinelProvider::new("sentinel", &[1000, 400])) as Arc<dyn Provider>,
+        )]);
+        let validator = SafetyValidator::new(vec![PathBuf::from("/tmp")]);
+        let lookup = |id: &str| resources.get(id).map(|x| x.path.clone());
+
+        let out = CleanupEngine::default().execute_gated(
+            &[id],
+            &resources,
+            &providers,
+            &validator,
+            lookup,
+            None,
+            &CleanupPolicy {
+                delete_mode: DeleteMode::Trash,
+                ..CleanupPolicy::default()
+            },
+        );
+        assert!(
+            !out[0].moved_to_trash,
+            "a subprocess cannot be trashed, so the mode must not claim it was"
+        );
+        assert_eq!(out[0].freed_bytes, 600);
+    }
+
     // ---------------------------------------------------------------- gates
 
     fn gated_resource(id: &str, path: &Path, provider: &str) -> Resource {
@@ -944,10 +1182,12 @@ mod tests {
             path: path.to_path_buf(),
             size_bytes: 2000,
             reclaimable_bytes: 2000,
+            apparent_bytes: None,
             safety: SafetyLevel::Safe,
             detail: None,
             age_days: Some(3),
-            retention_eligible: true,
+            blocked_reason: None,
+            blocked_detail: None,
             impact: None,
         }
     }
@@ -959,7 +1199,8 @@ mod tests {
     fn retention_blocked_resource_is_refused_by_the_engine() {
         let (root, target) = fixture("gate-retention");
         let mut r = gated_resource("nm:0100", &target, "node_modules");
-        r.retention_eligible = false;
+        r.blocked_reason = Some(devclean_core::BlockReason::Retention);
+        r.blocked_detail = Some("kept by your 30-day retention policy".to_string());
         r.age_days = Some(3);
         let mut resources = HashMap::new();
         resources.insert(r.id.clone(), r);
@@ -1137,6 +1378,10 @@ mod tests {
             &CleanupPolicy {
                 allow_privileged_operations: true,
                 docker_prune_scope: devclean_core::DockerPruneScope::Off,
+                delete_mode: DeleteMode::Permanent,
+                trash_dir: None,
+                ai_cleanup_enabled: true,
+                retention_days: None,
             },
         );
         assert_eq!(out[0].status, CleanupStatus::Failed);
@@ -1171,6 +1416,10 @@ mod tests {
             &CleanupPolicy {
                 allow_privileged_operations: false,
                 docker_prune_scope: devclean_core::DockerPruneScope::All,
+                delete_mode: DeleteMode::Permanent,
+                trash_dir: None,
+                ai_cleanup_enabled: true,
+                retention_days: None,
             },
         );
         assert_eq!(out[0].status, CleanupStatus::Success, "{:?}", out[0].error);

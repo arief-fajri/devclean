@@ -99,11 +99,15 @@ fn empty_run(e: &HistoryEntry) -> CleanupRun {
         failed: 0,
         cancelled: 0,
         providers: Vec::new(),
+        pre_allocated_sizing: false,
         entries: Vec::new(),
     }
 }
 
 fn push_entry(run: &mut CleanupRun, e: HistoryEntry) {
+    if e.sizing == devclean_core::Sizing::Apparent {
+        run.pre_allocated_sizing = true;
+    }
     run.entry_count += 1;
     run.requested_bytes += e.requested_bytes;
     run.freed_bytes += e.freed_bytes;
@@ -223,6 +227,8 @@ mod tests {
             name: format!("{id}/node_modules"),
             requested_bytes: 100,
             freed_bytes: 100,
+            moved_to_trash: false,
+            sizing: devclean_core::Sizing::Allocated,
             status: CleanupStatus::Success,
             error: None,
         }

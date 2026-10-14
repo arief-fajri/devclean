@@ -56,7 +56,18 @@ fn run_once(root: &Path, concurrency: usize) -> Duration {
         .enable_all()
         .build()
         .expect("runtime")
-        .block_on(async { manager.scan_all(roots, &[], &[], None, None).await });
+        .block_on(async {
+            manager
+                .scan_all(
+                    roots,
+                    &[],
+                    &[],
+                    devclean_core::PolicyInputs::default(),
+                    None,
+                    None,
+                )
+                .await
+        });
     let elapsed = started.elapsed();
     // Touch the result so the optimiser cannot skip the work.
     println!(

@@ -120,7 +120,7 @@ class ScanStore {
         total_bytes: resources.reduce((acc, r) => acc + r.size_bytes, 0),
         reclaimable_bytes: resources.reduce((acc, r) => acc + r.reclaimable_bytes, 0),
         retention_blocked_bytes: resources
-          .filter((r) => !r.retention_eligible)
+          .filter((r) => r.blocked_reason != null)
           .reduce((acc, r) => acc + r.reclaimable_bytes, 0),
         providers,
         resources,

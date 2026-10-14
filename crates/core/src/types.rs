@@ -27,8 +27,16 @@ pub struct Resource {
     pub name: String,
     /// Absolute path resolved by the backend. Informational for display only.
     pub path: PathBuf,
+    /// Bytes this resource actually occupies — what deleting it frees.
+    /// Block-accurate (`st_blocks * 512`), not a sum of payload lengths.
     pub size_bytes: u64,
     pub reclaimable_bytes: u64,
+    /// Logical size, present only when it is materially LARGER than
+    /// `size_bytes` — i.e. the resource holds sparse files (a 460 GB-declared
+    /// disk image occupying 8 GB). `None` for ordinary trees, where block
+    /// rounding makes the logical figure smaller, not larger.
+    #[serde(default)]
+    pub apparent_bytes: Option<u64>,
     pub safety: SafetyLevel,
     /// Extra context, e.g. `"143 days stale · pnpm"`.
     pub detail: Option<String>,
@@ -42,16 +50,52 @@ pub struct Resource {
     /// safety verdict.
     #[serde(default)]
     pub age_days: Option<u64>,
-    /// False when the active retention policy keeps this resource
-    /// (`Settings.retention_days`). Such a resource is reported but must be
-    /// refused by the cleanup engine even if its id is sent directly.
-    /// `#[serde(default = "default_true")]` keeps old caches eligible.
-    #[serde(default = "default_true")]
-    pub retention_eligible: bool,
+    /// Why this resource cannot be selected for cleanup, or `None` when it
+    /// can. Reported resources with a reason are still listed — the user
+    /// should see what exists and why it is held back — but the cleanup
+    /// engine refuses them even if their id is sent directly (I11).
+    ///
+    /// Replaces the old `retention_eligible: bool`, which could only say
+    /// "no" without saying why.
+    #[serde(default)]
+    pub blocked_reason: Option<BlockReason>,
+    /// One human sentence explaining `blocked_reason`, e.g. "kept by your
+    /// 30-day retention policy (this is 12d old)".
+    #[serde(default)]
+    pub blocked_detail: Option<String>,
 }
 
-fn default_true() -> bool {
-    true
+/// Why a reported resource cannot be cleaned (contract v0.8.0).
+///
+/// Deliberately a closed set: every reason has exactly one enforcement point
+/// in `devclean_cleanup::engine::refusal_for`, so the UI can explain a
+/// resource and the engine can refuse it from the same value.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum BlockReason {
+    /// `Settings.retention_days` keeps it — it is younger than the policy.
+    Retention,
+    /// AI conversation history, and `Settings.ai_cleanup_enabled` is off.
+    AiReadOnly,
+    /// The action needs `Settings.allow_privileged_operations`.
+    PrivilegedRequired,
+    /// `Settings.docker_prune_scope` does not cover this action.
+    DockerScope,
+    /// Git-aware protection: the artifact is tracked and the repo is dirty.
+    Protected,
+}
+
+impl BlockReason {
+    /// Short label for a badge.
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Retention => "kept",
+            Self::AiReadOnly => "report only",
+            Self::PrivilegedRequired => "needs opt-in",
+            Self::DockerScope => "scope off",
+            Self::Protected => "protected",
+        }
+    }
 }
 
 /// What happens when a resource is cleaned — one honest sentence plus
@@ -154,7 +198,13 @@ pub struct CleanupPreview {
 pub struct CleanupResult {
     pub resource_id: String,
     pub requested_bytes: u64,
+    /// Bytes returned to the filesystem NOW. Under `DeleteMode::Trash` this
+    /// is 0 — the artifact is recoverable and the space returns only when the
+    /// user empties the Trash. Claiming it earlier would be a lie.
     pub freed_bytes: u64,
+    /// True when the artifact was moved to the Trash rather than removed.
+    #[serde(default)]
+    pub moved_to_trash: bool,
     pub duration_ms: u64,
     pub status: CleanupStatus,
     pub error: Option<String>,
@@ -201,11 +251,13 @@ mod tests {
             path: std::path::PathBuf::from("/tmp/x"),
             size_bytes: 10,
             reclaimable_bytes: 10,
+            apparent_bytes: None,
             safety: SafetyLevel::Safe,
             detail: None,
             impact: Some(impact()),
             age_days: None,
-            retention_eligible: true,
+            blocked_reason: None,
+            blocked_detail: None,
         };
         let back: Resource = serde_json::from_str(&serde_json::to_string(&r).unwrap()).unwrap();
         assert_eq!(back.impact, r.impact);
@@ -229,8 +281,30 @@ pub struct HistoryEntry {
     pub name: String,
     pub requested_bytes: u64,
     pub freed_bytes: u64,
+    /// Mirrors [`CleanupResult::moved_to_trash`] for the durable log.
+    #[serde(default)]
+    pub moved_to_trash: bool,
+    /// Which sizing convention produced these byte figures.
+    ///
+    /// `#[serde(default)]` → [`Sizing::Apparent`], which is what every line
+    /// written before v0.8.0 actually used (a sum of file lengths). Those
+    /// rows stay readable and the UI marks them "before 0.1.0" rather than
+    /// silently comparing them against allocated figures.
+    #[serde(default)]
+    pub sizing: Sizing,
     pub status: CleanupStatus,
     pub error: Option<String>,
+}
+
+/// Which sizing convention a byte figure was produced with (v0.8.0).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Sizing {
+    /// Sum of file lengths. Every entry written before v0.8.0.
+    #[default]
+    Apparent,
+    /// Allocated blocks — what deleting frees. v0.8.0 onwards.
+    Allocated,
 }
 
 /// One cleanup run, aggregated over its per-resource entries. The primary
@@ -249,5 +323,10 @@ pub struct CleanupRun {
     pub failed: u32,
     pub cancelled: u32,
     pub providers: Vec<String>,
+    /// True when ANY entry in the run used the pre-v0.8.0 sizing convention
+    /// (a sum of file lengths). The UI flags such a run so its totals are not
+    /// silently compared against allocated figures.
+    #[serde(default)]
+    pub pre_allocated_sizing: bool,
     pub entries: Vec<HistoryEntry>,
 }

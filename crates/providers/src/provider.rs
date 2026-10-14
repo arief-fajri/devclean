@@ -89,6 +89,16 @@ pub trait Provider: Send + Sync {
     /// their own source of truth.
     fn measure(&self, path: &Path) -> Option<u64>;
 
+    /// True when this provider's resources are irreplaceable USER DATA
+    /// (AI conversation history) rather than a regenerable cache.
+    ///
+    /// Such resources are reported but not cleanable until the user enables
+    /// `Settings.ai_cleanup_enabled` (I11) — the default must never be
+    /// "delete my history".
+    fn is_user_data(&self) -> bool {
+        false
+    }
+
     /// Minimum age (in days) this provider's items must have before the
     /// retention policy will let them go. `None` means the provider's items
     /// carry no meaningful age (global caches) and are never held back by
@@ -119,6 +129,45 @@ pub trait Provider: Send + Sync {
     }
 }
 
+/// What a resource actually occupies on disk.
+///
+/// Two figures, because they answer two different questions:
+///
+/// - [`DirSize::allocated`] — what **deleting this frees**. Block-accurate:
+///   a 1-byte file occupies a whole 4 KiB block, so summing payload bytes
+///   under-reports a tree full of small files (measured: `v3-web`'s
+///   `node_modules` read as 0.95 GB while `du` reported 1.17 GB).
+/// - [`DirSize::apparent`] — the logical size the files claim. Materially
+///   larger only for **sparse** files, which is why it is surfaced rather
+///   than added: a 460 GB-declared disk image can occupy 8 GB.
+///
+/// Directories contribute their own blocks on filesystems that allocate
+/// them (ext4) and zero on APFS. We count **files only** on purpose: it
+/// keeps `allocated == 0` meaning "genuinely empty" everywhere, which the
+/// providers rely on to skip empty caches.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct DirSize {
+    /// Allocated blocks (`st_blocks * 512`), hard-linked inodes counted
+    /// once *within this tree*.
+    pub allocated: u64,
+    /// Sum of logical file sizes.
+    pub apparent: u64,
+}
+
+impl DirSize {
+    /// `Some(apparent)` only when it is *materially* different from
+    /// `allocated` — the sparse-file case. Dense trees where block rounding
+    /// makes `allocated > apparent` deliberately return `None`: annotating
+    /// those would put a confusing "appears as" note on every ordinary
+    /// directory.
+    pub fn apparent_if_material(&self) -> Option<u64> {
+        const GIB: u64 = 1 << 30;
+        let materially_larger = self.apparent > self.allocated.saturating_mul(2)
+            && self.apparent - self.allocated > GIB;
+        materially_larger.then_some(self.apparent)
+    }
+}
+
 /// [`Provider::measure`] for providers whose resource is a real directory.
 /// A path that is not a directory (vanished cache, or a sentinel like
 /// `__docker__/build-cache`) is *unmeasurable*, not zero — the two mean
@@ -127,28 +176,77 @@ pub fn measure_dir(path: &Path) -> Option<u64> {
     path.is_dir().then(|| dir_size(path))
 }
 
-/// Sum of file sizes under `path`. Symlinks are not followed (a symlink farm
-/// must never explode a scan, nor cause deletion outside the tree).
+/// Allocated bytes under `path` — what deleting it frees. Symlinks are not
+/// followed (a symlink farm must never explode a scan, nor cause deletion
+/// outside the tree).
 pub fn dir_size(path: &Path) -> u64 {
     static NEVER: AtomicBool = AtomicBool::new(false);
     dir_size_checked(path, &NEVER).unwrap_or(0)
 }
 
-/// Cancellable variant of [`dir_size`]. Returns `None` when `cancel` was
-/// set mid-measurement so callers can abort promptly (G-SCAN-02).
+/// Cancellable [`dir_size`]. Returns `None` when `cancel` was set
+/// mid-measurement so callers can abort promptly (G-SCAN-02).
 pub fn dir_size_checked(path: &Path, cancel: &AtomicBool) -> Option<u64> {
-    let mut total = 0u64;
+    dir_size_detail_checked(path, cancel).map(|d| d.allocated)
+}
+
+/// Both figures for a tree, for scan time where the resource is being
+/// built. Cancellable like [`dir_size_checked`].
+pub fn dir_size_detail_checked(path: &Path, cancel: &AtomicBool) -> Option<DirSize> {
+    let mut size = DirSize::default();
+    // Hard links share one set of blocks; counting a file once per link
+    // would over-report a pnpm store or any deduplicated tree.
+    let mut seen: std::collections::HashSet<(u64, u64)> = std::collections::HashSet::new();
     for e in walkdir::WalkDir::new(path).follow_links(false).into_iter() {
         if cancel.load(Ordering::Relaxed) {
             return None;
         }
         let Ok(e) = e else { continue };
         let Ok(m) = e.metadata() else { continue };
-        if m.is_file() {
-            total += m.len();
+        if !m.is_file() {
+            continue;
+        }
+        size.apparent = size.apparent.saturating_add(m.len());
+        let key = inode_key(&m);
+        if seen.insert(key) {
+            size.allocated = size.allocated.saturating_add(allocated_bytes(&m));
         }
     }
-    Some(total)
+    Some(size)
+}
+
+/// Uncancellable [`dir_size_detail_checked`].
+pub fn dir_size_detail(path: &Path) -> DirSize {
+    static NEVER: AtomicBool = AtomicBool::new(false);
+    dir_size_detail_checked(path, &NEVER).unwrap_or_default()
+}
+
+/// Identity of a file for hard-link deduplication: `(device, inode)`.
+/// On non-Unix platforms there is no portable equivalent, so every file is
+/// treated as distinct — over-counting there rather than under-counting.
+#[cfg(unix)]
+fn inode_key(m: &std::fs::Metadata) -> (u64, u64) {
+    use std::os::unix::fs::MetadataExt;
+    (m.dev(), m.ino())
+}
+
+#[cfg(not(unix))]
+fn inode_key(_m: &std::fs::Metadata) -> (u64, u64) {
+    (0, 0)
+}
+
+/// Allocated size of one file: `st_blocks * 512`. Falls back to the logical
+/// length where the platform does not expose block counts, which keeps the
+/// number monotonic instead of dropping to zero.
+#[cfg(unix)]
+fn allocated_bytes(m: &std::fs::Metadata) -> u64 {
+    use std::os::unix::fs::MetadataExt;
+    m.blocks().saturating_mul(512)
+}
+
+#[cfg(not(unix))]
+fn allocated_bytes(m: &std::fs::Metadata) -> u64 {
+    m.len()
 }
 
 /// Home directory (`HOME`, fallback `USERPROFILE` on Windows).
@@ -333,5 +431,149 @@ mod tests {
         assert!(detail.contains("old"));
         assert!(!detail.contains("stale"), "fresh dir must not hint stale");
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    // ------------------------------------------------------------- sizing
+
+    fn scratch(tag: &str) -> PathBuf {
+        let d = std::env::temp_dir().join(format!("devclean-size-{tag}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&d);
+        std::fs::create_dir_all(&d).unwrap();
+        d
+    }
+
+    /// The whole point of A1a: `size_bytes` must be what deleting frees, not
+    /// the sum of payload lengths. A 1-byte file occupies a whole block, so
+    /// a tree of tiny files reads far larger allocated than apparent — this
+    /// is the measured cause of the 19% gap against `du`.
+    #[cfg(unix)]
+    #[test]
+    fn allocated_counts_blocks_not_payload() {
+        let d = scratch("blocks");
+        std::fs::write(d.join("tiny"), "x").unwrap();
+
+        let size = dir_size_detail(&d);
+        assert_eq!(size.apparent, 1, "one byte of payload");
+        assert!(
+            size.allocated >= 4096,
+            "a 1-byte file must occupy at least one block, got {}",
+            size.allocated
+        );
+        assert!(
+            size.allocated > size.apparent,
+            "block rounding must make allocated exceed apparent for tiny files"
+        );
+        assert_eq!(
+            dir_size(&d),
+            size.allocated,
+            "dir_size is the allocated figure — providers' `== 0` predicates rely on it"
+        );
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    /// The predicates that skip empty caches (`if size == 0 { return }`) must
+    /// keep meaning "empty" after the switch to allocated.
+    #[test]
+    fn an_empty_directory_measures_zero() {
+        let d = scratch("empty");
+        let sub = d.join("nothing");
+        std::fs::create_dir_all(&sub).unwrap();
+
+        let size = dir_size_detail(&sub);
+        assert_eq!(size.allocated, 0, "an empty dir must still read as empty");
+        assert_eq!(size.apparent, 0);
+        assert_eq!(dir_size(&sub), 0);
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    #[test]
+    fn a_missing_path_is_unmeasurable_not_zero() {
+        let missing = PathBuf::from("/definitely/not/a/devclean/path");
+        assert_eq!(measure_dir(&missing), None, "absent ≠ empty");
+    }
+
+    /// Hard links share one set of blocks. Counting a file once per link
+    /// would over-report any deduplicated tree (pnpm stores, `.app` bundles).
+    #[cfg(unix)]
+    #[test]
+    fn a_hardlinked_file_is_counted_once_within_an_artifact() {
+        let d = scratch("hardlink");
+        let original = d.join("original.bin");
+        std::fs::write(&original, vec![7u8; 8192]).unwrap();
+        let link = d.join("link.bin");
+        std::fs::hard_link(&original, &link).expect("hard link");
+
+        let size = dir_size_detail(&d);
+        let single = dir_size_detail(
+            &d.join("original.bin")
+                .parent()
+                .unwrap()
+                .join("original.bin"),
+        );
+        assert_eq!(
+            size.allocated, single.allocated,
+            "two names for one inode must not double the allocated figure"
+        );
+        // Apparent still counts both names: it is a logical figure.
+        assert_eq!(size.apparent, 8192 * 2);
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    /// `apparent_if_material` exists to surface sparse files and stay quiet
+    /// about ordinary trees, where block rounding makes allocated LARGER.
+    #[test]
+    fn apparent_is_reported_only_when_materially_larger() {
+        // Ordinary tree: allocated > apparent. Must stay silent.
+        assert_eq!(
+            DirSize {
+                allocated: 4096,
+                apparent: 1
+            }
+            .apparent_if_material(),
+            None,
+            "a dense tree must not carry an 'appears as' note"
+        );
+        // Sparse file: apparent far larger. Must be reported.
+        assert_eq!(
+            DirSize {
+                allocated: 8 << 30,
+                apparent: 460 << 30
+            }
+            .apparent_if_material(),
+            Some(460 << 30)
+        );
+        // Larger, but not materially so: still silent.
+        assert_eq!(
+            DirSize {
+                allocated: 100,
+                apparent: 150
+            }
+            .apparent_if_material(),
+            None
+        );
+        // Over 2× but under the 1 GiB floor: silent.
+        assert_eq!(
+            DirSize {
+                allocated: 1000,
+                apparent: 3000
+            }
+            .apparent_if_material(),
+            None
+        );
+    }
+
+    #[test]
+    fn cancellation_aborts_a_detail_measurement() {
+        let d = scratch("cancel");
+        for i in 0..50 {
+            std::fs::write(d.join(format!("f{i}")), vec![0u8; 1024]).unwrap();
+        }
+        let cancel = AtomicBool::new(true);
+        assert_eq!(
+            dir_size_detail_checked(&d, &cancel),
+            None,
+            "a cancelled measurement must report nothing, not a partial sum"
+        );
+        let _ = std::fs::remove_dir_all(&d);
     }
 }

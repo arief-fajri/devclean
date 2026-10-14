@@ -28,6 +28,8 @@ mod imp {
     }
 
     /// `(available, total)` in bytes, or `None` if the path cannot be probed.
+    ///
+    /// (See [`field`] for why the conversions below are not redundant.)
     pub fn space(path: &Path) -> Option<(u64, u64)> {
         let c = c_path(path)?;
         let mut buf: libc::statvfs = unsafe { std::mem::zeroed() };
@@ -37,16 +39,16 @@ mod imp {
         // f_frsize is the fragment size POSIX says to scale by; fall back to
         // the fundamental block size when a platform reports zero.
         let block = if buf.f_frsize != 0 {
-            buf.f_frsize as u64
+            field(buf.f_frsize)
         } else {
-            buf.f_bsize as u64
+            field(buf.f_bsize)
         };
         if block == 0 {
             return None;
         }
         Some((
-            (buf.f_bavail as u64).saturating_mul(block),
-            (buf.f_blocks as u64).saturating_mul(block),
+            field(buf.f_bavail).saturating_mul(block),
+            field(buf.f_blocks).saturating_mul(block),
         ))
     }
 
@@ -114,6 +116,18 @@ mod imp {
             known: true,
             mount: mount(path),
         })
+    }
+
+    /// Normalise a `statvfs` field to `u64`.
+    ///
+    /// The field widths are platform-dependent — `u64` on macOS, `u32` on some
+    /// Linux targets — so a conversion is needed on one and a no-op on the
+    /// other. `as u64` is flagged as an unnecessary cast on macOS, and
+    /// `u64::from` as a useless conversion; this is the version that is
+    /// correct on both, and the allow records why the lint is wrong here.
+    #[allow(clippy::useless_conversion)]
+    fn field<T: Into<u64>>(v: T) -> u64 {
+        v.into()
     }
 }
 

@@ -10,7 +10,7 @@
    */
   import { formatBytes } from "$lib/format";
   import { safetyMeta } from "$lib/safety";
-  import type { Resource } from "$lib/tauri";
+  import { BLOCK_REASON_HINTS, BLOCK_REASON_LABELS, type Resource } from "$lib/tauri";
   import { Check, Copy, Lock, X } from "lucide-svelte";
 
   interface Props {
@@ -176,16 +176,24 @@
           <dd class="text-right">{resource.detail}</dd>
         </div>
       {/if}
-      {#if !resource.retention_eligible}
+      {#if resource.blocked_reason}
         <div class="flex justify-between gap-2">
-          <dt class="text-zinc-500">Retention</dt>
+          <dt class="text-zinc-500">Cannot be cleaned</dt>
           <dd class="inline-flex items-center gap-1 text-right text-zinc-500">
             <span aria-hidden="true" class="inline-flex"><Lock size={11} /></span>
-            kept — cannot be cleaned
+            {BLOCK_REASON_LABELS[resource.blocked_reason]}
           </dd>
         </div>
       {/if}
     </dl>
+    {#if resource.blocked_reason}
+      <p
+        class="mt-3 rounded-lg bg-zinc-100 px-2.5 py-2 text-xs text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300"
+        data-testid="blocked-note"
+      >
+        {resource.blocked_detail ?? BLOCK_REASON_HINTS[resource.blocked_reason]}
+      </p>
+    {/if}
   </div>
 
   <footer
@@ -203,8 +211,8 @@
         onToggle(resource.id);
         onClose();
       }}
-      disabled={!resource.retention_eligible}
-      title={resource.retention_eligible ? "" : "Kept by your retention policy"}
+      disabled={resource.blocked_reason != null}
+      title={resource.blocked_detail ?? ""}
     >
       {selected ? "Deselect" : "Select for cleanup"}
     </button>

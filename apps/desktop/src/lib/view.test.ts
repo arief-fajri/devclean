@@ -22,9 +22,9 @@ function res(o: Partial<Resource> & Pick<Resource, "id">): Resource {
     size_bytes: 100,
     reclaimable_bytes: 100,
     safety: "safe",
-    // v0.5.0: the backend always sends these; old caches omit them and the
-    // Rust side defaults them, so the TS defaults mirror that.
-    retention_eligible: true,
+    // The backend omits these when the resource is cleanable; the TS shape
+    // mirrors that (absent === selectable).
+    blocked_reason: null,
     ...o,
   };
 }

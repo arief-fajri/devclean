@@ -206,12 +206,16 @@ impl Provider for OpencodeDbProvider {
             path: db.clone(),
             size_bytes: bytes,
             reclaimable_bytes: bytes,
+            // A single database file: apparent and allocated are the same
+            // number, so there is nothing extra to report.
+            apparent_bytes: None,
             safety: SafetyLevel::Dangerous,
             detail: Some(format!(
                 "{old_sessions} of {total} sessions are older than {SESSION_RETENTION_DAYS} days"
             )),
             age_days: None,
-            retention_eligible: true,
+            blocked_reason: None,
+            blocked_detail: None,
             impact: impact(
                 if running {
                     "opencode is running right now, so this is SKIPPED. Quit opencode and clean it then."
@@ -244,6 +248,10 @@ impl Provider for OpencodeDbProvider {
         // database is closed is safe; the process gate, not this, is what
         // stops us writing to a live file.
         std::fs::metadata(path).ok().map(|m| m.len())
+    }
+
+    fn is_user_data(&self) -> bool {
+        true
     }
 
     fn retention_days(&self) -> Option<u32> {

@@ -22,6 +22,8 @@ function entry(id: string, bytes = 100): HistoryEntry {
     name: `${id}/__pycache__`,
     requested_bytes: bytes,
     freed_bytes: bytes,
+    moved_to_trash: false,
+    sizing: "allocated",
     status: "success",
   };
 }
@@ -38,6 +40,7 @@ function run(o: Partial<CleanupRun> = {}): CleanupRun {
     failed: 0,
     cancelled: 0,
     providers: ["python_cache"],
+    pre_allocated_sizing: false,
     entries: [entry("a")],
   };
   return { ...base, ...o };

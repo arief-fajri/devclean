@@ -2,7 +2,7 @@
 
 > The single document defining what the frontend may see. Changing this file
 > = changing the contract → requires human approval (Level B) + a regression
-> test. Version: **v0.7.3 (free space without a subprocess)**.
+> test. Version: **v0.8.0 (honest sizes, recoverable deletes, real gates)**.
 
 ## Commands (15)
 
@@ -49,14 +49,26 @@ interface ResourceImpact { consequence: string; cost?: string; command?: string 
 
 interface Resource {
   id: string; provider: string; name: string; path: string;
-  size_bytes: number; reclaimable_bytes: number; safety: SafetyLevel;
+  /** What deleting this frees: allocated blocks, not a sum of file lengths.
+   *  Hard-linked inodes are counted once within the artifact. */
+  size_bytes: number; reclaimable_bytes: number;
+  /** Logical size, present only when materially LARGER than `size_bytes`
+   *  (sparse files). Absent for ordinary trees. */
+  apparent_bytes?: number | null;
+  safety: SafetyLevel;
   detail?: string; impact?: ResourceImpact;
   /** Age in whole days; null for global caches, whose age is meaningless. */
   age_days?: number | null;
-  /** False when the retention policy keeps it. The backend refuses such an
-   *  id even if the frontend sends it directly. */
-  retention_eligible: boolean;
+  /** Why this resource cannot be selected, or null when it can. The backend
+   *  refuses any resource carrying a reason, even if its id is sent directly. */
+  blocked_reason?: BlockReason | null;
+  /** One sentence explaining `blocked_reason`, e.g. "kept by your 30-day
+   *  retention policy (this is 12d old)". */
+  blocked_detail?: string | null;
 }
+
+type BlockReason = "retention" | "ai_read_only" | "privileged_required"
+  | "docker_scope" | "protected";
 
 interface ProviderSummary { provider: string; name: string; total_bytes: number;
   reclaimable_bytes: number; resource_count: number }
@@ -73,7 +85,8 @@ interface CleanupPreview { items: CleanupPreviewItem[]; total_bytes: number;
   preview_token: string; expires_at_unix: number }
 
 interface CleanupResult { resource_id: string; requested_bytes: number;
-  freed_bytes: number; duration_ms: number; status: CleanupStatus; error?: string }
+  freed_bytes: number; moved_to_trash: boolean; duration_ms: number;
+  status: CleanupStatus; error?: string }
 
 interface Settings {
   scan_roots: string[]; excluded_paths: string[];
@@ -179,6 +192,67 @@ is no destructive item — see G-UI-02 in `docs/development/methodology/guardrai
 
 ## Contract changelog
 
+- `v0.8.0` — honest sizes, recoverable deletes, and gates that actually run.
+  **No command added, removed or re-typed.** Three coupled changes; the third
+  fixes a control that had never worked.
+
+  **1. Sizes that match `du`.**
+  - `Resource.size_bytes` now means **allocated blocks** (`st_blocks * 512`),
+    i.e. what deleting the resource frees — it was a sum of file *lengths*,
+    which read up to 19% low on trees full of small files and up to 145% high
+    on trees full of hard links (measured: this repo's own `target/` reported
+    26.6 GB against `du`'s 10.8 GB). Hard-linked inodes are counted once per
+    artifact via `(dev, ino)`.
+  - `+Resource.apparent_bytes?: number | null` (additive, `#[serde(default)]`)
+    — the logical size, present only when materially larger than `size_bytes`,
+    so sparse files can be shown as `8.6 GB (appears as 460 GB)`.
+  - The on-disk scan cache is versioned `1 → 2`: a v1 cache holds logical
+    sizes and is rejected rather than displayed.
+  - Decision record: [docs/decisions/allocated-vs-apparent.md](../decisions/allocated-vs-apparent.md).
+
+  **2. Recoverable deletes.**
+  - `+Settings.delete_mode: "trash" | "permanent"` (additive,
+    `#[serde(default)]` → `trash`). Path removal moves the artifact to
+    `~/.Trash` by default instead of deleting it.
+  - `+CleanupResult.moved_to_trash: boolean`, `+HistoryEntry.moved_to_trash`
+    (additive). **Under `trash`, `freed_bytes` is 0**: the space is still on
+    disk and returns only when the user empties the Trash.
+  - The mode governs path removal only — `RunCommand` and `RunSql` have no
+    undo and are never reported as trashed.
+  - Decision record: [docs/decisions/trash-by-default.md](../decisions/trash-by-default.md).
+
+  **3. Blocked reasons — a control that never ran, fixed.**
+  - `Resource.retention_eligible: boolean` is **replaced** by
+    `blocked_reason?: BlockReason | null` + `blocked_detail?: string | null`
+    (breaking to the type; nothing else consumed the old field).
+  - **`retention_eligible` was never set to `false` in production code**, so
+    `Settings.retention_days` had no effect on any cleanup and
+    `ScanSummary.retention_blocked_bytes` was permanently zero. Measured after
+    the fix with a 10-year policy: **106/106 resources blocked, 69.6 GB held
+    back**; before it, the same policy blocked **zero**.
+  - `+Settings.ai_cleanup_enabled: boolean` (additive, `#[serde(default)]` →
+    `false`). AI conversation history is reported with sizes but not
+    selectable until the user opts in (`blocked_reason: "ai_read_only"`).
+  - `+HistoryEntry.sizing?: "apparent" | "allocated"` and
+    `+CleanupRun.pre_allocated_sizing: boolean` (additive). Rows written
+    before v0.8.0 read as `"apparent"`; the history page labels those runs
+    "before 0.1.0".
+  - The scan stamps the reason; the engine refuses what is stamped. Both call
+    the same `devclean_core::policy::block_reason_for`, so the explanation the
+    user reads is the one that is enforced (I11).
+  - Decision record: [docs/decisions/blocked-reason.md](../decisions/blocked-reason.md).
+
+  **Regression tests:** `allocated_counts_blocks_not_payload`,
+  `an_empty_directory_measures_zero`,
+  `a_hardlinked_file_is_counted_once_within_an_artifact`,
+  `apparent_is_reported_only_when_materially_larger`,
+  `a_v1_cache_with_logical_sizes_is_rejected`,
+  `trash_mode_moves_aside_and_reports_pending_not_freed`,
+  `permanent_mode_removes_and_reports_freed`,
+  `command_backed_actions_are_never_marked_as_trashed`,
+  the `devclean_core::policy` suite, `retention_and_ai_gates_now_reach_the_scan`,
+  `blocked_ids_are_collected_for_the_engine` (Rust); `cleanupOutcome` and
+  `blocked` suites (frontend).
 - `v0.7.2` — bounded cleanup preview. **No command added, removed or
   re-typed.**
   - `preview_cleanup` now fails with an explanation after `PREVIEW_TIMEOUT`

@@ -57,6 +57,35 @@ impl DockerPruneScope {
     }
 }
 
+/// How a cleanup removes something (contract v0.8.0).
+///
+/// Default is [`DeleteMode::Trash`]: a mistake must be recoverable. This tool
+/// runs against directories the user did not hand-pick one by one, so "one
+/// wrong click" has to be undoable — and emptying the Trash is a decision the
+/// user makes later, deliberately.
+///
+/// `Permanent` exists because some users genuinely want the space back now (a
+/// 13 GB database does not fit in a Trash nobody empties), but it is never
+/// the default.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum DeleteMode {
+    /// Move to the OS Trash / Recycle Bin. Recoverable. Default.
+    #[default]
+    Trash,
+    /// Remove outright. Frees space immediately, with no undo.
+    Permanent,
+}
+
+impl DeleteMode {
+    /// True when a cleanup under this mode returns space to the filesystem
+    /// right away. Under `Trash` the bytes are *pending* until the user
+    /// empties it, so `freed_bytes` must not claim them.
+    pub fn frees_space_immediately(self) -> bool {
+        matches!(self, Self::Permanent)
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Settings {
     pub scan_roots: Vec<PathBuf>,
@@ -90,6 +119,18 @@ pub struct Settings {
     /// needed and shows the risk, instead of failing at the last moment.
     #[serde(default)]
     pub sqlite_backup: bool,
+    /// v0.8.0: how a cleanup removes a resource. Default `trash`, so a
+    /// mistake is recoverable. `#[serde(default)]` keeps older settings.json
+    /// files readable — they get the safer default, not the old behaviour.
+    #[serde(default)]
+    pub delete_mode: DeleteMode,
+    /// v0.8.0: allow cleanup of AI conversation history.
+    ///
+    /// Defaults to FALSE. Session transcripts, project memory and agent
+    /// state are not regenerable, so the shipped default is to REPORT them
+    /// and refuse to delete until the user opts in explicitly (I11).
+    #[serde(default)]
+    pub ai_cleanup_enabled: bool,
 }
 
 impl Default for Settings {
@@ -106,6 +147,8 @@ impl Default for Settings {
             retention_days: None,
             docker_prune_scope: DockerPruneScope::default(),
             sqlite_backup: false,
+            delete_mode: DeleteMode::default(),
+            ai_cleanup_enabled: false,
         }
     }
 }

@@ -98,7 +98,16 @@ G-REL-04  No gate lives only in the UI (I11). Confirmation, retention and the
            ordinary_providers_are_never_touched_by_the_docker_gates ✅
 ```
 
-## 5. UI (G-UI)
+## 5. Publication (G-PUB)
+
+```text
+G-PUB-01  A platform claim in README.md must be backed by CI, and
+           tauri.conf.json must build no artifact for an untested platform.
+           Enforcement: test — apps/desktop/src/lib/platform-claim.test.ts ✅ ·
+           CI — the frontend job runs `npm test` ✅
+```
+
+## 6. UI (G-UI)
 
 ```text
 G-UI-01  Significant cleanup requires a confirmation dialog + re-measured preview.
@@ -171,6 +180,18 @@ previously named mechanisms that did not exist:
 | "G-UI-01 enforced by code" | enforced by `preview_token` in the engine | the old enforcement was a `tracing::debug!` |
 | v0.7.0 UI shell revamp (G-UI-02/03) | the menu-bar id allowlist + the page-level scan of `routes/*.svelte` | converting the dialogs into pages could have put a cleanup call one click from the list |
 | v0.7.1 tray icon showed a white square (G-UI-04) | the asset is now decoded and measured in CI, and generated from one geometry | the earlier PNG was written as greyscale *without* an alpha channel, so macOS painted the whole frame; nothing in Rust, the build or a screenshot diff had caught it |
+
+### What v0.8.0 changed, and why
+
+Four controls were found claiming enforcement they did not have. Each is now
+backed by a mechanism a test can fail against:
+
+| Was | Now | Evidence |
+|---|---|---|
+| `retention_eligible` was never set to `false` in production, so `Settings.retention_days` had no effect and `retention_blocked_bytes` was permanently 0 | `blocked_reason` stamped at scan time by `devclean_core::policy::block_reason_for`, refused by the engine from the same function | 10-year policy now blocks **106/106** resources, 69.6 GB held back (was 0) |
+| `freed_bytes` for command-backed cleanup always equalled `requested` | `before − after`, both measured; unmeasurable reports 0 with a reason | `runcommand_freed_bytes_is_measured_not_assumed` |
+| the Trash mode did not exist, so every delete was permanent | `delete_mode` defaults to `trash`; `freed_bytes` is 0 for a trashed artifact | `trash_mode_moves_aside_and_reports_pending_not_freed` |
+| 102 frontend tests — including G-UI-02/03/05 — were never run by CI | the `frontend` job runs `npm test` | `platform-claim.test.ts` asserts it |
 
 ## Open gaps
 

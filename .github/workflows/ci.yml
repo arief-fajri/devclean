@@ -5,18 +5,46 @@ on:
   pull_request:
 
 jobs:
+  # Formatting, lints and tests on BOTH runners. macOS is the shipped
+  # platform; Ubuntu exists because the sizing code (`st_blocks`), the Trash
+  # implementation and `statvfs` are Unix-shaped and were previously only ever
+  # exercised on one OS.
   rust:
-    runs-on: macos-latest
+    name: rust (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, ubuntu-latest]
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@master
         with:
+          # Pinned by rust-toolchain.toml, not "stable": a cleanup tool that
+          # suddenly stops building because of an unrelated compiler release
+          # is worse than one a version behind.
+          toolchain: "1.90"
           components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
       - run: cargo fmt --all -- --check
       - run: cargo clippy --workspace --all-targets -- -D warnings
       - run: cargo test --workspace
 
+  # The declared MSRV must actually compile. `rust-version = "1.90"` in
+  # Cargo.toml was an unverified claim.
+  msrv:
+    name: msrv (1.90)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.90"
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo check --workspace --all-targets
+
   frontend:
+    name: frontend
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -28,6 +56,12 @@ jobs:
       - run: npm ci
         working-directory: apps/desktop
       - run: npm run check
+        working-directory: apps/desktop
+      # Without this, the guardrails that live in test files — G-UI-02/03/05
+      # (pages never call the cleanup API, tray menu allowlist, pointer rule)
+      # and G-PUB-01 (platform claims match CI) — are only enforced by whoever
+      # remembers to run them locally.
+      - run: npm test
         working-directory: apps/desktop
       - run: npm run build
         working-directory: apps/desktop

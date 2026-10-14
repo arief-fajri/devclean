@@ -8,8 +8,12 @@
     resource: Resource;
     checked: boolean;
     showPath: boolean;
-    /** Held back by the retention policy — shown, but not selectable. */
+    /** Held back for any reason — shown, but not selectable. */
     locked?: boolean;
+    /** Why it is held back, shown as the tooltip. */
+    lockedDetail?: string | null;
+    /** Short badge text, e.g. "report only". */
+    lockedLabel?: string | null;
     /** A scan is running; selection is unavailable. */
     disabled?: boolean;
     onToggle: (id: string) => void;
@@ -21,6 +25,8 @@
     checked,
     showPath,
     locked = false,
+    lockedDetail = null,
+    lockedLabel = null,
     disabled = false,
     onToggle,
     onOpenDetail,
@@ -44,7 +50,7 @@
     checked={checked}
     disabled={unselectable}
     onchange={() => onToggle(r.id)}
-    aria-label={locked ? `{r.name} is kept by your retention policy` : `Select ${r.name}`}
+    aria-label={locked ? `${r.name} cannot be cleaned` : `Select ${r.name}`}
   />
   <div class="min-w-0 flex-1">
     <div class="flex items-baseline justify-between gap-2">
@@ -57,10 +63,12 @@
         {#if locked}
           <span
             class="ml-1 inline-flex items-center gap-1 text-[11px] font-normal text-zinc-400"
-            title="Kept by your retention policy. The backend refuses it even if the id is sent directly."
+            title={lockedDetail ??
+              "The backend refuses this even if its id is sent directly."}
+            data-testid="blocked-badge"
           >
             <span aria-hidden="true" class="flex"><Lock size={10} /></span>
-            kept
+            {lockedLabel ?? "kept"}
           </span>
         {:else if r.detail}
           <span class="ml-1 text-xs font-normal text-zinc-400">{r.detail}</span>
@@ -68,6 +76,14 @@
       </button>
       <span class="tnum shrink-0 font-mono text-xs text-zinc-500">
         {formatBytes(r.reclaimable_bytes)}
+        {#if r.apparent_bytes}
+          <span
+            class="text-zinc-400"
+            title="This file occupies far less on disk than its logical size — it is sparse. Deleting it frees the first figure."
+          >
+            (appears as {formatBytes(r.apparent_bytes)})
+          </span>
+        {/if}
       </span>
     </div>
     <div class="mt-1 flex items-center gap-1.5">

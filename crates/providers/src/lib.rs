@@ -32,8 +32,9 @@ pub use npm_cache::NpmCacheProvider;
 pub use opencode_db::OpencodeDbProvider;
 pub use opencode_fs::OpencodeFsProvider;
 pub use provider::{
-    dir_size, dir_size_checked, home_dir, impact, measure_dir, project_detail, stale_note,
-    stale_note_for_age, tool_output_dir, walk_cancelled, CleanupAction, Provider,
+    dir_size, dir_size_checked, dir_size_detail, dir_size_detail_checked, home_dir, impact,
+    measure_dir, project_detail, stale_note, stale_note_for_age, tool_output_dir, walk_cancelled,
+    CleanupAction, DirSize, Provider,
 };
 pub use python_cache::PythonCacheProvider;
 pub use registry::ProviderRegistry;

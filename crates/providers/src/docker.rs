@@ -163,10 +163,14 @@ impl Provider for DockerProvider {
             path: PathBuf::from("__docker__/build-cache"),
             size_bytes: bytes,
             reclaimable_bytes: bytes,
+            // External figure (`docker system df`), not a tree walk: there is
+            // no separate logical size to report.
+            apparent_bytes: None,
             safety: SafetyLevel::Safe,
             detail: None,
             age_days: None,
-            retention_eligible: true,
+            blocked_reason: None,
+            blocked_detail: None,
             impact: impact(
                 "Docker rebuilds image layers from your Dockerfile.",
                 Some("Next image build starts from scratch"),

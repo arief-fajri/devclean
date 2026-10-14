@@ -93,13 +93,17 @@ impl Provider for DockerPrunedProvider {
                     path: PathBuf::from(sentinel),
                     size_bytes: bytes,
                     reclaimable_bytes: bytes,
+                    // External figure (`docker system df`), not a tree walk:
+                    // there is no separate logical size to report.
+                    apparent_bytes: None,
                     safety,
                     detail: Some(format!(
                         "Needs Docker scope “{}” and Privileged operations",
                         scope_label(scope)
                     )),
                     age_days: None,
-                    retention_eligible: true,
+                    blocked_reason: None,
+                    blocked_detail: None,
                     impact: impact(consequence, Some(cost), Some(cmd)),
                 })
             },

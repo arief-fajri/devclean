@@ -4,7 +4,8 @@
 //! hence `Safe`.
 
 use super::provider::{
-    dir_size_checked, home_dir, impact, measure_dir, tool_output_dir, CleanupAction, Provider,
+    dir_size_detail_checked, home_dir, impact, measure_dir, tool_output_dir, CleanupAction,
+    Provider,
 };
 use devclean_core::{Resource, SafetyLevel};
 use std::path::{Path, PathBuf};
@@ -92,10 +93,10 @@ impl Provider for NpmCacheProvider {
             let Some(dir) = cache_dir(m) else { continue };
             // Skip (don't abort) caches whose size can't be measured;
             // empty caches report nothing reclaimable.
-            let Some(size) = dir_size_checked(&dir, cancel) else {
+            let Some(size) = dir_size_detail_checked(&dir, cancel) else {
                 continue;
             };
-            if size == 0 {
+            if size.allocated == 0 {
                 continue;
             };
             out.push(Resource {
@@ -103,12 +104,14 @@ impl Provider for NpmCacheProvider {
                 provider: self.id().to_string(),
                 name: m.label.to_string(),
                 path: dir,
-                size_bytes: size,
-                reclaimable_bytes: size,
+                size_bytes: size.allocated,
+                reclaimable_bytes: size.allocated,
+                apparent_bytes: size.apparent_if_material(),
                 safety: SafetyLevel::Safe,
                 detail: None,
                 age_days: None,
-                retention_eligible: true,
+                blocked_reason: None,
+                blocked_detail: None,
                 impact: impact(m.consequence, Some(m.cost), Some(&clean_command(m))),
             });
         }

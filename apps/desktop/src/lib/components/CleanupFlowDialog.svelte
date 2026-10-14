@@ -1,6 +1,7 @@
 <script lang="ts">
   import { coverageNote, previewCoverage, previewPhase } from "$lib/cleanup-view";
   import { formatBytes, truncateMiddle } from "$lib/format";
+  import { cleanupOutcome } from "$lib/cleanup-view";
   import { safetyMeta } from "$lib/safety";
   import type {
     CleanupPreview,
@@ -112,7 +113,11 @@
     }
     return { success, partial, failed, cancelled };
   });
-  const doneFreed = $derived((results ?? []).reduce((a, r) => a + r.freed_bytes, 0));
+  /** Honest split of freed-now vs pending-in-Trash (unit-tested pure logic). */
+  const outcome = $derived(cleanupOutcome(results ?? []));
+  const doneFreed = $derived(outcome.freed);
+  const donePending = $derived(outcome.pending);
+  const doneTrashed = $derived(outcome.trashed);
   const doneRequested = $derived((results ?? []).reduce((a, r) => a + r.requested_bytes, 0));
 
   function onWindowKey(e: KeyboardEvent) {
@@ -534,11 +539,33 @@
         Cleanup complete
       </h2>
       <p class="mt-1 text-sm text-zinc-500" role="status">
-        <span class="tnum font-mono font-semibold text-emerald-700 dark:text-emerald-300">
-          {formatBytes(doneFreed)}
-        </span>
-        freed of {formatBytes(doneRequested)} requested
+        {#if outcome.headline === "trashed"}
+          <span class="tnum font-mono font-semibold text-zinc-700 dark:text-zinc-200">
+            {formatBytes(donePending)}
+          </span>
+          moved to Trash — space returns when you empty it
+        {:else if outcome.headline === "mixed"}
+          <span class="tnum font-mono font-semibold text-emerald-700 dark:text-emerald-300">
+            {formatBytes(doneFreed)}
+          </span>
+          freed now · <span class="tnum font-mono">{formatBytes(donePending)}</span> in the Trash
+        {:else}
+          <span class="tnum font-mono font-semibold text-emerald-700 dark:text-emerald-300">
+            {formatBytes(doneFreed)}
+          </span>
+          freed of {formatBytes(doneRequested)} requested
+        {/if}
       </p>
+      {#if doneTrashed > 0}
+        <p
+          class="mt-2 rounded-lg bg-zinc-100 px-2.5 py-1.5 text-xs text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300"
+          data-testid="trash-note"
+        >
+          {doneTrashed}
+          {doneTrashed === 1 ? "item is" : "items are"} recoverable from the Trash until you empty
+          it.
+        </p>
+      {/if}
       <p class="mt-1 text-xs text-zinc-500">
         {doneCounts.success} success · {doneCounts.partial} partial · {doneCounts.failed} failed ·
         {doneCounts.cancelled} cancelled
