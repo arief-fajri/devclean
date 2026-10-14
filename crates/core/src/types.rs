@@ -79,14 +79,25 @@ pub struct ProviderInfo {
     pub enabled: bool,
 }
 
-/// Free space on the volume holding the app's data (contract v0.5.0).
+/// Free space on the volume holding `$HOME` — the volume the dashboard's
+/// "free space" card describes (contract v0.7.3).
+///
+/// This is the *home* volume, not necessarily the volume holding the scan
+/// roots; a root on an external drive sits on a different volume. `mount`
+/// names the volume so the card can say which one it means instead of leaving
+/// "this volume" to guesswork (macOS only; `None` elsewhere).
+///
 /// `known: false` when the platform query failed — the UI must then say
 /// "unknown", never "0 bytes free".
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct DiskFree {
     pub available_bytes: u64,
     pub total_bytes: u64,
     pub known: bool,
+    /// Mount point of this volume (e.g. `/Volumes/Work`), when the platform
+    /// can name it.
+    #[serde(default)]
+    pub mount: Option<String>,
 }
 
 /// Per-provider totals for the dashboard.

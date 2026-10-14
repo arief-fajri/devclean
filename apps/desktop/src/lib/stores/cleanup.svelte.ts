@@ -15,6 +15,7 @@ import {
   runCleanup,
 } from "$lib/tauri";
 import type { CleanupPreview, CleanupProgress, CleanupResult } from "$lib/tauri";
+import { settingsStore } from "$lib/stores/settings.svelte";
 
 class CleanupStore {
   cleaning = $state(false);
@@ -129,6 +130,9 @@ class CleanupStore {
       this.cancelling = false;
       // confirmOpen stays true so the flow dialog shows the `done` phase.
       this.progress = null;
+      // Cleanup freed space on the disk; re-measure so the dashboard card
+      // does not keep quoting the number from before the deletion.
+      void settingsStore.refreshDiskFree();
     });
   }
 

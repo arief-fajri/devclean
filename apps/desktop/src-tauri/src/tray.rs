@@ -173,7 +173,11 @@ fn icon_item(
     IconMenuItem::with_id(app, id, text, false, icon, None::<&str>)
 }
 
-fn show_main(app: &AppHandle) {
+/// The one way DevClean reveals its window. The menu bar, the tray icon and
+/// the Dock all call this — so a fix to one cannot leave the others behind
+/// (see G-UI-06: closing the window used to leave the Dock icon dead, because
+/// this logic lived behind the menu bar's event handler and nothing else).
+pub(crate) fn show_main(app: &AppHandle) {
     if let Some(w) = app.get_webview_window("main") {
         let _ = w.show();
         let _ = w.unminimize();
@@ -535,6 +539,7 @@ mod tests {
             available_bytes: free,
             total_bytes: total,
             known: true,
+            mount: None,
         }
     }
 
@@ -632,6 +637,7 @@ mod tests {
                 available_bytes: 0,
                 total_bytes: 0,
                 known: false,
+                mount: None,
             },
         );
         assert_eq!(unknown.disk_low, None);

@@ -2,6 +2,7 @@
 //! core. This layer is intentionally thin: no filesystem logic lives here
 //! beyond wiring crates together. See `docs/reference/tauri-contract.md`.
 
+use crate::disk;
 use crate::events::*;
 use crate::metrics::MemSample;
 use crate::state::AppState;
@@ -89,12 +90,8 @@ pub async fn run_scan(app: &AppHandle, state: &AppState) -> Result<ScanSummary, 
         .await;
     state.store_resources(summary.resources.clone());
     // One free-space probe per scan, never per menu open (G-REL-01): the menu
-    // bar reads this instead of shelling out while the user is looking at it.
-    state.store_disk_free(disk_free().unwrap_or(DiskFree {
-        available_bytes: 0,
-        total_bytes: 0,
-        known: false,
-    }));
+    // bar reads this instead of measuring while the user is looking at it.
+    state.store_disk_free(disk_free());
     // Best-effort instant paint for the next startup (M3 scan cache).
     if let Err(e) = devclean_scanner::save_cached_summary(
         &state.scan_cache_path,
@@ -411,6 +408,13 @@ pub async fn cleanup(
         }
     }
 
+    // Cleanup is the one event that moves free space. Re-measure here so the
+    // dashboard card and the menu bar agree with the disk again, instead of
+    // both quoting the number from before the deletion (contract v0.7.3).
+    let freed_now = disk_free();
+    state.store_disk_free(freed_now);
+    crate::tray::refresh(&app, &state);
+
     // Progress already streamed per item; this final tick keeps the UI in
     // sync when ids were skipped (unknown ids report nothing).
     app.emit(
@@ -525,42 +529,20 @@ pub async fn detect_scan_roots(
         .map_err(|e| e.to_string())
 }
 
-/// Free and total bytes of the volume holding `$HOME`. Lets the UI say
-/// "not enough space to back up the 13 GB database" BEFORE the user
-/// confirms a destructive SQLite cleanup.
+/// Free and total bytes of the volume holding `$HOME`, plus that volume's mount
+/// name. Lets the UI say "not enough space to back up the 13 GB database"
+/// BEFORE the user confirms a destructive SQLite cleanup.
+///
+/// Measured with `statvfs`, not a subprocess: this is awaited while the window
+/// loads its settings (contract v0.7.3).
 #[tauri::command]
 pub fn get_disk_free() -> Result<DiskFree, String> {
-    Ok(disk_free().unwrap_or(DiskFree {
-        available_bytes: 0,
-        total_bytes: 0,
-        known: false,
-    }))
+    Ok(disk_free())
 }
 
-fn disk_free() -> Option<DiskFree> {
-    let stat = std::process::Command::new("df")
-        .args(["-k", &home_for_df()])
-        .output()
-        .ok()
-        .filter(|o| o.status.success())?;
-    let text = String::from_utf8_lossy(&stat.stdout);
-    // macOS: "Filesystem 1024-blocks Used Available Capacity iused ...".
-    // Linux: "Filesystem 1K-blocks Used Available Use% Mounted on".
-    let last = text.lines().skip(1).find(|l| !l.starts_with("map "))?;
-    let cols: Vec<&str> = last.split_whitespace().collect();
-    let avail_kb = cols.get(3)?.parse::<u64>().ok()?;
-    let total_kb = cols.get(1)?.parse::<u64>().ok()?;
-    Some(DiskFree {
-        available_bytes: avail_kb.saturating_mul(1024),
-        total_bytes: total_kb.saturating_mul(1024),
-        known: true,
-    })
-}
-
-fn home_for_df() -> String {
-    devclean_core::home_dir()
-        .map(|p| p.display().to_string())
-        .unwrap_or_else(|| "/".to_string())
+/// The reported volume, or `known: false` — never a silent zero.
+fn disk_free() -> DiskFree {
+    disk::report()
 }
 
 #[cfg(test)]
@@ -673,6 +655,7 @@ mod preview_deadline_tests {
                 available_bytes: 0,
                 total_bytes: 0,
                 known: false,
+                mount: None,
             }),
         };
 

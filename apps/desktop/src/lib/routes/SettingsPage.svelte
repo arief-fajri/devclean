@@ -5,7 +5,7 @@
    * page discards unsaved edits, and the sticky bar says so out loud rather
    * than letting a silent save/lose surprise the user.
    */
-  import { formatBytes } from "$lib/format";
+  import { formatBytes, volumeLabel } from "$lib/format";
   import { SETTINGS_TABS, settingsTab } from "$lib/nav";
   import { providerMeta } from "$lib/providerMeta";
   import { navStore } from "$lib/stores/nav.svelte";
@@ -286,7 +286,7 @@
                     {/if}
                   </span>
                 </span>
-                <label class="flex shrink-0 cursor-pointer items-center gap-1.5 text-xs text-zinc-500">
+                <label class="flex shrink-0 items-center gap-1.5 text-xs text-zinc-500">
                   <input
                     type="checkbox"
                     class="h-4 w-4 accent-emerald-600"
@@ -576,7 +576,7 @@
         </label>
         {#if settingsStore.diskFree}
           <p class="mt-1.5 text-xs text-zinc-500">
-            Free space on this volume:
+            {volumeLabel(settingsStore.diskFree)}:
             {#if settingsStore.diskFree.known}
               <strong class="font-medium"
                 >{formatBytes(settingsStore.diskFree.available_bytes)}</strong

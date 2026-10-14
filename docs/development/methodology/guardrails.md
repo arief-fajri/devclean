@@ -126,6 +126,39 @@ G-UI-04  The menu bar icon is a real template image: it must carry an alpha
            SVG from one geometry, so they cannot drift;
            test — tray-icon.test.ts decodes the shipped PNG and asserts an alpha
            channel, transparent corners, a non-slab coverage, fill and centring ✅
+G-UI-05  A clickable surface must look clickable. Tailwind v4 dropped v3's
+           preflight rule for pointer cursors, so every button inherited the
+           OS default arrow and the app gave no affordance at all.
+           Enforcement: code — one `:where(...)` rule in `app.css` under
+           `@layer base` (layered, so a utility such as `cursor-default` can
+           still opt out; `:where` keeps specificity at 0 so `.control` keeps
+           winning); disabled controls get `cursor: not-allowed` instead of a
+           silent dead arrow;
+           test — architecture.test.ts asserts the rule is still declared, that
+           no surface smuggles `cursor-default` in (only the modal backdrop may),
+           that nobody re-adds a hand-written `cursor-pointer`, and that every
+           button either has a handler or `disabled`, so the blanket selector is
+           not advertising a promise the app does not keep ✅
+G-UI-06  Every affordance the OS gives us must work. Hiding the window on
+           close keeps DevClean in the menu bar, but it also means the Dock
+           icon is on screen doing nothing — a bug with no error, no log and
+           no failing test, because the event simply had no listener.
+           Enforcement: code — `show_main` is the single reveal path
+           (`pub(crate)`), called by the menu bar, the tray icon and the Dock;
+           `lib.rs` matches `RunEvent::Reopen`;
+           test — tests::the_dock_reopen_event_is_handled fails if the arm is
+           deleted *or* if the shell goes back to `Builder::run`;
+           tests::every_reveal_path_goes_through_one_function fails if anyone
+           reaches for the window outside `show_main` ✅
+G-REL-06  Nothing on the boot path may spawn a process without a deadline.
+           `get_disk_free` used to run `df` while the window loaded its
+           settings: no timeout, no way to report progress, and a hang there
+           would have held the whole startup. It is measured with `statvfs`
+           instead. The general form of this — unbounded provider probes — is
+           still open as G-REL-05; what is closed is the app's own boot path.
+           Enforcement: code — `disk::report()` is the only free-space source
+           and it makes no `Command`; test — `statvfs_agrees_with_df` keeps the
+           substitute honest against the `df` it replaced ✅
 ```
 
 ### What changed in v0.5.0, and why the claims above changed

@@ -26,6 +26,37 @@
   color-scheme: light dark;
 }
 
+/* Every clickable surface advertises itself.
+ *
+ * Tailwind v4 dropped v3's preflight rule for this, so all 57 buttons in the
+ * app inherited the OS default arrow — the only controls that looked right
+ * were the two `<select>`s, which said `cursor-pointer` by hand.
+ *
+ * `:where` keeps specificity at 0, so `.control` and any utility still win:
+ * `cursor-default` on a button stays an escape hatch (the modal backdrop, or
+ * a future drag-handle). This must live in `@layer base` — unlayered CSS beats
+ * every utility in v4, which would make that escape hatch impossible.
+ *
+ * Disabled controls get `not-allowed` rather than the native default arrow:
+ * it says "this is off" in the one channel a mouse user has left, and it
+ * agrees with `.control`, which already excludes `:disabled` from its hover.
+ */
+@layer base {
+  :where(
+    button:not(:disabled),
+    [role="button"]:not(:disabled),
+    summary,
+    a[href],
+    label:has(> :is(input, select))
+  ) {
+    cursor: pointer;
+  }
+
+  :where(button:disabled, [aria-disabled="true"]) {
+    cursor: not-allowed;
+  }
+}
+
 /* Base paint: the document itself must be opaque. Without this the title
    bar strip and any uncovered pixel stay transparent, letting whatever is
    behind the window show through — and causing a white flash on launch.

@@ -50,6 +50,7 @@ impl Default for AppState {
                 available_bytes: 0,
                 total_bytes: 0,
                 known: false,
+                mount: None,
             }),
         }
     }
@@ -73,8 +74,11 @@ impl AppState {
         *self.disk_free.lock().unwrap() = free;
     }
 
+    /// A copy of the last measured free space, for the menu bar. Cloned: the
+    /// value is three numbers and one optional mount name, and callers hold it
+    /// across a paint.
     pub fn disk_free(&self) -> DiskFree {
-        *self.disk_free.lock().unwrap()
+        self.disk_free.lock().unwrap().clone()
     }
 
     /// Persist settings best-effort: a failed write is logged, never fatal

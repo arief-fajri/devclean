@@ -1,5 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { formatBytes, formatPct, isStaleSignal, parseAgeDays, truncateMiddle } from "./format";
+import {
+  formatBytes,
+  formatPct,
+  isStaleSignal,
+  parseAgeDays,
+  truncateMiddle,
+  volumeLabel,
+} from "./format";
 
 describe("formatBytes", () => {
   it("handles zero and invalid input", () => {
@@ -59,5 +66,27 @@ describe("parseAgeDays / isStaleSignal", () => {
     expect(isStaleSignal("· 90d old")).toBe(false);
     expect(isStaleSignal("· 91d old")).toBe(true);
     expect(isStaleSignal(undefined)).toBe(false);
+  });
+});
+
+describe("volumeLabel", () => {
+  it("names the mount so 'this volume' stops being a guess", () => {
+    expect(volumeLabel({ mount: "/Volumes/Work" })).toBe("Free space on /Volumes/Work");
+    expect(volumeLabel({ mount: "/System/Volumes/Data" })).toBe(
+      "Free space on /System/Volumes/Data",
+    );
+  });
+
+  it("names the probe when the platform cannot name the volume", () => {
+    expect(volumeLabel({ mount: null })).toBe(
+      "Free space on the volume holding your home folder",
+    );
+    expect(volumeLabel(null)).toBe("Free space on the volume holding your home folder");
+  });
+
+  it("does not announce a bare root as a volume name", () => {
+    expect(volumeLabel({ mount: "/" })).toBe(
+      "Free space on the volume holding your home folder",
+    );
   });
 });

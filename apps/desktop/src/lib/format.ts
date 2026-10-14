@@ -48,3 +48,23 @@ export function truncateMiddle(path: string, maxLen = 64): string {
   const head = maxLen - 1 - tail;
   return `${path.slice(0, head)}…${path.slice(path.length - tail)}`;
 }
+
+/**
+ * The heading for the free-space card.
+ *
+ * The numbers always describe the volume holding `$HOME`, which is not
+ * necessarily where the scan roots live — a root on an external drive is a
+ * different volume. When the platform can name the volume we say so, which
+ * turns "this volume" from a guess into a fact. When it cannot (Linux, any
+ * failed probe), we name the probe instead of implying a name we do not have.
+ */
+export function volumeLabel(free: DiskFreeLike | null): string {
+  const mount = free?.mount;
+  if (mount && mount !== "/") return `Free space on ${mount}`;
+  return "Free space on the volume holding your home folder";
+}
+
+/** The minimum a caller needs; keeps `volumeLabel` unit-testable. */
+interface DiskFreeLike {
+  mount: string | null;
+}

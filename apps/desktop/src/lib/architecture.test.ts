@@ -79,3 +79,90 @@ describe("G-UI-02 — the menu bar never starts a cleanup", () => {
     expect(ids).toEqual(["open", "scan", "review", "history", "settings", "quit"]);
   });
 });
+
+/**
+ * G-UI-05. Tailwind v4 removed v3's preflight rule that gave buttons a
+ * pointer cursor, so every control in the app advertised itself with the
+ * default arrow. The fix is one rule in `app.css`, not 57 `cursor-pointer`
+ * classes — which means the failure mode is not "someone forgot a button",
+ * it is "someone deleted or mistyped the rule".
+ *
+ * These tests guard the *source*. Whether the selector actually matches is a
+ * rendering question, and there is still no DOM in this project (M5).
+ */
+const css = readFileSync(join(here, "..", "app.css"), "utf8");
+
+function svelteSources(): { file: string; source: string }[] {
+  const root = join(here, "..");
+  return readdirSync(root, { recursive: true, encoding: "utf8" })
+    .filter((f: string) => f.endsWith(".svelte"))
+    .map((f: string) => ({ file: f, source: readFileSync(join(root, f), "utf8") }));
+}
+
+const SVELTE = svelteSources();
+
+describe("G-UI-05 — a clickable surface looks clickable", () => {
+  it("declares the pointer rule in the base layer", () => {
+    expect(css, "the rule must be layered, or no utility can override it").toContain(
+      "@layer base",
+    );
+    for (const selector of [
+      "button:not(:disabled)",
+      '[role="button"]:not(:disabled)',
+      "label:has(",
+      "cursor: pointer",
+      "cursor: not-allowed",
+    ]) {
+      expect(css, `app.css must declare ${selector}`).toContain(selector);
+    }
+  });
+
+  it("finds buttons to check (the guardrail must not pass vacuously)", () => {
+    const withButtons = SVELTE.filter((f) => f.source.includes("<button"));
+    const count = SVELTE.reduce(
+      (acc, f) => acc + (f.source.match(/<button\b/g) ?? []).length,
+      0,
+    );
+    expect(withButtons.length, "expected components with buttons").toBeGreaterThanOrEqual(5);
+    expect(count, "expected buttons to be covered by the rule").toBeGreaterThanOrEqual(40);
+  });
+
+  it("gives a pointer only to buttons that do something", () => {
+    // The rule is a blanket selector, so it is only honest as long as every
+    // button is actionable. A button with neither a handler nor `disabled`
+    // is decorative, and showing a pointer on it would be a promise the app
+    // does not keep.
+    for (const f of SVELTE) {
+      for (const tag of f.source.match(/<button\b[^>]*>/g) ?? []) {
+        const actionable = [
+          "onclick",
+          "on:click",
+          "onkeydown",
+          "disabled",
+          'type="submit"',
+        ].some((k) => tag.includes(k));
+        expect(
+          actionable,
+          `${f.file}: a button with no handler and no disabled would advertise a pointer it cannot honour — <${tag}>`,
+        ).toBe(true);
+      }
+    }
+  });
+
+  it("lets exactly one surface opt out — the modal backdrop", () => {
+    const optOuts = SVELTE.filter((f) => f.source.includes("cursor-default")).map((f) => f.file);
+    expect(optOuts).toEqual(["lib/components/CleanupFlowDialog.svelte"]);
+  });
+
+  it("labels wrapping a control rely on the rule, not a manual class", () => {
+    // Three checkboxes in Settings are toggled by clicking their label text.
+    // They used to need `cursor-pointer` by hand; the base rule covers them,
+    // and a hand-written copy would drift.
+    for (const f of SVELTE.filter((x) => x.source.includes("cursor-pointer"))) {
+      expect(
+        f.source,
+        `${f.file} still sets cursor-pointer by hand — the base rule owns this now`,
+      ).not.toContain("cursor-pointer");
+    }
+  });
+});

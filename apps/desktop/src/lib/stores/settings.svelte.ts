@@ -22,7 +22,7 @@ class SettingsStore {
   /** `detect_scan_roots` result (contract v0.5.0). */
   candidates = $state<ScanRootCandidate[]>([]);
   detecting = $state(false);
-  /** Free space on the data volume — tells the user up front whether an
+  /** Free space on the home volume — tells the user up front whether an
    * AI-database backup would even fit. */
   diskFree = $state<DiskFree | null>(null);
 
@@ -30,10 +30,22 @@ class SettingsStore {
     try {
       this.settings = await getSettings();
       this.providers = await getProviders();
-      this.diskFree = await getDiskFree().catch(() => null);
+      await this.refreshDiskFree();
     } catch (e) {
       this.error = String(e);
     }
+  }
+
+  /**
+   * Re-measure free space. Called at startup and again after every cleanup,
+   * because cleanup is the only thing in the app that moves the number — a
+   * card that still quotes the pre-cleanup figure is simply wrong (contract
+   * v0.7.3). Failures leave the previous reading in place rather than
+   * blanking the card: stale is better than nothing.
+   */
+  async refreshDiskFree() {
+    const free = await getDiskFree().catch(() => null);
+    if (free) this.diskFree = free;
   }
 
   /** Discover candidate scan roots under $HOME. Read-only and bounded. */

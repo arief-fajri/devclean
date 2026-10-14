@@ -191,6 +191,41 @@ clean; svelte-check 0 errors 0 warnings; vite build ok.
     its SVG by tools/make_tray_icon.py, and guarded by tray-icon.test.ts (G-UI-04).
 ```
 
+## v0.7.2/v0.7.3 — bounded preview + honest free space (done)
+
+```text
+[x] preview_cleanup is bounded: over PREVIEW_TIMEOUT (120s) it fails with an
+    explanation instead of leaving the confirmation dialog waiting forever.
+    get_cached_scan also seeds the id registry from the cache, so a cleanup
+    started before the first scan finishes still resolves its ids (G-API-01).
+[x] The Dock icon works again. Closing the window hides it and leaves DevClean
+    in the menu bar, but the Dock icon stayed on screen and did nothing:
+    `Builder::run` is `build()?.run(|_, _| {})`, so macOS's
+    `applicationShouldHandleReopen` had no listener. The shell now runs its
+    own event loop and handles `RunEvent::Reopen`, routing the Dock, the tray
+    and the menu through one `show_main` so they cannot drift (G-UI-06).
+[x] Pointer cursors are back: Tailwind v4 removed v3's preflight rule, so all
+    57 buttons showed the default arrow. One `:where(...)` rule in `app.css`
+    (@layer base, so utilities can still opt out) covers buttons, tabs, links,
+    summaries and labels wrapping a control; disabled controls get
+    `cursor: not-allowed`. Guarded by architecture.test.ts (G-UI-05) — which
+    fails if the rule is deleted, if a surface smuggles `cursor-default` in, or
+    if a button without a handler would advertise a pointer it cannot honour.
+[x] "Free space on this volume" no longer lies about *which* volume, and no
+    longer quotes a number from before the last cleanup:
+      - measured with statvfs instead of a `df` subprocess on the boot path
+        (G-REL-06); a regression test compares the two so the substitution
+        cannot drift silently
+      - the volume's mount name travels with the numbers (macOS), so the card
+        says "/Volumes/Work" instead of "this volume"
+      - refreshed after every cleanup, in the UI store and in the menu bar's
+        cached copy, which previously disagreed with each other
+    Known limit (deliberate): the card still describes the volume holding
+    $HOME. A scan root on another volume is a different filesystem, and
+    per-volume reporting is not implemented — the mount name is there so the
+    label is at least honest about which one it means.
+```
+
 ## M5 — UI regression coverage (not started)
 
 ```text

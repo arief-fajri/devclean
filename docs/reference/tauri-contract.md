@@ -2,7 +2,7 @@
 
 > The single document defining what the frontend may see. Changing this file
 > = changing the contract → requires human approval (Level B) + a regression
-> test. Version: **v0.7.2 (bounded cleanup preview)**.
+> test. Version: **v0.7.3 (free space without a subprocess)**.
 
 ## Commands (15)
 
@@ -21,7 +21,7 @@
 | `get_history` | `{limit?: number}` | `HistoryEntry[]` | Newest entries, oldest first; default 100, cap 1000 |
 | `get_providers` | — | `ProviderInfo[]` | Every registered provider + its enabled state |
 | `detect_scan_roots` | — | `ScanRootCandidate[]` | Candidate folders under `$HOME`, largest cache first (v0.5.0) |
-| `get_disk_free` | — | `DiskFree` | Free/total bytes of the data volume; `known: false` when unavailable (v0.5.0) |
+| `get_disk_free` | — | `DiskFree` | Free/total bytes of the volume holding `$HOME`, plus that volume's `mount` name when the platform can supply one; `known: false` when unavailable. Measured with `statvfs`, **no subprocess** (v0.7.3) |
 | `get_history_runs` | `{limit?: number}` | `CleanupRun[]` | Newest cleanup **runs** (default 20, cap 200) with their entries attached; tail-read (v0.6.0) |
 
 ## Events (8)
@@ -91,7 +91,8 @@ interface ProviderInfo { id: string; name: string; enabled: boolean }
 interface ScanRootCandidate { path: string; approximate_bytes: number | null;
   cache_count: number; already_configured: boolean }
 
-interface DiskFree { available_bytes: number; total_bytes: number; known: boolean }
+interface DiskFree { available_bytes: number; total_bytes: number; known: boolean;
+  mount: string | null }   // v0.7.3: e.g. "/Volumes/Work"; macOS only, null elsewhere
 
 interface HistoryEntry { run_id?: string; finished_at_unix: number;
   resource_id: string; provider: string; name: string; requested_bytes: number;
@@ -128,21 +129,34 @@ Not:
    backwards or report `N/N` with work pending).
 3. `cleanup` returns `Err` (not a per-item failure) when a required
    `preview_token` is missing, expired, or covers a different id set.
-4. **`preview_cleanup` is bounded (v0.7.2).** Re-measuring walks every
+3. **`preview_cleanup` is bounded (v0.7.2).** Re-measuring walks every
    selected path; over 120s it fails with an explanation instead of leaving the
    dialog waiting forever (G-REL-01, which previously covered scans and
    subprocesses but not this).
-5. **A partial preview is reported, not hidden.** `preview_cleanup` silently
+4. **A partial preview is reported, not hidden.** `preview_cleanup` silently
    omitted ids it could not resolve; the UI now shows how many of the selected
    resources were found, and refuses to present an empty preview as work.
-6. **Closing the window hides it (v0.7.0).** The app keeps running in the menu
+5. **Closing the window hides it (v0.7.0).** The app keeps running in the menu
    bar; only `Quit DevClean` exits. Before this, closing the last window made
    the runtime exit (`tauri-runtime-writ` exits on `RunEvent::ExitRequested`
    when the last window is destroyed), which silently removed the tray icon
    and made every menu action unreachable.
-7. **Navigation is frontend-local.** The page id lives in `$lib/nav` and is
+6. **Navigation is frontend-local.** The page id lives in `$lib/nav` and is
    never sent to the backend; a reload always starts on Overview. No command
    was added to support the sidebar.
+7. **The Dock icon opens the window (v0.7.3).** Closing the window hides it
+   (note 5), which left the Dock icon on screen and inert: macOS sends
+   `applicationShouldHandleReopen` on a Dock click, but `Builder::run` installs
+   an *empty* event handler (`build()?.run(|_, _| {})`), so nothing acted on
+   it. The shell now runs its own loop and handles `RunEvent::Reopen` by
+   calling the same `show_main` the menu bar uses. The Dock, the tray icon and
+   the menu all reveal the window through one function, so they cannot drift.
+8. **Free space is re-measured where it moves (v0.7.3).** The dashboard read
+   `get_disk_free` once at launch, so after a cleanup the card quoted the
+   pre-deletion figure. Both the UI store and the menu bar's cached copy now
+   refresh when a cleanup finishes. `get_disk_free` also stops spawning `df`
+   on the boot path (v0.7.3): it is measured with `statvfs`, and a
+   regression test compares the two so the substitution cannot silently drift.
 
 ## Menu bar surface (v0.7.0)
 
@@ -184,7 +198,7 @@ is no destructive item — see G-UI-02 in `docs/development/methodology/guardrai
   added or changed.**
   - `+tray_action` event (`{route, filter?}`), emitted only after the window
     is shown; the frontend validates the route id.
-  - Closing the window hides it instead of exiting (behavioural note 4).
+  - Closing the window hides it instead of exiting (behavioural note 5).
   - Menu bar: one click opens a read-only info block (reclaimable, kept,
     top three providers, stale count, low-disk warning) plus the six actions
     above. Numbers come from the scan cache and from free space measured once

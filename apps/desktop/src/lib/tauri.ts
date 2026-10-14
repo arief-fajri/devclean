@@ -138,6 +138,11 @@ export interface DiskFree {
   total_bytes: number;
   /** False when the platform query failed — show "unknown", never "0". */
   known: boolean;
+  /**
+   * Mount point of the volume these numbers describe (e.g. `/Volumes/Work`),
+   * when the platform can name it. macOS only; null elsewhere.
+   */
+  mount: string | null;
 }
 
 export interface ProviderInfo {

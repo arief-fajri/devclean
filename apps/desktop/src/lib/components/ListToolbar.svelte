@@ -147,7 +147,7 @@
       {/if}
     </p>
     <label
-      class="flex shrink-0 cursor-pointer items-center gap-1.5 text-xs text-zinc-500"
+      class="flex shrink-0 items-center gap-1.5 text-xs text-zinc-500"
       title="Show the filesystem path under each item"
     >
       <input type="checkbox" class="h-3.5 w-3.5 accent-emerald-600" bind:checked={viewStore.showPaths} />

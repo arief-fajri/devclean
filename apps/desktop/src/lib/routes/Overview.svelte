@@ -7,7 +7,7 @@
    */
   import PageHeader from "$lib/components/PageHeader.svelte";
   import SummaryPanel from "$lib/components/SummaryPanel.svelte";
-  import { formatBytes, formatPct, isStaleSignal } from "$lib/format";
+  import { formatBytes, formatPct, isStaleSignal, volumeLabel } from "$lib/format";
   import { runTotals, when } from "$lib/history";
   import { routeDef } from "$lib/nav";
   import { providerMeta } from "$lib/providerMeta";
@@ -197,7 +197,7 @@
         >
           <h2 class="flex items-center gap-2 text-sm font-semibold text-zinc-700 dark:text-zinc-200">
             <span aria-hidden="true" class="flex text-zinc-400"><HardDrive size={15} /></span>
-            Free space on this volume
+            {volumeLabel(diskFree)}
           </h2>
           <p class="tnum mt-2 font-mono text-2xl font-semibold text-zinc-900 dark:text-zinc-50">
             {formatBytes(diskFree.available_bytes)}
