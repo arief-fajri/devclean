@@ -9,6 +9,10 @@
 
 pub mod engine;
 pub mod history;
+pub mod retention;
+pub mod sql;
 
-pub use engine::{CleanupEngine, CleanupProgressFn};
-pub use history::{append_history_entry, read_history};
+pub use engine::{CleanupEngine, CleanupPolicy, CleanupProgressFn, Refusal};
+pub use history::{append_history_entry, read_history, read_history_runs};
+pub use retention::{apply_retention, prune, reclaimable_bytes};
+pub use sql::run_sql;

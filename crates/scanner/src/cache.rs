@@ -71,6 +71,7 @@ mod tests {
 
     fn summary() -> ScanSummary {
         ScanSummary {
+            retention_blocked_bytes: 0,
             total_bytes: 10,
             reclaimable_bytes: 10,
             providers: vec![],
@@ -84,6 +85,8 @@ mod tests {
                 safety: SafetyLevel::Safe,
                 detail: None,
                 impact: None,
+                age_days: None,
+                retention_eligible: true,
             }],
         }
     }

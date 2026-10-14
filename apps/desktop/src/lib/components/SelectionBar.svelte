@@ -8,11 +8,13 @@
     safe: number;
     review: number;
     busy: boolean;
+    /** A scan is running — cleanup waits until it settles. */
+    disabled?: boolean;
     onClear: () => void;
     onClean: () => void;
   }
 
-  let { count, bytes, safe, review, busy, onClear, onClean }: Props = $props();
+  let { count, bytes, safe, review, busy, disabled = false, onClear, onClean }: Props = $props();
 </script>
 
 <div
@@ -49,7 +51,8 @@
         <button
           class="inline-flex items-center gap-2 rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-700 disabled:opacity-50"
           onclick={onClean}
-          disabled={busy}
+          disabled={busy || disabled}
+          title={disabled ? "Wait for the current scan to finish" : ""}
         >
           <span aria-hidden="true" class="flex"><Trash2 size={15} /></span>
           Review &amp; clean selected

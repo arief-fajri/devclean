@@ -13,3 +13,4 @@ thiserror.workspace = true
 walkdir.workspace = true
 tokio.workspace = true
 tracing.workspace = true
+rusqlite.workspace = true

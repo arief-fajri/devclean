@@ -33,7 +33,12 @@ state + Cancel remaining) → **done** (freed vs requested, per-resource
 before/after). The app stays responsive throughout — `cleanup` and
 `preview_cleanup` run off the UI thread. Scan roots, ignore list, provider
 toggles, and other options live under the Settings dialog (persisted to
-disk); past cleanups under History, grouped by day. The tray icon offers
+disk). After a cleanup the app re-scans **only the providers it cleaned** —
+the summary shows a "partial re-scan" note because the other providers keep
+their last known figures. Use **Scan again** for a full sweep. Past cleanups
+live under History, grouped by cleanup **run** (per-resource rows collapsed
+behind a chevron), so one large cleanup can never hide the runs before it.
+The tray icon offers
 Show / Scan now / Quit; notifications fire only for completed
 scans/cleanups while the window is unfocused.
 

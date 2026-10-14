@@ -128,3 +128,38 @@ export function countBySafety(resources: Resource[]): { safe: number; review: nu
   }
   return { safe, review };
 }
+
+/**
+ * Scan-root candidates that are still worth offering.
+ *
+ * The backend flags `already_configured` against the *saved* roots, while
+ * the dialog edits a draft — so both must be checked. Rendering an
+ * already-added path in the suggestion list is what made every active
+ * root appear twice in Settings.
+ */
+export function addableCandidates<T extends { path: string; already_configured: boolean }>(
+  candidates: T[],
+  draftRoots: string[],
+): T[] {
+  const roots = new Set(draftRoots);
+  return candidates.filter((c) => !c.already_configured && !roots.has(c.path));
+}
+
+export function alreadyAddedCount<T extends { path: string; already_configured: boolean }>(
+  candidates: T[],
+  draftRoots: string[],
+): number {
+  return candidates.length - addableCandidates(candidates, draftRoots).length;
+}
+
+/**
+ * Drop expanded provider ids that no longer exist (e.g. their last item was
+ * cleaned, so the card disappears).
+ *
+ * Without this the ids accumulate forever and a provider that later shows up
+ * again pops open by itself — the "another card opened itself" report.
+ */
+export function pruneExpanded(expanded: string[], present: string[]): string[] {
+  const alive = new Set(present);
+  return expanded.filter((p) => alive.has(p));
+}

@@ -6,7 +6,7 @@
 //! Lives outside scan roots → declares
 //! [`Provider::extra_allowed_roots`]; protected-path rules still apply.
 
-use super::provider::{dir_size, home_dir, impact, CleanupAction, Provider};
+use super::provider::{dir_size, home_dir, impact, measure_dir, CleanupAction, Provider};
 use devclean_core::{Resource, SafetyLevel};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::AtomicBool;
@@ -46,12 +46,18 @@ impl Provider for XcodeDataProvider {
             reclaimable_bytes: size,
             safety: SafetyLevel::Caution,
             detail: None,
+            age_days: None,
+            retention_eligible: true,
             impact: impact(
                 "Build output only; your source code is untouched.",
                 Some("Full rebuild from scratch is slow"),
                 None,
             ),
         }]
+    }
+
+    fn measure(&self, path: &Path) -> Option<u64> {
+        measure_dir(path)
     }
 
     fn cleanup_action(&self, path: &Path) -> CleanupAction {

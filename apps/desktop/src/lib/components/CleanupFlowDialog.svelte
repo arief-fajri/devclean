@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { formatBytes } from "$lib/format";
+  import { formatBytes, truncateMiddle } from "$lib/format";
   import { safetyMeta } from "$lib/safety";
   import type {
     CleanupPreview,
@@ -8,7 +8,7 @@
     CleanupResult,
     ResourceImpact,
   } from "$lib/tauri";
-  import { LoaderCircle, TriangleAlert } from "lucide-svelte";
+  import { LoaderCircle, TriangleAlert, X } from "lucide-svelte";
 
   interface Props {
     /** Null when cleanup started without confirmation. */
@@ -21,6 +21,9 @@
     /** Set when the run finishes → the `done` phase. */
     results: CleanupResult[] | null;
     lookupImpact: (id: string) => ResourceImpact | undefined;
+    /** Filesystem path of the resource — display-only (the backend resolves
+     * deletion from the opaque id, never from this string). */
+    lookupPath: (id: string) => string | undefined;
     nameOf: (id: string) => string;
     onConfirm: () => void;
     onCancel: () => void;
@@ -38,6 +41,7 @@
     progress,
     results,
     lookupImpact,
+    lookupPath,
     nameOf,
     onConfirm,
     onCancel,
@@ -105,6 +109,57 @@
   }
 </script>
 
+    {#snippet itemRow(item: CleanupPreviewItem, highlight: boolean)}
+      {@const meta = safetyMeta(item.safety)}
+      {@const Icon = meta.icon}
+      {@const impact = lookupImpact(item.resource_id)}
+      {@const consequence = item.warning ?? impact?.consequence ?? meta.hint}
+      <li
+        class="rounded-lg border p-2 {highlight
+          ? 'border-amber-300 bg-amber-50 dark:border-amber-800 dark:bg-amber-950/40'
+          : 'border-zinc-100 dark:border-zinc-800'}"
+      >
+        <div class="flex items-start justify-between gap-2">
+          <span class="min-w-0 flex-1">
+            <span class="block truncate text-zinc-700 dark:text-zinc-300">
+              {item.name}
+            </span>
+            {#if lookupPath(item.resource_id)}
+              <span
+                class="mt-0.5 block truncate font-mono text-[11px] text-zinc-400"
+                title={lookupPath(item.resource_id)}
+              >
+                {truncateMiddle(lookupPath(item.resource_id) ?? "")}
+              </span>
+            {/if}
+          </span>
+          <span class="flex shrink-0 items-center gap-1.5">
+            <span
+              class="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[11px] font-semibold uppercase {meta.badge}"
+            >
+              <span aria-hidden="true" class="inline-flex"><Icon size={11} strokeWidth={2.5} /></span>
+              {meta.label}
+            </span>
+            <span class="tnum font-mono text-xs text-zinc-500">{formatBytes(item.bytes)}</span>
+          </span>
+        </div>
+        <p class="mt-1 text-xs text-zinc-500">
+          {consequence}
+          {#if !item.warning && impact?.cost}
+            <span class="text-zinc-400"> · {impact.cost}</span>
+          {/if}
+        </p>
+        {#if item.warning}
+          <p class="mt-0.5 flex items-center gap-1 text-xs text-amber-700 dark:text-amber-300">
+            <span aria-hidden="true" class="inline-flex"><TriangleAlert size={11} /></span>
+            {item.warning}
+          </p>
+        {:else if impact?.command}
+          <p class="mt-0.5 font-mono text-[11px] text-zinc-400">{impact.command}</p>
+        {/if}
+      </li>
+    {/snippet}
+
 <svelte:window onkeydown={onWindowKey} />
 
 <div
@@ -127,20 +182,51 @@
     }}
     disabled={phase === "running"}
   ></button>
-  <div class="relative max-h-[85vh] w-full max-w-md overflow-auto rounded-xl bg-white p-6 shadow-xl dark:bg-zinc-900">
-    {#if phase === "review" && preview}
-      <h2 class="text-lg font-semibold text-zinc-900 dark:text-zinc-100">
-        Clean {formatBytes(preview.total_bytes)} from {preview.items.length}
-        {preview.items.length === 1 ? "resource" : "resources"}?
-      </h2>
-      <p class="mt-1 text-sm text-zinc-500">
-        Re-measured
-        {#if measuredAt}
-          {measuredAt.toLocaleTimeString()}
+  <div
+    class="relative flex max-h-[85vh] w-full max-w-md flex-col overflow-hidden rounded-xl bg-white shadow-xl dark:bg-zinc-900"
+  >
+    <!-- Sticky header (C5): phase title + X on the right. -->
+    <header
+      class="flex shrink-0 items-start gap-3 border-b border-zinc-100 px-5 py-4 dark:border-zinc-800"
+    >
+      <div class="min-w-0 flex-1">
+        {#if phase === "review" && preview}
+          <h2 class="text-lg font-semibold text-zinc-900 dark:text-zinc-100">
+            Clean {formatBytes(preview.total_bytes)} from {preview.items.length}
+            {preview.items.length === 1 ? "resource" : "resources"}?
+          </h2>
+          <p class="mt-0.5 text-sm text-zinc-500">
+            Re-measured
+            {#if measuredAt}
+              {measuredAt.toLocaleTimeString()}
+            {/if}
+            (scan numbers can go stale)
+          </p>
+        {:else if phase === "running"}
+          <h2 class="text-lg font-semibold text-zinc-900 dark:text-zinc-100">Cleaning…</h2>
+        {:else}
+          <h2 class="text-lg font-semibold text-zinc-900 dark:text-zinc-100">
+            Cleanup complete
+          </h2>
         {/if}
-        (scan numbers can go stale)
-      </p>
+      </div>
+      <button
+        class="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-zinc-500 hover:bg-zinc-100 hover:text-zinc-900 disabled:opacity-40 dark:hover:bg-zinc-800 dark:hover:text-zinc-100"
+        onclick={() => {
+          if (phase === "review" && !cleaning) onCancel();
+          else if (phase === "done") onDone();
+        }}
+        disabled={phase === "running"}
+        aria-label="Close dialog"
+      >
+        <span aria-hidden="true" class="flex"><X size={17} /></span>
+      </button>
+    </header>
 
+    <!-- Body + footer are emitted per phase: each phase owns a scroll area
+         so its footer can stay pinned while its content scrolls. -->
+    {#if phase === "review" && preview}
+      <div class="min-h-0 flex-1 overflow-y-auto px-5 py-4">
       {#if showItems}
         <div class="mt-3 max-h-64 space-y-3 overflow-auto text-sm">
           {#if reviewItems.length > 0}
@@ -177,46 +263,6 @@
         </p>
       {/if}
 
-      {#snippet itemRow(item: CleanupPreviewItem, highlight: boolean)}
-        {@const meta = safetyMeta(item.safety)}
-        {@const Icon = meta.icon}
-        {@const impact = lookupImpact(item.resource_id)}
-        {@const consequence = item.warning ?? impact?.consequence ?? meta.hint}
-        <li
-          class="rounded-lg border p-2 {highlight
-            ? 'border-amber-300 bg-amber-50 dark:border-amber-800 dark:bg-amber-950/40'
-            : 'border-zinc-100 dark:border-zinc-800'}"
-        >
-          <div class="flex items-center justify-between gap-2">
-            <span class="min-w-0 flex-1 truncate text-zinc-700 dark:text-zinc-300">
-              {item.name}
-            </span>
-            <span class="flex shrink-0 items-center gap-1.5">
-              <span
-                class="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[11px] font-semibold uppercase {meta.badge}"
-              >
-                <span aria-hidden="true" class="inline-flex"><Icon size={11} strokeWidth={2.5} /></span>
-                {meta.label}
-              </span>
-              <span class="tnum font-mono text-xs text-zinc-500">{formatBytes(item.bytes)}</span>
-            </span>
-          </div>
-          <p class="mt-1 text-xs text-zinc-500">
-            {consequence}
-            {#if !item.warning && impact?.cost}
-              <span class="text-zinc-400"> · {impact.cost}</span>
-            {/if}
-          </p>
-          {#if item.warning}
-            <p class="mt-0.5 flex items-center gap-1 text-xs text-amber-700 dark:text-amber-300">
-              <span aria-hidden="true" class="inline-flex"><TriangleAlert size={11} /></span>
-              {item.warning}
-            </p>
-          {:else if impact?.command}
-            <p class="mt-0.5 font-mono text-[11px] text-zinc-400">{impact.command}</p>
-          {/if}
-        </li>
-      {/snippet}
 
       <label class="mt-3 flex items-start gap-2 text-sm text-zinc-700 dark:text-zinc-300">
         <input
@@ -227,8 +273,12 @@
         />
         I understand this data will be deleted and can be recreated.
       </label>
+      </div>
 
-      <div class="mt-4 flex justify-end gap-2">
+      <!-- Sticky footer -->
+      <footer
+        class="flex shrink-0 justify-end gap-2 border-t border-zinc-100 px-5 py-3 dark:border-zinc-800"
+      >
         <button
           class="rounded-lg px-4 py-2 text-sm text-zinc-600 hover:bg-zinc-100 autofocus dark:text-zinc-300 dark:hover:bg-zinc-800"
           onclick={onCancel}
@@ -243,8 +293,9 @@
         >
           {cleaning ? "Cleaning…" : `Clean ${formatBytes(preview.total_bytes)}`}
         </button>
-      </div>
+      </footer>
     {:else if phase === "running"}
+      <div class="min-h-0 flex-1 overflow-y-auto px-5 py-4">
       <h2 class="text-lg font-semibold text-zinc-900 dark:text-zinc-100">
         Cleaning…
       </h2>
@@ -287,12 +338,22 @@
                   <span class="text-sm text-zinc-300 dark:text-zinc-600">○</span>
                 {/if}
               </span>
-              <span
-                class="min-w-0 flex-1 truncate {i < done
-                  ? 'text-zinc-400 line-through'
-                  : 'text-zinc-700 dark:text-zinc-300'}"
-              >
-                {item.name}
+              <span class="min-w-0 flex-1">
+                <span
+                  class="block truncate {i < done
+                    ? 'text-zinc-400 line-through'
+                    : 'text-zinc-700 dark:text-zinc-300'}"
+                >
+                  {item.name}
+                </span>
+                {#if lookupPath(item.resource_id)}
+                  <span
+                    class="mt-0.5 block truncate font-mono text-[11px] text-zinc-400"
+                    title={lookupPath(item.resource_id)}
+                  >
+                    {truncateMiddle(lookupPath(item.resource_id) ?? "")}
+                  </span>
+                {/if}
               </span>
               <span class="tnum shrink-0 font-mono text-xs text-zinc-500">
                 {formatBytes(item.bytes)}
@@ -302,7 +363,12 @@
         </ul>
       {/if}
 
-      <div class="mt-4 flex items-center justify-between gap-2">
+      </div>
+
+      <!-- Sticky footer -->
+      <footer
+        class="flex shrink-0 items-center justify-between gap-2 border-t border-zinc-100 px-5 py-3 dark:border-zinc-800"
+      >
         <span class="text-xs text-zinc-500" role="status">
           {cancelling ? "Cancelling…" : "The app stays responsive — you can wait or cancel the rest."}
         </span>
@@ -313,10 +379,11 @@
         >
           {cancelling ? "Cancelling…" : "Cancel remaining"}
         </button>
-      </div>
+      </footer>
     {:else if phase === "done" && results}
+      <div class="min-h-0 flex-1 overflow-y-auto px-5 py-4">
       <h2 class="text-lg font-semibold text-zinc-900 dark:text-zinc-100">
-        ✓ Cleanup complete
+        Cleanup complete
       </h2>
       <p class="mt-1 text-sm text-zinc-500" role="status">
         <span class="tnum font-mono font-semibold text-emerald-700 dark:text-emerald-300">
@@ -332,9 +399,19 @@
         {#each results as r (r.resource_id)}
           <li class="rounded-lg border border-zinc-100 px-2 py-1.5 dark:border-zinc-800">
             <div class="flex items-center justify-between gap-2">
-              <span class="min-w-0 flex-1 truncate" title={nameOf(r.resource_id)}>
-                {resultMark(r.status)}
-                {nameOf(r.resource_id)}
+              <span class="min-w-0 flex-1">
+                <span class="block truncate" title={nameOf(r.resource_id)}>
+                  {resultMark(r.status)}
+                  {nameOf(r.resource_id)}
+                </span>
+                {#if lookupPath(r.resource_id)}
+                  <span
+                    class="mt-0.5 block truncate font-mono text-[11px] text-zinc-400"
+                    title={lookupPath(r.resource_id)}
+                  >
+                    {truncateMiddle(lookupPath(r.resource_id) ?? "")}
+                  </span>
+                {/if}
               </span>
               <span class="tnum shrink-0 font-mono text-xs text-zinc-500">
                 {formatBytes(r.requested_bytes)} → {formatBytes(r.freed_bytes)}
@@ -362,7 +439,12 @@
           Cancelled: the in-flight item finished, the rest were skipped.
         </p>
       {/if}
-      <div class="mt-4 flex justify-end gap-2">
+      </div>
+
+      <!-- Sticky footer -->
+      <footer
+        class="flex shrink-0 justify-end gap-2 border-t border-zinc-100 px-5 py-3 dark:border-zinc-800"
+      >
         <button
           class="rounded-lg border border-zinc-200 px-4 py-2 text-sm text-zinc-600 hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
           onclick={onRescan}
@@ -375,7 +457,7 @@
         >
           Done
         </button>
-      </div>
+      </footer>
     {/if}
   </div>
 </div>

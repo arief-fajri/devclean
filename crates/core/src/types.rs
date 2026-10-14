@@ -36,6 +36,22 @@ pub struct Resource {
     /// `#[serde(default)]` keeps v0.2.x on-disk scan caches readable.
     #[serde(default)]
     pub impact: Option<ResourceImpact>,
+    /// Age of the underlying item in whole days, when the provider can tell.
+    /// `None` for global caches whose age is meaningless. This is the input
+    /// to the retention policy (I9) and a display signal only — never a
+    /// safety verdict.
+    #[serde(default)]
+    pub age_days: Option<u64>,
+    /// False when the active retention policy keeps this resource
+    /// (`Settings.retention_days`). Such a resource is reported but must be
+    /// refused by the cleanup engine even if its id is sent directly.
+    /// `#[serde(default = "default_true")]` keeps old caches eligible.
+    #[serde(default = "default_true")]
+    pub retention_eligible: bool,
+}
+
+fn default_true() -> bool {
+    true
 }
 
 /// What happens when a resource is cleaned — one honest sentence plus
@@ -63,6 +79,16 @@ pub struct ProviderInfo {
     pub enabled: bool,
 }
 
+/// Free space on the volume holding the app's data (contract v0.5.0).
+/// `known: false` when the platform query failed — the UI must then say
+/// "unknown", never "0 bytes free".
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+pub struct DiskFree {
+    pub available_bytes: u64,
+    pub total_bytes: u64,
+    pub known: bool,
+}
+
 /// Per-provider totals for the dashboard.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProviderSummary {
@@ -80,6 +106,11 @@ pub struct ScanSummary {
     pub reclaimable_bytes: u64,
     pub providers: Vec<ProviderSummary>,
     pub resources: Vec<Resource>,
+    /// Bytes held back by the active retention policy. Reported separately
+    /// so the dashboard can say "12.4 GB reclaimable · 3.1 GB kept" instead
+    /// of silently shrinking the headline (I9).
+    #[serde(default)]
+    pub retention_blocked_bytes: u64,
 }
 
 /// One line of a cleanup preview (shown in the confirmation dialog).
@@ -97,6 +128,13 @@ pub struct CleanupPreviewItem {
 pub struct CleanupPreview {
     pub items: Vec<CleanupPreviewItem>,
     pub total_bytes: u64,
+    /// Opaque proof that this exact set of ids was measured and shown to the
+    /// user. `cleanup` requires it while `require_confirmation` is on, so
+    /// the confirmation gate is enforced by the backend and not merely by
+    /// the UI choosing to call `preview_cleanup` first (G-UI-01).
+    pub preview_token: String,
+    /// Unix seconds after which `preview_token` stops being accepted.
+    pub expires_at_unix: u64,
 }
 
 /// Per-resource outcome. Partial failure is reported here, never as a
@@ -155,6 +193,8 @@ mod tests {
             safety: SafetyLevel::Safe,
             detail: None,
             impact: Some(impact()),
+            age_days: None,
+            retention_eligible: true,
         };
         let back: Resource = serde_json::from_str(&serde_json::to_string(&r).unwrap()).unwrap();
         assert_eq!(back.impact, r.impact);
@@ -166,6 +206,11 @@ mod tests {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct HistoryEntry {
+    /// Id of the cleanup run this entry belongs to. `#[serde(default)]`
+    /// keeps every pre-v0.6 history line readable: legacy entries get an
+    /// empty id and are grouped by `finished_at_unix` instead.
+    #[serde(default)]
+    pub run_id: String,
     /// Unix timestamp (seconds) when the cleanup finished.
     pub finished_at_unix: u64,
     pub resource_id: String,
@@ -175,4 +220,23 @@ pub struct HistoryEntry {
     pub freed_bytes: u64,
     pub status: CleanupStatus,
     pub error: Option<String>,
+}
+
+/// One cleanup run, aggregated over its per-resource entries. The primary
+/// unit of the history UI: a single run can be hundreds of resources, so
+/// an entry-count limit (without run grouping) would let one large cleanup
+/// hide every run before it.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CleanupRun {
+    pub run_id: String,
+    pub finished_at_unix: u64,
+    pub entry_count: u32,
+    pub requested_bytes: u64,
+    pub freed_bytes: u64,
+    pub success: u32,
+    pub partial: u32,
+    pub failed: u32,
+    pub cancelled: u32,
+    pub providers: Vec<String>,
+    pub entries: Vec<HistoryEntry>,
 }

@@ -1,9 +1,10 @@
 use devclean_core::{
-    CleanupPreview, CleanupPreviewItem, CleanupResult, CleanupStatus, Resource, SafetyValidator,
-    CLEANUP_COMMAND_TIMEOUT,
+    CleanupPreview, CleanupPreviewItem, CleanupResult, CleanupStatus, DockerPruneScope, Resource,
+    SafetyValidator, CLEANUP_COMMAND_TIMEOUT,
 };
-use devclean_providers::{dir_size, CleanupAction, Provider};
+use devclean_providers::{CleanupAction, Provider};
 use std::collections::HashMap;
+use std::path::Path;
 use std::sync::{
     atomic::{AtomicBool, Ordering},
     Arc,
@@ -15,6 +16,57 @@ use std::time::{Duration, Instant};
 /// item — never just once at the end — so the UI can render a live
 /// progress bar while the queue still runs.
 pub type CleanupProgressFn = Box<dyn Fn(usize, usize, &CleanupResult) + Send + Sync>;
+
+/// Backend-enforced limits that are NOT about path safety (G-SAFE-03, I9).
+///
+/// Everything here is checked by the engine before a resource is touched,
+/// so sending a forbidden id straight to the `cleanup` command is refused
+/// exactly as if the user had clicked the button.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct CleanupPolicy {
+    /// The user unlocked destructive-but-requested operations in Settings.
+    pub allow_privileged_operations: bool,
+    /// How far Docker pruning may go.
+    pub docker_prune_scope: DockerPruneScope,
+}
+
+/// Why a resource was refused before any action ran.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Refusal {
+    /// `Settings.retention_days` keeps this resource (I9).
+    RetentionKept {
+        age_days: Option<u64>,
+        keep_days: u32,
+    },
+    /// The action goes past build-cache pruning without the user opting in.
+    PrivilegedLocked { consequence: String },
+    /// `DockerPruneScope::Off`.
+    DockerDisabled,
+}
+
+impl std::fmt::Display for Refusal {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::RetentionKept {
+                age_days: Some(d),
+                keep_days,
+            } => write!(
+                f,
+                "kept by your {keep_days}-day retention policy (this is {d}d old)"
+            ),
+            Self::RetentionKept { keep_days, .. } => {
+                write!(f, "kept by your {keep_days}-day retention policy")
+            }
+            Self::PrivilegedLocked { consequence } => write!(
+                f,
+                "needs Privileged operations in Settings > Cleanup ({consequence})"
+            ),
+            Self::DockerDisabled => {
+                write!(f, "Docker cleanup is off in Settings > Cleanup")
+            }
+        }
+    }
+}
 
 #[derive(Clone)]
 pub struct CleanupEngine {
@@ -35,34 +87,90 @@ impl CleanupEngine {
     }
 
     /// Re-measure each selected resource now (sizes may have changed since
-    /// the scan) and attach the provider's warning, if any.
+    /// the scan) and attach the provider's warning, if any. Measurement
+    /// goes through the provider so command-backed resources (Docker) are
+    /// re-queried instead of echoing stale scan numbers (P4).
     pub fn preview(
         &self,
         ids: &[String],
         resources: &HashMap<String, Resource>,
-        _providers: &HashMap<String, Arc<dyn Provider>>,
+        providers: &HashMap<String, Arc<dyn Provider>>,
     ) -> CleanupPreview {
         let mut items = Vec::new();
         for id in ids {
-            if let Some(r) = resources.get(id) {
-                let bytes = current_bytes(r);
-                items.push(CleanupPreviewItem {
-                    resource_id: id.clone(),
-                    name: r.name.clone(),
-                    bytes,
-                    safety: r.safety,
-                    warning: warning_for(r),
-                });
-            }
+            let Some(r) = resources.get(id) else { continue };
+            let Some(p) = providers.get(&r.provider) else {
+                continue;
+            };
+            items.push(CleanupPreviewItem {
+                resource_id: id.clone(),
+                name: r.name.clone(),
+                bytes: p.measure(&r.path).unwrap_or(r.reclaimable_bytes),
+                safety: r.safety,
+                warning: warning_for(r),
+            });
         }
         let total_bytes = items.iter().map(|i| i.bytes).sum();
-        CleanupPreview { items, total_bytes }
+        // Issue the confirmation token for exactly this id set (G-UI-01).
+        let token = devclean_core::PreviewToken::issue(ids);
+        CleanupPreview {
+            items,
+            total_bytes,
+            expires_at_unix: token.expires_at_unix(),
+            preview_token: token.encode(),
+        }
+    }
+
+    /// [`CleanupEngine::execute`] plus the backend-enforced policy gates
+    /// (retention, privileged operations, Docker scope). This is what the
+    /// `cleanup` command calls; `execute` stays available as the ungated
+    /// primitive for unit tests that exercise measurement only.
+    #[allow(clippy::too_many_arguments)]
+    pub fn execute_gated(
+        &self,
+        ids: &[String],
+        resources: &HashMap<String, Resource>,
+        providers: &HashMap<String, Arc<dyn Provider>>,
+        validator: &SafetyValidator,
+        lookup: impl Fn(&str) -> Option<std::path::PathBuf>,
+        on_progress: Option<CleanupProgressFn>,
+        policy: &CleanupPolicy,
+    ) -> Vec<CleanupResult> {
+        let mut out = Vec::new();
+        let total = ids.len();
+        let mut done = 0usize;
+        for id in ids {
+            let result = if self.cancelled.load(Ordering::SeqCst) {
+                cancelled_result(id, resources.get(id))
+            } else {
+                let Some(r) = resources.get(id) else {
+                    continue;
+                };
+                let Some(p) = providers.get(&r.provider) else {
+                    continue;
+                };
+                // Gates run BEFORE any measurement or filesystem access.
+                match refusal_for(r, p, policy) {
+                    Some(reason) => refused_result(id, r, reason),
+                    None => self.clean_one(id, r, p, validator, &lookup),
+                }
+            };
+            done += 1;
+            if let Some(cb) = &on_progress {
+                cb(done, total, &result);
+            }
+            out.push(result);
+        }
+        out
     }
 
     /// Execute cleanup for the selected ids. Each resource yields its own
     /// [`CleanupResult`] so partial failure is transparent (G-REL-02).
     /// `on_progress` fires after every completed item (including
     /// cancelled ones); unknown ids are still skipped silently.
+    ///
+    /// No policy gates here — prefer [`CleanupEngine::execute_gated`] from
+    /// the command layer.
     pub fn execute(
         &self,
         ids: &[String],
@@ -105,75 +213,189 @@ impl CleanupEngine {
         lookup: &dyn Fn(&str) -> Option<std::path::PathBuf>,
     ) -> CleanupResult {
         let start = Instant::now();
-        let requested = current_bytes(r);
+        // Resolve the authoritative path server-side (I1).
+        let path = lookup(id).unwrap_or_else(|| r.path.clone());
+        // `before` is MEASURED, never the scan-time figure: by cleanup time
+        // the cache may already have shrunk or grown (P4).
+        let before = provider.measure(&path);
 
-        // Resolve the authoritative path server-side (I1), except for
-        // command-based providers where no path is deleted at all.
-        let action = provider.cleanup_action(&lookup(id).unwrap_or_else(|| r.path.clone()));
+        let action = provider.cleanup_action(&path);
         let outcome: Result<u64, String> = match &action {
             CleanupAction::RemoveDir(path) => {
                 // I2: validate before touching anything.
                 if let Err(e) = validator.validate_path(path) {
-                    Err(e.to_string())
-                } else {
-                    let before = dir_size(path);
-                    match std::fs::remove_dir_all(path) {
-                        Ok(()) => Ok(before),
-                        Err(e) => Err(format!("could not remove {}: {e}", path.display())),
-                    }
+                    return failed(id, before, provider, path, start, e.to_string());
+                }
+                match std::fs::remove_dir_all(path) {
+                    Ok(()) => Ok(provider.measure(path).map_or(before.unwrap_or(0), |after| {
+                        before.unwrap_or(0).saturating_sub(after)
+                    })),
+                    Err(e) => Err(format!("could not remove {}: {e}", path.display())),
                 }
             }
             CleanupAction::RunCommand { program, args } => {
+                let cmd = format!("`{program} {}`", args.join(" "));
                 match run_command_timeout(program, args, CLEANUP_COMMAND_TIMEOUT) {
                     Ok(o) if o.status.success() => {
-                        // Re-measure: freed = before - after (0 if fully cleaned).
-                        let after = lookup(id).map(|p| dir_size(&p)).unwrap_or(0);
-                        Ok(requested.saturating_sub(after))
+                        // freed = before - after, both measured. The old code
+                        // compared against the resource's sentinel path,
+                        // which is never a directory, so `after` was always 0
+                        // and `freed` always equalled `requested` — a number
+                        // that was never observed (I8, G-REL-02).
+                        match provider.measure(&path) {
+                            Some(after) => {
+                                let b = before.unwrap_or(0);
+                                Ok(b.saturating_sub(after))
+                            }
+                            None => Err(format!(
+                                "{cmd} completed, but the freed space could not be \
+                                 measured (no directory and no readable tool report)"
+                            )),
+                        }
                     }
                     Ok(o) => Err(format!(
-                        "`{program} {}` failed: {}",
-                        args.join(" "),
+                        "{cmd} failed: {}",
                         String::from_utf8_lossy(&o.stderr).trim()
                     )),
                     Err(e) => Err(e),
                 }
             }
+            CleanupAction::PruneOlderThan {
+                dir,
+                min_age_days,
+                pattern,
+                prune_empty_dirs,
+                skip_names,
+            } => {
+                // I2 + I9: the directory must still pass the validator, and
+                // the cutoff comes from the provider's declared policy —
+                // never from anything a caller supplied (G-SAFE-02).
+                if let Err(e) = validator.validate_path(dir) {
+                    return failed(id, before, provider, dir, start, e.to_string());
+                }
+                Ok(crate::retention::prune(
+                    dir,
+                    *min_age_days,
+                    pattern,
+                    *prune_empty_dirs,
+                    skip_names,
+                ))
+            }
+            CleanupAction::RunSql {
+                db,
+                statements,
+                bound_cutoff,
+                checkpoint,
+                vacuum,
+                require_idle,
+            } => {
+                // I2: the file must still pass the validator. `opencode.db`
+                // lives outside scan roots, so it is only ever accepted via
+                // the provider's declared `extra_allowed_roots`.
+                if let Err(e) = validator.validate_path(db) {
+                    return failed(id, before, provider, db, start, e.to_string());
+                }
+                crate::sql::run_sql(
+                    db,
+                    statements,
+                    *bound_cutoff,
+                    checkpoint,
+                    *vacuum,
+                    *require_idle,
+                )
+            }
         };
 
         let (status, freed, error) = match outcome {
             Ok(freed) => (CleanupStatus::Success, freed, None),
-            Err(error) => {
-                // Best effort: something may have been freed before the error.
-                let after = lookup(id).map(|p| dir_size(&p)).unwrap_or(0);
-                let freed = requested.saturating_sub(after);
-                let status = if freed > 0 {
-                    CleanupStatus::Partial
-                } else {
-                    CleanupStatus::Failed
-                };
-                (status, freed, Some(error))
-            }
+            Err(error) => Self::failed_outcome(before, provider, &path, error),
         };
         CleanupResult {
             resource_id: id.to_string(),
-            requested_bytes: requested,
+            requested_bytes: r.reclaimable_bytes,
             freed_bytes: freed,
             duration_ms: start.elapsed().as_millis() as u64,
             status,
             error,
         }
     }
+
+    /// Best-effort `freed` after a failure: measure now, subtract from
+    /// `before`. When the current size cannot be measured we report 0 —
+    /// never `before - 0`, which would fabricate the whole figure.
+    fn failed_outcome(
+        before: Option<u64>,
+        provider: &Arc<dyn Provider>,
+        path: &Path,
+        error: String,
+    ) -> (CleanupStatus, u64, Option<String>) {
+        match (before, provider.measure(path)) {
+            (Some(b), Some(after)) if b > after => (CleanupStatus::Partial, b - after, Some(error)),
+            // Measured and nothing was freed, or unmeasurable: report 0.
+            _ => (CleanupStatus::Failed, 0, Some(error)),
+        }
+    }
 }
 
-fn current_bytes(r: &Resource) -> u64 {
-    // Filesystem-backed resources are re-measured; virtual ones (Docker)
-    // keep the scanned figure.
-    if r.path.starts_with("__docker__") {
-        r.reclaimable_bytes
-    } else if r.path.is_dir() {
-        dir_size(&r.path)
-    } else {
-        0
+/// Early-return result for a path the validator refused: nothing was
+/// touched, so `freed` is 0 and the status is `Failed`.
+fn failed(
+    id: &str,
+    before: Option<u64>,
+    provider: &Arc<dyn Provider>,
+    path: &Path,
+    start: Instant,
+    error: String,
+) -> CleanupResult {
+    let (status, freed, error) = CleanupEngine::failed_outcome(before, provider, path, error);
+    CleanupResult {
+        resource_id: id.to_string(),
+        requested_bytes: 0,
+        freed_bytes: freed,
+        duration_ms: start.elapsed().as_millis() as u64,
+        status,
+        error,
+    }
+}
+
+/// Gates that apply to a resource BEFORE anything is measured or touched.
+///
+/// Deliberately provider-driven: the engine asks what the action WOULD do
+/// rather than pattern-matching provider ids, so a new provider is gated
+/// automatically instead of needing an `if` here (P1).
+fn refusal_for(r: &Resource, p: &Arc<dyn Provider>, policy: &CleanupPolicy) -> Option<Refusal> {
+    // 1. Retention (I9). Enforced here, not in the UI, so a direct call to
+    //    `cleanup` cannot bypass the age policy.
+    if !r.retention_eligible {
+        return Some(Refusal::RetentionKept {
+            age_days: r.age_days,
+            keep_days: p.retention_days().unwrap_or(0),
+        });
+    }
+
+    // 2/3. Privileged operations + Docker scope (G-SAFE-03). Only providers
+    //      that declare a Docker scope are subject to these gates; every
+    //      other provider returns `None` here and passes straight through.
+    let required = p.required_docker_scope()?;
+    if policy.docker_prune_scope == DockerPruneScope::Off {
+        return Some(Refusal::DockerDisabled);
+    }
+    if required.requires_privileged() && !policy.allow_privileged_operations {
+        return Some(Refusal::PrivilegedLocked {
+            consequence: required.consequence().to_string(),
+        });
+    }
+    None
+}
+
+fn refused_result(id: &str, r: &Resource, reason: Refusal) -> CleanupResult {
+    CleanupResult {
+        resource_id: id.to_string(),
+        requested_bytes: r.reclaimable_bytes,
+        freed_bytes: 0,
+        duration_ms: 0,
+        status: CleanupStatus::Failed,
+        error: Some(reason.to_string()),
     }
 }
 
@@ -272,6 +494,7 @@ fn run_command_timeout(
 mod tests {
     use super::*;
     use devclean_core::{SafetyLevel, SafetyValidator};
+    use devclean_providers::NodeModulesProvider;
     use std::path::PathBuf;
 
     fn fixture(tag: &str) -> (PathBuf, PathBuf) {
@@ -310,6 +533,8 @@ mod tests {
                 safety: SafetyLevel::Safe,
                 detail: None,
                 impact: None,
+                age_days: None,
+                retention_eligible: true,
             },
         );
         let validator = SafetyValidator::new(vec![root.clone()]);
@@ -351,6 +576,8 @@ mod tests {
                 safety: SafetyLevel::Safe,
                 detail: None,
                 impact: None,
+                age_days: None,
+                retention_eligible: true,
             },
         );
         // Validator rooted elsewhere: the same path must be refused.
@@ -392,6 +619,8 @@ mod tests {
             safety: SafetyLevel::Safe,
             detail: None,
             impact: None,
+            age_days: None,
+            retention_eligible: true,
         }
     }
 
@@ -470,5 +699,481 @@ mod tests {
         )
         .unwrap_err();
         assert!(err.contains("could not run"), "got: {err}");
+    }
+
+    /// Stand-in for Docker: the resource has **no directory of its own** — its
+    /// `path` is a sentinel that never exists, and the only way to learn its
+    /// size is to ask the provider, which re-reads `docker system df`.
+    /// `sizes` is popped one entry per `measure` call: the "before" reading
+    /// then the "after" reading.
+    struct SentinelProvider {
+        tag: &'static str,
+        sizes: std::sync::Mutex<std::collections::VecDeque<u64>>,
+    }
+
+    impl SentinelProvider {
+        fn new(tag: &'static str, sizes: &[u64]) -> Self {
+            Self {
+                tag,
+                sizes: std::sync::Mutex::new(sizes.iter().copied().collect()),
+            }
+        }
+    }
+
+    impl Provider for SentinelProvider {
+        fn id(&self) -> &'static str {
+            self.tag
+        }
+        fn name(&self) -> &'static str {
+            "Sentinel stub"
+        }
+        fn default_safety(&self) -> SafetyLevel {
+            SafetyLevel::Safe
+        }
+        fn scan(&self, _roots: &[PathBuf], _cancel: &AtomicBool) -> Vec<Resource> {
+            Vec::new()
+        }
+        fn cleanup_action(&self, _path: &Path) -> CleanupAction {
+            CleanupAction::RunCommand {
+                program: "/usr/bin/true",
+                args: &["--pretend-prune"],
+            }
+        }
+        fn measure(&self, _path: &Path) -> Option<u64> {
+            self.sizes.lock().ok().and_then(|mut q| q.pop_front())
+        }
+    }
+
+    #[test]
+    fn runcommand_freed_bytes_is_measured_not_assumed() {
+        // A prune that reclaims 3 GB of a 10 GB cache. The old code read
+        // `after` from the resource's path — a sentinel that is never a
+        // directory — so `after` was always 0 and `freed` always equalled
+        // `requested` (10 GB). The true, measurable answer is 3 GB.
+        let before_bytes: u64 = 10_000_000_000;
+        let after_bytes: u64 = 7_000_000_000;
+
+        let id = "sn:0001".to_string();
+        let r = Resource {
+            id: id.clone(),
+            provider: "sentinel".to_string(),
+            name: "Virtual cache".to_string(),
+            path: PathBuf::from("__sentinel__/cache"),
+            size_bytes: before_bytes,
+            reclaimable_bytes: before_bytes,
+            safety: SafetyLevel::Safe,
+            detail: None,
+            impact: None,
+            age_days: None,
+            retention_eligible: true,
+        };
+        let mut resources = HashMap::new();
+        resources.insert(id.clone(), r);
+        let providers: HashMap<String, Arc<dyn Provider>> = HashMap::from([(
+            "sentinel".to_string(),
+            Arc::new(SentinelProvider::new(
+                "sentinel",
+                &[before_bytes, after_bytes],
+            )) as Arc<dyn Provider>,
+        )]);
+        let validator = SafetyValidator::new(vec![PathBuf::from("/tmp")]);
+        let engine = CleanupEngine::default();
+        let lookup = |id: &str| resources.get(id).map(|x| x.path.clone());
+
+        let results = engine.execute(&[id], &resources, &providers, &validator, lookup, None);
+        let got = &results[0];
+
+        assert_eq!(got.status, CleanupStatus::Success, "error: {:?}", got.error);
+        assert_eq!(got.freed_bytes, 3_000_000_000, "freed must be measured");
+        assert_ne!(
+            got.freed_bytes, got.requested_bytes,
+            "a partial prune must never report the whole requested figure"
+        );
+    }
+
+    #[test]
+    fn runcommand_that_frees_nothing_reports_zero_not_the_requested_figure() {
+        // Prune runs, cache is unchanged: freed must be 0.
+        let n: u64 = 4_000_000_000;
+        let id = "sn:0002".to_string();
+        let r = Resource {
+            id: id.clone(),
+            provider: "sentinel".to_string(),
+            name: "Virtual cache".to_string(),
+            path: PathBuf::from("__sentinel__/cache"),
+            size_bytes: n,
+            reclaimable_bytes: n,
+            safety: SafetyLevel::Safe,
+            detail: None,
+            impact: None,
+            age_days: None,
+            retention_eligible: true,
+        };
+        let mut resources = HashMap::new();
+        resources.insert(id.clone(), r);
+        let providers: HashMap<String, Arc<dyn Provider>> = HashMap::from([(
+            "sentinel".to_string(),
+            Arc::new(SentinelProvider::new("sentinel", &[n, n])) as Arc<dyn Provider>,
+        )]);
+        let validator = SafetyValidator::new(vec![PathBuf::from("/tmp")]);
+        let engine = CleanupEngine::default();
+        let lookup = |id: &str| resources.get(id).map(|x| x.path.clone());
+
+        let results = engine.execute(&[id], &resources, &providers, &validator, lookup, None);
+        assert_eq!(results[0].freed_bytes, 0);
+    }
+
+    #[test]
+    fn unmeasurable_after_state_reports_zero_and_a_reason() {
+        // A command provider whose resource has no directory and no tool
+        // report: `measure` returns None both before and after. The engine
+        // must report 0 freed with an explicit reason — never `requested`.
+        struct UnmeasurableProvider;
+        impl Provider for UnmeasurableProvider {
+            fn id(&self) -> &'static str {
+                "unmeasurable"
+            }
+            fn name(&self) -> &'static str {
+                "Unmeasurable stub"
+            }
+            fn default_safety(&self) -> SafetyLevel {
+                SafetyLevel::Safe
+            }
+            fn scan(&self, _roots: &[PathBuf], _cancel: &AtomicBool) -> Vec<Resource> {
+                Vec::new()
+            }
+            fn cleanup_action(&self, _path: &Path) -> CleanupAction {
+                CleanupAction::RunCommand {
+                    program: "/usr/bin/true",
+                    args: &[],
+                }
+            }
+            fn measure(&self, _path: &Path) -> Option<u64> {
+                None
+            }
+        }
+
+        let id = "um:0001".to_string();
+        let r = Resource {
+            id: id.clone(),
+            provider: "unmeasurable".to_string(),
+            name: "virtual".to_string(),
+            path: PathBuf::from("__virtual__/thing"),
+            size_bytes: 5_000_000_000,
+            reclaimable_bytes: 5_000_000_000,
+            safety: SafetyLevel::Safe,
+            detail: None,
+            impact: None,
+            age_days: None,
+            retention_eligible: true,
+        };
+        let mut resources = HashMap::new();
+        resources.insert(id.clone(), r);
+        let providers: HashMap<String, Arc<dyn Provider>> = HashMap::from([(
+            "unmeasurable".to_string(),
+            Arc::new(UnmeasurableProvider) as Arc<dyn Provider>,
+        )]);
+        let validator = SafetyValidator::new(vec![PathBuf::from("/tmp")]);
+        let engine = CleanupEngine::default();
+        let lookup = |id: &str| resources.get(id).map(|x| x.path.clone());
+
+        let results = engine.execute(&[id], &resources, &providers, &validator, lookup, None);
+        let got = &results[0];
+        assert_eq!(got.freed_bytes, 0, "must not fabricate 5 GB");
+        let err = got.error.as_deref().unwrap_or_default();
+        assert!(
+            err.contains("could not be measured"),
+            "expected an honest reason, got: {err}"
+        );
+    }
+
+    #[test]
+    fn refused_path_reports_zero_freed_not_the_requested_figure() {
+        // The validator refuses before anything is touched. `freed` must be
+        // 0 — not `requested - 0`, which is what the old error path did.
+        let (root, target) = fixture("refuse");
+        let mut resources = HashMap::new();
+        resources.insert(
+            "nm:0009".to_string(),
+            Resource {
+                id: "nm:0009".to_string(),
+                provider: "node_modules".to_string(),
+                name: "proj/node_modules".to_string(),
+                path: target.clone(),
+                size_bytes: 2000,
+                reclaimable_bytes: 2000,
+                safety: SafetyLevel::Safe,
+                detail: None,
+                impact: None,
+                age_days: None,
+                retention_eligible: true,
+            },
+        );
+        let providers: HashMap<String, Arc<dyn Provider>> = HashMap::from([(
+            "node_modules".to_string(),
+            Arc::new(NodeModulesProvider) as Arc<dyn Provider>,
+        )]);
+        let validator = SafetyValidator::new(vec![PathBuf::from("/definitely/not/a/root")]);
+        let engine = CleanupEngine::default();
+        let lookup = |id: &str| resources.get(id).map(|x| x.path.clone());
+
+        let results = engine.execute(
+            &["nm:0009".to_string()],
+            &resources,
+            &providers,
+            &validator,
+            lookup,
+            None,
+        );
+        assert_eq!(results[0].status, CleanupStatus::Failed);
+        assert_eq!(
+            results[0].freed_bytes, 0,
+            "a refused cleanup freed nothing and must say so"
+        );
+        assert!(target.exists());
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    // ---------------------------------------------------------------- gates
+
+    fn gated_resource(id: &str, path: &Path, provider: &str) -> Resource {
+        Resource {
+            id: id.to_string(),
+            provider: provider.to_string(),
+            name: "node_modules".to_string(),
+            path: path.to_path_buf(),
+            size_bytes: 2000,
+            reclaimable_bytes: 2000,
+            safety: SafetyLevel::Safe,
+            detail: None,
+            age_days: Some(3),
+            retention_eligible: true,
+            impact: None,
+        }
+    }
+
+    /// I9: the age policy is enforced by the engine, so calling `cleanup`
+    /// with a held-back id directly is refused — the checkbox in the UI is
+    /// a convenience, not the control.
+    #[test]
+    fn retention_blocked_resource_is_refused_by_the_engine() {
+        let (root, target) = fixture("gate-retention");
+        let mut r = gated_resource("nm:0100", &target, "node_modules");
+        r.retention_eligible = false;
+        r.age_days = Some(3);
+        let mut resources = HashMap::new();
+        resources.insert(r.id.clone(), r);
+        let providers = setup().1;
+        let validator = SafetyValidator::new(vec![root.clone()]);
+        let lookup = |id: &str| resources.get(id).map(|x| x.path.clone());
+        let policy = CleanupPolicy::default();
+
+        let out = CleanupEngine::default().execute_gated(
+            &["nm:0100".to_string()],
+            &resources,
+            &providers,
+            &validator,
+            lookup,
+            None,
+            &policy,
+        );
+        assert_eq!(out[0].status, CleanupStatus::Failed);
+        assert_eq!(out[0].freed_bytes, 0);
+        let err = out[0].error.as_deref().unwrap_or_default();
+        assert!(err.contains("retention policy"), "got: {err}");
+        assert!(
+            target.exists(),
+            "a retention-blocked resource must be untouched"
+        );
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn retention_eligible_resource_still_goes_through() {
+        let (root, target) = fixture("gate-retention-ok");
+        let r = gated_resource("nm:0101", &target, "node_modules");
+        let mut resources = HashMap::new();
+        resources.insert(r.id.clone(), r);
+        let providers = setup().1;
+        let validator = SafetyValidator::new(vec![root.clone()]);
+        let lookup = |id: &str| resources.get(id).map(|x| x.path.clone());
+
+        let out = CleanupEngine::default().execute_gated(
+            &["nm:0101".to_string()],
+            &resources,
+            &providers,
+            &validator,
+            lookup,
+            None,
+            &CleanupPolicy::default(),
+        );
+        assert_eq!(out[0].status, CleanupStatus::Success);
+        assert!(!target.exists());
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// Stub that declares it needs Docker scope `All`, standing in for the
+    /// image/volume prune that is behind the privileged opt-in.
+    struct PrivilegedStub;
+    impl Provider for PrivilegedStub {
+        fn id(&self) -> &'static str {
+            "privileged_stub"
+        }
+        fn name(&self) -> &'static str {
+            "Privileged stub"
+        }
+        fn default_safety(&self) -> SafetyLevel {
+            SafetyLevel::Dangerous
+        }
+        fn scan(&self, _roots: &[PathBuf], _cancel: &AtomicBool) -> Vec<Resource> {
+            Vec::new()
+        }
+        fn cleanup_action(&self, path: &Path) -> CleanupAction {
+            CleanupAction::RemoveDir(path.to_path_buf())
+        }
+        fn measure(&self, path: &Path) -> Option<u64> {
+            devclean_providers::measure_dir(path)
+        }
+        fn required_docker_scope(&self) -> Option<devclean_core::DockerPruneScope> {
+            Some(devclean_core::DockerPruneScope::All)
+        }
+    }
+
+    struct DockerOffStub;
+    impl Provider for DockerOffStub {
+        fn id(&self) -> &'static str {
+            "docker_off_stub"
+        }
+        fn name(&self) -> &'static str {
+            "Docker-off stub"
+        }
+        fn default_safety(&self) -> SafetyLevel {
+            SafetyLevel::Safe
+        }
+        fn scan(&self, _roots: &[PathBuf], _cancel: &AtomicBool) -> Vec<Resource> {
+            Vec::new()
+        }
+        fn cleanup_action(&self, path: &Path) -> CleanupAction {
+            CleanupAction::RemoveDir(path.to_path_buf())
+        }
+        fn measure(&self, path: &Path) -> Option<u64> {
+            devclean_providers::measure_dir(path)
+        }
+        fn required_docker_scope(&self) -> Option<devclean_core::DockerPruneScope> {
+            Some(devclean_core::DockerPruneScope::Off)
+        }
+    }
+
+    /// G-SAFE-03: `allow_privileged_operations` used to be a stored flag
+    /// nothing read. It must now actually stop the delete.
+    #[test]
+    fn privileged_scope_is_refused_until_the_user_opts_in() {
+        let (root, target) = fixture("gate-privileged");
+        let r = gated_resource("pv:0001", &target, "privileged_stub");
+        let mut resources = HashMap::new();
+        resources.insert(r.id.clone(), r);
+        let providers: HashMap<String, Arc<dyn Provider>> = HashMap::from([(
+            "privileged_stub".to_string(),
+            Arc::new(PrivilegedStub) as Arc<dyn Provider>,
+        )]);
+        let validator = SafetyValidator::new(vec![root.clone()]);
+        let lookup = |id: &str| resources.get(id).map(|x| x.path.clone());
+
+        let locked = CleanupEngine::default().execute_gated(
+            &["pv:0001".to_string()],
+            &resources,
+            &providers,
+            &validator,
+            lookup,
+            None,
+            &CleanupPolicy {
+                allow_privileged_operations: false,
+                ..CleanupPolicy::default()
+            },
+        );
+        assert_eq!(locked[0].status, CleanupStatus::Failed);
+        assert!(target.exists(), "locked resource must survive");
+        let err = locked[0].error.as_deref().unwrap_or_default();
+        assert!(err.contains("Privileged operations"), "got: {err}");
+
+        let unlocked = CleanupEngine::default().execute_gated(
+            &["pv:0001".to_string()],
+            &resources,
+            &providers,
+            &validator,
+            lookup,
+            None,
+            &CleanupPolicy {
+                allow_privileged_operations: true,
+                ..CleanupPolicy::default()
+            },
+        );
+        assert_eq!(unlocked[0].status, CleanupStatus::Success);
+        assert!(!target.exists());
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn docker_scope_off_refuses_even_without_the_privileged_flag() {
+        let (root, target) = fixture("gate-docker-off");
+        let r = gated_resource("dk:0009", &target, "docker_off_stub");
+        let mut resources = HashMap::new();
+        resources.insert(r.id.clone(), r);
+        let providers: HashMap<String, Arc<dyn Provider>> = HashMap::from([(
+            "docker_off_stub".to_string(),
+            Arc::new(DockerOffStub) as Arc<dyn Provider>,
+        )]);
+        let validator = SafetyValidator::new(vec![root.clone()]);
+        let lookup = |id: &str| resources.get(id).map(|x| x.path.clone());
+
+        // The user's scope is `Off`: refuse even when fully privileged.
+        let out = CleanupEngine::default().execute_gated(
+            &["dk:0009".to_string()],
+            &resources,
+            &providers,
+            &validator,
+            lookup,
+            None,
+            &CleanupPolicy {
+                allow_privileged_operations: true,
+                docker_prune_scope: devclean_core::DockerPruneScope::Off,
+            },
+        );
+        assert_eq!(out[0].status, CleanupStatus::Failed);
+        assert!(target.exists());
+        let err = out[0].error.as_deref().unwrap_or_default();
+        assert!(err.contains("Docker cleanup is off"), "got: {err}");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// Non-Docker providers must never be caught by the Docker gates — the
+    /// default scope is `Off`, and treating that as "refuse" would break
+    /// every ordinary cleanup.
+    #[test]
+    fn ordinary_providers_are_never_touched_by_the_docker_gates() {
+        let (root, target) = fixture("gate-non-docker");
+        let r = gated_resource("nm:0110", &target, "node_modules");
+        let mut resources = HashMap::new();
+        resources.insert(r.id.clone(), r);
+        let providers = setup().1;
+        let validator = SafetyValidator::new(vec![root.clone()]);
+        let lookup = |id: &str| resources.get(id).map(|x| x.path.clone());
+
+        // Even with every Docker gate at its most restrictive, an ordinary
+        // node_modules cleanup must still succeed.
+        let out = CleanupEngine::default().execute_gated(
+            &["nm:0110".to_string()],
+            &resources,
+            &providers,
+            &validator,
+            lookup,
+            None,
+            &CleanupPolicy {
+                allow_privileged_operations: false,
+                docker_prune_scope: devclean_core::DockerPruneScope::All,
+            },
+        );
+        assert_eq!(out[0].status, CleanupStatus::Success, "{:?}", out[0].error);
+        let _ = std::fs::remove_dir_all(&root);
     }
 }

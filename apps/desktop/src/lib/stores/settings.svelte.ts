@@ -3,8 +3,14 @@
  * Backend persistence is in-memory (file persistence = M3, per contract);
  * the safety validator still re-checks every path (I2, I7).
  */
-import { getProviders, getSettings, updateSettings } from "$lib/tauri";
-import type { ProviderInfo, Settings, ThemeMode } from "$lib/tauri";
+import {
+  detectScanRoots,
+  getDiskFree,
+  getProviders,
+  getSettings,
+  updateSettings,
+} from "$lib/tauri";
+import type { DiskFree, ProviderInfo, ScanRootCandidate, Settings, ThemeMode } from "$lib/tauri";
 
 class SettingsStore {
   settings = $state<Settings | null>(null);
@@ -13,13 +19,42 @@ class SettingsStore {
   open = $state(false);
   saving = $state(false);
   error = $state<string | null>(null);
+  /** `detect_scan_roots` result (contract v0.5.0). */
+  candidates = $state<ScanRootCandidate[]>([]);
+  detecting = $state(false);
+  /** Free space on the data volume — tells the user up front whether an
+   * AI-database backup would even fit. */
+  diskFree = $state<DiskFree | null>(null);
 
   async load() {
     try {
       this.settings = await getSettings();
       this.providers = await getProviders();
+      this.diskFree = await getDiskFree().catch(() => null);
     } catch (e) {
       this.error = String(e);
+    }
+  }
+
+  /** Discover candidate scan roots under $HOME. Read-only and bounded. */
+  async detect() {
+    if (this.detecting) return;
+    this.detecting = true;
+    try {
+      this.candidates = await detectScanRoots();
+    } catch (e) {
+      this.error = String(e);
+    } finally {
+      this.detecting = false;
+    }
+  }
+
+  /** Refresh candidates from the saved roots (after a save). */
+  async refreshCandidates() {
+    try {
+      this.candidates = await detectScanRoots();
+    } catch {
+      // Non-fatal: the user can still type a path.
     }
   }
 
@@ -45,11 +80,13 @@ class SettingsStore {
       const beforeDisabled = key(this.settings?.disabled_providers ?? []);
       this.settings = await updateSettings(next);
       this.providers = await getProviders();
-      return (
+      const changed =
         beforeRoots !== key(next.scan_roots) ||
         beforeExcluded !== key(next.excluded_paths) ||
-        beforeDisabled !== key(next.disabled_providers)
-      );
+        beforeDisabled !== key(next.disabled_providers) ||
+        this.settings.retention_days !== next.retention_days;
+      if (beforeRoots !== key(next.scan_roots)) await this.refreshCandidates();
+      return changed;
     } catch (e) {
       this.error = String(e);
       return false;

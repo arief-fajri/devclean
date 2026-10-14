@@ -1,15 +1,7 @@
 <script lang="ts">
-  import { onMount } from "svelte";
-  import {
-    History,
-    Leaf,
-    Moon,
-    RefreshCw,
-    Settings,
-    ShieldCheck,
-    Sun,
-    TriangleAlert,
-  } from "lucide-svelte";
+  import { onMount, untrack } from "svelte";
+  import { CircleCheck, History, Moon, RefreshCw, Settings, Sun } from "lucide-svelte";
+  import AppLogo from "$lib/components/AppLogo.svelte";
   import CleanupFlowDialog from "$lib/components/CleanupFlowDialog.svelte";
   import HistoryDialog from "$lib/components/HistoryDialog.svelte";
   import ListToolbar from "$lib/components/ListToolbar.svelte";
@@ -17,7 +9,6 @@
   import ResourceDetail from "$lib/components/ResourceDetail.svelte";
   import SelectionBar from "$lib/components/SelectionBar.svelte";
   import SettingsDialog from "$lib/components/SettingsDialog.svelte";
-  import StatTile from "$lib/components/StatTile.svelte";
   import SummaryPanel from "$lib/components/SummaryPanel.svelte";
   import { isStaleSignal } from "$lib/format";
   import { cleanupStore } from "$lib/stores/cleanup.svelte";
@@ -25,6 +16,7 @@
   import { scanStore } from "$lib/stores/scan.svelte";
   import { settingsStore } from "$lib/stores/settings.svelte";
   import { viewStore } from "$lib/stores/view.svelte";
+  import { providerMeta } from "$lib/providerMeta";
   import { applyView, countBySafety } from "$lib/view";
 
   let dark = $state(false);
@@ -52,11 +44,27 @@
    * Only skipped when the user explicitly disabled require_confirmation. */
   function handleClean() {
     const s = settingsStore.settings;
+    const providers = providersOf(scanStore.selected);
     if (s && !s.require_confirmation) {
+      cleanupStore.touchedProviders = providers;
       void cleanupStore.execute(scanStore.selected);
     } else {
       void cleanupStore.openConfirm(scanStore.selected);
     }
+  }
+
+  /** Re-scan only what was cleaned. Falls back to a full scan when we
+   * cannot tell which providers were involved. */
+  function handleRescanAfterCleanup() {
+    const providers = cleanupStore.touchedProviders;
+    cleanupStore.closeFlow();
+    if (providers.length > 0) void scanStore.rescanProviders(providers);
+    else void scanStore.start();
+  }
+
+  function handleConfirmClean() {
+    cleanupStore.touchedProviders = providersOf(scanStore.selected);
+    void cleanupStore.execute(scanStore.selected);
   }
 
   async function handleSaveSettings(next: Parameters<typeof settingsStore.save>[0]) {
@@ -80,6 +88,25 @@
       ? applyView(scanStore.summary, scanStore.selected, viewStore.options)
       : [],
   );
+  // Forget expanded ids whose provider no longer has any item, so a card
+  // can never appear to open itself after a cleanup. Reads only `groups`
+  // and writes the view store via untrack → no self-triggering loop.
+  $effect(() => {
+    const present = groups.map((g) => g.summary.provider);
+    untrack(() => viewStore.pruneExpanded(present));
+  });
+
+  /** Providers just cleaned that have nothing left. Rendered as a compact
+   * note so the list does not silently jump when their card disappears. */
+  const cleanedGone = $derived(
+    cleanupStore.touchedProviders.filter(
+      (p) => !groups.some((g) => g.summary.provider === p),
+    ),
+  );
+  function providerName(id: string): string {
+    return settingsStore.providers.find((p) => p.id === id)?.name ?? id;
+  }
+
   const allResources = $derived(scanStore.summary?.resources ?? []);
   const totalReclaimable = $derived(scanStore.summary?.reclaimable_bytes ?? 0);
   const safeBytes = $derived(
@@ -98,15 +125,18 @@
     }
     return { safeCats, reviewCats };
   });
-  const scanStatus = $derived(
-    !scanStore.scanning
-      ? null
-      : scanStore.progress
-        ? `Scanning ${scanStore.progress.provider}… (${scanStore.progress.done}/${scanStore.progress.total})`
-        : scanStore.cancelling
-          ? "Cancelling scan…"
-          : "Starting scan…",
+  /** Every provider this run covers — disabled ones never take a slot. */
+  const totalProviders = $derived(
+    settingsStore.providers.filter((p) => p.enabled).length,
   );
+  const scanStatus = $derived.by(() => {
+    if (!scanStore.scanning) return null;
+    if (scanStore.cancelling) return "Cancelling scan…";
+    const p = scanStore.progress;
+    if (!p) return "Starting scan…";
+    const name = providerMeta(p.provider).label;
+    return `Scanning ${name}… (${p.done}/${p.total})`;
+  });
   const scanPct = $derived(
     scanStore.progress && scanStore.progress.total > 0
       ? Math.round((scanStore.progress.done / scanStore.progress.total) * 100)
@@ -115,6 +145,21 @@
   const impactById = $derived(
     new Map((scanStore.summary?.resources ?? []).map((r) => [r.id, r.impact])),
   );
+  const providerById = $derived(
+    new Map((scanStore.summary?.resources ?? []).map((r) => [r.id, r.provider])),
+  );
+  const pathById = $derived(
+    new Map((scanStore.summary?.resources ?? []).map((r) => [r.id, r.path])),
+  );
+  /** Provider ids behind a set of resource ids (ids only — never paths). */
+  function providersOf(ids: string[]): string[] {
+    const out = new Set<string>();
+    for (const id of ids) {
+      const p = providerById.get(id);
+      if (p) out.add(p);
+    }
+    return [...out];
+  }
   /** Safe/review split of the current selection (by id, filter-independent). */
   const selectionSafety = $derived.by(() => {
     const map = new Map((scanStore.summary?.resources ?? []).map((r) => [r.id, r]));
@@ -157,12 +202,7 @@
     >
       <div class="flex items-center justify-between gap-3">
       <div class="flex items-center gap-2.5">
-        <span
-          aria-hidden="true"
-          class="flex h-9 w-9 items-center justify-center rounded-lg bg-emerald-100 dark:bg-emerald-950"
-        >
-          <Leaf size={20} class="text-emerald-700 dark:text-emerald-300" />
-        </span>
+        <AppLogo size={36} />
         <span>
           <span class="block text-xl leading-6 font-bold">DevClean</span>
           <span class="block text-xs text-zinc-500">Developer Storage Manager</span>
@@ -216,42 +256,25 @@
           providerCount={scanStore.summary.providers.length}
           lastScannedAt={scanStore.lastScannedAt}
           fromCache={scanStore.fromCache}
+          partialScan={scanStore.partialScan}
           scanning={scanStore.scanning}
           cancelling={scanStore.cancelling}
           scanStatus={scanStatus}
           scanPct={scanPct}
+          activeProvider={scanStore.activeProvider}
+          doneProviders={scanStore.doneProviders}
+          totalProviders={totalProviders}
           safeBytes={safeBytes}
           safeCategories={categoryCounts.safeCats}
           reviewCategories={categoryCounts.reviewCats}
+          retentionBlocked={scanStore.summary.retention_blocked_bytes}
+          retentionDays={settingsStore.settings?.retention_days ?? null}
           onScan={() => scanStore.start()}
           onCancelScan={() => scanStore.cancel()}
         />
       </div>
 
-      <div class="mt-3 grid grid-cols-2 gap-3">
-        <StatTile
-          icon={ShieldCheck}
-          value={String(categoryCounts.safeCats)}
-          label="Safe categories"
-          iconClass="text-emerald-600 dark:text-emerald-400"
-          active={viewStore.safety === "safe"}
-          onSelect={() => {
-            viewStore.safety = viewStore.safety === "safe" ? "all" : "safe";
-          }}
-        />
-        <StatTile
-          icon={TriangleAlert}
-          value={String(categoryCounts.reviewCats)}
-          label="Need review"
-          iconClass="text-amber-600 dark:text-amber-400"
-          active={viewStore.safety === "review"}
-          onSelect={() => {
-            viewStore.safety = viewStore.safety === "review" ? "all" : "review";
-          }}
-        />
-      </div>
-
-      <div class="mt-4">
+      <div class="mt-3">
         <ListToolbar
           totalCount={allResources.length}
           safeCount={listCounts.safe}
@@ -275,12 +298,30 @@
             showPath={viewStore.showPaths}
             expanded={viewStore.expanded.includes(g.summary.provider)}
             rescanning={scanStore.rescanning === g.summary.provider}
+            scanning={scanStore.scanning}
+            active={scanStore.activeProvider === g.summary.provider}
+            done={scanStore.doneProviders.includes(g.summary.provider)}
             onToggle={(id) => scanStore.toggle(id)}
             onToggleProvider={(prov) => scanStore.toggleProvider(prov)}
             onExpand={(prov) => viewStore.toggleExpand(prov)}
             onRescan={(prov) => scanStore.rescanProvider(prov)}
             onOpenDetail={(id) => scanStore.openDetail(id)}
           />
+        {/each}
+
+        <!-- Providers emptied by the last cleanup: say so instead of
+             letting the list silently jump. -->
+        {#each cleanedGone as p (p)}
+          <div
+            class="flex items-center gap-2 rounded-xl border border-dashed border-zinc-200 px-4 py-3 text-sm text-zinc-500 dark:border-zinc-800"
+            data-testid="cleaned-empty-{p}"
+          >
+            <span aria-hidden="true" class="flex shrink-0 text-emerald-600 dark:text-emerald-400">
+              <CircleCheck size={16} />
+            </span>
+            <span class="min-w-0 flex-1 truncate">{providerName(p)}</span>
+            <span class="shrink-0 text-xs text-zinc-400">Cleaned · nothing left</span>
+          </div>
         {/each}
       </div>
 
@@ -351,6 +392,7 @@
       safe={selectionSafety.safe}
       review={selectionSafety.review}
       busy={barBusy}
+      disabled={scanStore.scanning}
       onClear={() => scanStore.clearSelection()}
       onClean={handleClean}
     />
@@ -378,14 +420,12 @@
       progress={cleanupStore.progress}
       results={cleanupStore.results}
       lookupImpact={(id) => impactById.get(id) ?? undefined}
+      lookupPath={(id) => pathById.get(id)}
       nameOf={(id) => cleanupStore.nameOf(id)}
-      onConfirm={() => cleanupStore.execute(scanStore.selected)}
+      onConfirm={handleConfirmClean}
       onCancel={() => cleanupStore.close()}
       onCancelCleanup={() => cleanupStore.cancel()}
-      onRescan={() => {
-        cleanupStore.closeFlow();
-        void scanStore.start();
-      }}
+      onRescan={handleRescanAfterCleanup}
       onDone={() => cleanupStore.closeFlow()}
     />
   {/if}
@@ -406,7 +446,8 @@
   <!-- Cleanup history (backend JSONL log) -->
   {#if historyStore.open}
     <HistoryDialog
-      entries={historyStore.entries}
+      runs={historyStore.runs}
+      truncated={historyStore.truncated}
       loading={historyStore.loading}
       error={historyStore.error}
       onRefresh={() => historyStore.refresh()}

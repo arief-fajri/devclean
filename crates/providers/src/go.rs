@@ -1,7 +1,7 @@
 //! Go cache provider. Split into build cache + module cache, cleaned via
 //! the official `go` tool — never by deleting cache internals by hand.
 
-use super::provider::{dir_size_checked, impact, CleanupAction, Provider};
+use super::provider::{dir_size_checked, impact, measure_dir, CleanupAction, Provider};
 use devclean_core::{Resource, SafetyLevel};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -70,11 +70,17 @@ impl Provider for GoProvider {
                     reclaimable_bytes: size,
                     safety: SafetyLevel::Safe,
                     detail: None,
+                    age_days: None,
+                    retention_eligible: true,
                     impact: impact(consequence, Some(cost), Some(clean_args)),
                 });
             }
         }
         out
+    }
+
+    fn measure(&self, path: &Path) -> Option<u64> {
+        measure_dir(path)
     }
 
     fn cleanup_action(&self, path: &Path) -> CleanupAction {

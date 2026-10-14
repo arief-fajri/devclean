@@ -2,7 +2,7 @@
   import { formatBytes } from "$lib/format";
   import { safetyMeta } from "$lib/safety";
   import type { Resource } from "$lib/tauri";
-  import { Check, Copy } from "lucide-svelte";
+  import { Check, Copy, Lock, X } from "lucide-svelte";
 
   interface Props {
     resource: Resource;
@@ -43,8 +43,13 @@
   aria-modal="true"
   aria-label="Detail {resource.name}"
 >
-  <div class="w-full max-w-md rounded-xl bg-white p-6 shadow-xl dark:bg-zinc-900">
-    <div class="flex items-start justify-between gap-2">
+  <div
+    class="flex max-h-[85vh] w-full max-w-md flex-col overflow-hidden rounded-xl bg-white shadow-xl dark:bg-zinc-900"
+  >
+    <!-- Sticky header (C5): name + safety badge + X on the right. -->
+    <header
+      class="flex shrink-0 items-start gap-3 border-b border-zinc-100 px-5 py-4 dark:border-zinc-800"
+    >
       <h2 class="min-w-0 flex-1 truncate text-lg font-semibold text-zinc-900 dark:text-zinc-100">
         {resource.name}
       </h2>
@@ -54,9 +59,18 @@
         <span aria-hidden="true" class="inline-flex"><Icon size={11} strokeWidth={2.5} /></span>
         {meta.label}
       </span>
-    </div>
+      <button
+        class="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-zinc-500 hover:bg-zinc-100 hover:text-zinc-900 dark:hover:bg-zinc-800 dark:hover:text-zinc-100"
+        onclick={onClose}
+        aria-label="Close detail"
+      >
+        <span aria-hidden="true" class="flex"><X size={17} /></span>
+      </button>
+    </header>
 
-    <p class="mt-2 text-sm text-zinc-600 dark:text-zinc-300">{consequence}</p>
+    <!-- Scrollable body -->
+    <div class="min-h-0 flex-1 overflow-y-auto px-5 py-4">
+    <p class="text-sm text-zinc-600 dark:text-zinc-300">{consequence}</p>
     {#if resource.impact?.cost || resource.impact?.command}
       <p class="mt-1 text-xs text-zinc-500">
         {#if resource.impact.cost}{resource.impact.cost}{/if}
@@ -105,15 +119,34 @@
         <dt class="text-zinc-500">Provider</dt>
         <dd>{resource.provider}</dd>
       </div>
+      {#if resource.age_days !== null && resource.age_days !== undefined}
+        <div class="flex justify-between gap-2">
+          <dt class="text-zinc-500">Age</dt>
+          <dd class="tnum text-right font-mono">{resource.age_days}d</dd>
+        </div>
+      {/if}
       {#if resource.detail}
         <div class="flex justify-between gap-2">
           <dt class="text-zinc-500">Info</dt>
           <dd class="text-right">{resource.detail}</dd>
         </div>
       {/if}
+      {#if !resource.retention_eligible}
+        <div class="flex justify-between gap-2">
+          <dt class="text-zinc-500">Retention</dt>
+          <dd class="inline-flex items-center gap-1 text-right text-zinc-500">
+            <span aria-hidden="true" class="inline-flex"><Lock size={11} /></span>
+            kept — cannot be cleaned
+          </dd>
+        </div>
+      {/if}
     </dl>
+    </div>
 
-    <div class="mt-5 flex justify-end gap-2">
+    <!-- Sticky footer -->
+    <footer
+      class="flex shrink-0 justify-end gap-2 border-t border-zinc-100 px-5 py-3 dark:border-zinc-800"
+    >
       <button
         class="rounded-lg px-4 py-2 text-sm text-zinc-600 hover:bg-zinc-100 dark:text-zinc-300 dark:hover:bg-zinc-800"
         onclick={onClose}
@@ -121,14 +154,16 @@
         Close
       </button>
       <button
-        class="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-700"
+        class="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-700 disabled:opacity-50"
         onclick={() => {
           onToggle(resource.id);
           onClose();
         }}
+        disabled={!resource.retention_eligible}
+        title={resource.retention_eligible ? "" : "Kept by your retention policy"}
       >
         {selected ? "Deselect" : "Select for cleanup"}
       </button>
-    </div>
+    </footer>
   </div>
 </div>

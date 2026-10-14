@@ -1,6 +1,8 @@
 /**
- * Per-provider icon + accent. The backend decides safety; this file only
- * decides how a provider *looks*. Unknown ids fall back to a hard drive.
+ * Per-provider display metadata: icon, colours, and a short label used by
+ * the scan progress list. The backend decides safety; this file only
+ * decides how a provider *looks* and how it is named. Unknown ids fall
+ * back to a generic drive.
  */
 import {
   Apple,
@@ -9,14 +11,21 @@ import {
   Coffee,
   Container,
   Database,
+  FileText,
   HardDrive,
+  MessageSquare,
   Package,
   Terminal,
+  Trash2,
 } from "lucide-svelte";
 import type { IconComponent } from "./icons";
 
 export interface ProviderMeta {
   icon: IconComponent;
+  /** Small check shown next to a provider that finished scanning. */
+  tick: IconComponent;
+  /** Short name for tight spaces (the scan progress list). */
+  label: string;
   /** Icon color (light + dark). */
   accent: string;
   /** 40px tile background (light + dark). */
@@ -25,6 +34,8 @@ export interface ProviderMeta {
 
 const FALLBACK: ProviderMeta = {
   icon: HardDrive,
+  tick: Archive,
+  label: "Other",
   accent: "text-zinc-500 dark:text-zinc-400",
   tile: "bg-zinc-100 dark:bg-zinc-800",
 };
@@ -32,48 +43,101 @@ const FALLBACK: ProviderMeta = {
 export const PROVIDER_META: Record<string, ProviderMeta> = {
   node_modules: {
     icon: Package,
+    tick: Package,
+    label: "node_modules",
     accent: "text-lime-600 dark:text-lime-400",
     tile: "bg-lime-100 dark:bg-lime-950",
   },
   rust_target: {
     icon: Boxes,
+    tick: Boxes,
+    label: "Rust target",
     accent: "text-orange-600 dark:text-orange-400",
     tile: "bg-orange-100 dark:bg-orange-950",
   },
   go_cache: {
     icon: Coffee,
+    tick: Coffee,
+    label: "Go cache",
     accent: "text-cyan-600 dark:text-cyan-400",
     tile: "bg-cyan-100 dark:bg-cyan-950",
   },
   docker: {
     icon: Container,
+    tick: Container,
+    label: "Docker build cache",
     accent: "text-sky-600 dark:text-sky-400",
     tile: "bg-sky-100 dark:bg-sky-950",
   },
+  docker_pruned: {
+    icon: Trash2,
+    tick: Trash2,
+    label: "Docker images & volumes",
+    accent: "text-red-600 dark:text-red-400",
+    tile: "bg-red-100 dark:bg-red-950",
+  },
   npm_cache: {
     icon: Package,
+    tick: Package,
+    label: "npm/pnpm/yarn",
     accent: "text-red-500 dark:text-red-400",
     tile: "bg-red-100 dark:bg-red-950",
   },
   python_cache: {
     icon: Terminal,
+    tick: Terminal,
+    label: "Python caches",
     accent: "text-blue-600 dark:text-blue-400",
     tile: "bg-blue-100 dark:bg-blue-950",
   },
   cargo_registry: {
     icon: Archive,
+    tick: Archive,
+    label: "Cargo registry",
     accent: "text-amber-600 dark:text-amber-400",
     tile: "bg-amber-100 dark:bg-amber-950",
   },
   gradle_cache: {
     icon: Database,
+    tick: Database,
+    label: "Gradle caches",
     accent: "text-emerald-600 dark:text-emerald-400",
     tile: "bg-emerald-100 dark:bg-emerald-950",
   },
   xcode_data: {
     icon: Apple,
+    tick: Apple,
+    label: "Xcode DerivedData",
     accent: "text-zinc-500 dark:text-zinc-400",
     tile: "bg-zinc-100 dark:bg-zinc-800",
+  },
+  global_cache: {
+    icon: HardDrive,
+    tick: HardDrive,
+    label: "System caches",
+    accent: "text-teal-600 dark:text-teal-400",
+    tile: "bg-teal-100 dark:bg-teal-950",
+  },
+  opencode_fs: {
+    icon: FileText,
+    tick: FileText,
+    label: "opencode data",
+    accent: "text-indigo-600 dark:text-indigo-400",
+    tile: "bg-indigo-100 dark:bg-indigo-950",
+  },
+  opencode_db: {
+    icon: MessageSquare,
+    tick: MessageSquare,
+    label: "opencode history",
+    accent: "text-purple-600 dark:text-purple-400",
+    tile: "bg-purple-100 dark:bg-purple-950",
+  },
+  claude: {
+    icon: MessageSquare,
+    tick: MessageSquare,
+    label: "Claude data",
+    accent: "text-orange-600 dark:text-orange-400",
+    tile: "bg-orange-100 dark:bg-orange-950",
   },
 };
 

@@ -58,9 +58,96 @@ while the ancestor check still refuses to delete `$HOME` and friends.
 
 ## Privileged operations
 
-`allow_privileged_operations` defaults to **OFF**. Operations needing
-sudo/admin never run silently — they require explicit opt-in under Settings
-plus a confirmation dialog (G-UI-01).
+`allow_privileged_operations` defaults to **OFF**, and since v0.5.0 the
+cleanup **engine** consults it — it is no longer a stored flag that nothing
+reads. `Settings.docker_prune_scope` separately caps what Docker cleanup may
+touch, and the two combine:
+
+| `docker_prune_scope` | Needs privileged | What actually runs |
+|---|---|---|
+| `off` | no | nothing |
+| `build-cache` (default) | no | `docker builder prune -af` |
+| `build-cache+images` | **yes** | + `docker image prune -af` |
+| `all` | **yes** | + `docker volume prune -af` |
+
+Selecting a wider scope without enabling the privileged flag does not widen
+anything: the engine falls back to build-cache and the Settings dialog says so
+in as many words.
+
+## Confirmation token (v0.5.0)
+
+`preview_cleanup` measures the exact id set and returns a `preview_token`
+(digest of the sorted ids + issue time + nonce, 300s TTL). While
+`require_confirmation` is on, `cleanup` refuses without a valid token
+covering exactly those ids.
+
+**What this buys**
+
+- A caller cannot delete a set of resources that was never shown to it.
+- Sizes cannot silently change between preview and execute.
+
+**What it does NOT buy — and this matters**
+
+This is a *workflow* gate, not an authentication boundary. The frontend runs in
+the same process tree and can read any token it is handed, so a fully
+compromised frontend can mint its own preview and then call `cleanup`.
+Defending against that needs an out-of-process UI, which is out of scope.
+
+The real defences remain `SafetyValidator`, the protected-path list, and the
+fixed `(program, args)` pairs. The token makes `require_confirmation` mean
+something; it does not make the frontend trustworthy.
+
+## AI data (`opencode`, `claude`)
+
+Two categories, handled differently:
+
+- **Filesystem history** (logs, session diffs, snapshots, tool output, plans,
+  conversation transcripts) — age-pruned only. `CleanupAction::PruneOlderThan`
+  takes a fixed glob AND a `skip_names` list; the skip list wins over the glob
+  at any depth, so `history.jsonl`, `settings.json` and credentials survive
+  even under `pattern: "*"` (I10).
+- **The SQLite history** — `opencode.db` is the single largest item on a
+  long-lived machine (13 GB here). It is gated by:
+  1. a cheap structural probe (open + read the schema catalog);
+  2. an **exclusive-lock test** — `BEGIN EXCLUSIVE` with a 0s busy timeout.
+     If another process holds the file the lock fails and the cleanup is
+     refused;
+  3. `PRAGMA foreign_keys = OFF` (opencode's schema declares
+     `REFERENCES session(id)` with no `ON DELETE CASCADE`, so enforcing it
+     would make the DELETE fail outright);
+  4. fixed `&'static str` statements with the age cutoff as a **bound
+     parameter**, never interpolated;
+  5. `wal_checkpoint(TRUNCATE)` before `VACUUM`, without which freed pages stay
+     claimed by the WAL and the file never shrinks.
+
+`sqlite_backup` defaults to **off**: a backup is a full second copy, and
+requiring 13 GB of headroom would make the feature unusable on smaller disks.
+With it off, the confirmation dialog states the size that would be needed and
+the risk, rather than failing at the last moment.
+
+### Why `pgrep` is not the idleness gate
+
+The legacy `cleanup.sh` guards its database work with `pgrep -f opencode`.
+Measured on this machine, from a process launched inside a sandbox:
+
+```text
+$ pgrep -fl opencode            # exit 1, nothing — while opencode IS running
+$ pgrep -fl <own exact exe path> # exit 1, nothing — cannot see its own process
+```
+
+A probe that answers "nothing is running" when it simply cannot see anything is
+worse than no probe. DevClean uses the SQLite exclusive lock as the
+authoritative gate, which needs no process-table access at all, and keeps
+`pgrep` only as a secondary hint whose "unknown" answer is never read as
+"safe".
+
+### Why there is no `PRAGMA quick_check`
+
+Measured: `quick_check(1)` on the 14 GB `opencode.db` takes **2m11s**. A
+multi-minute freeze before a confirmation dialog is not acceptable, and the
+check is not needed for safety — SQLite's `DELETE` and `VACUUM` are both
+transactional, so a damaged database fails the operation and leaves the
+original file untouched.
 
 ## Reporting a safety issue
 

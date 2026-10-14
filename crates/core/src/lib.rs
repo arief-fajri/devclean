@@ -8,17 +8,22 @@
 //! ```
 
 pub mod limits;
+pub mod preview_token;
 pub mod safety;
 pub mod settings;
 pub mod system;
 pub mod types;
 
 pub use limits::{CLEANUP_COMMAND_TIMEOUT, PROVIDER_SCAN_TIMEOUT};
+pub use preview_token::{authorize, GateError, PreviewToken, PREVIEW_TTL_SECS};
 
 pub use safety::{SafetyError, SafetyValidator};
-pub use settings::{Settings, ThemeMode};
-pub use system::{app_data_dir, default_scan_roots, platform_name};
+pub use settings::{DockerPruneScope, Settings, ThemeMode};
+pub use system::{
+    app_data_dir, default_scan_roots, detect_scan_roots, home_dir, platform_name, ScanRootCandidate,
+};
 pub use types::{
-    CleanupPreview, CleanupPreviewItem, CleanupResult, CleanupStatus, HistoryEntry, ProviderInfo,
-    ProviderSummary, Resource, ResourceImpact, SafetyLevel, ScanSummary,
+    CleanupPreview, CleanupPreviewItem, CleanupResult, CleanupRun, CleanupStatus, DiskFree,
+    HistoryEntry, ProviderInfo, ProviderSummary, Resource, ResourceImpact, SafetyLevel,
+    ScanSummary,
 };

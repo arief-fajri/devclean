@@ -9,6 +9,7 @@ import {
   onCleanupCompleted,
   onScanCompleted,
   onScanProgress,
+  onScanProviderStarted,
   onScanStarted,
   scanAll,
   scanProvider,
@@ -23,10 +24,19 @@ class ScanStore {
   selected = $state<string[]>([]);
   detail = $state<Resource | null>(null);
   rescanning = $state<string | null>(null);
+  /** Providers refreshed by the last targeted re-scan; `null` after a full
+   * scan. Drives the "partial re-scan" badge so stale figures elsewhere are
+   * never presented as fresh. */
+  partialScan = $state<string[] | null>(null);
   error = $state<string | null>(null);
   lastScannedAt = $state<Date | null>(null);
   /** True while the shown summary comes from the on-disk cache. */
   fromCache = $state(false);
+  /** Provider currently scanning (v0.5.0). Null when nothing is running. */
+  activeProvider = $state<string | null>(null);
+  /** Providers that have already finished this run — drives the per-card
+   * check/spinner/dot state while a scan is in flight. */
+  doneProviders = $state<string[]>([]);
 
   /** Instant paint from the last scan (if roots match), then the caller
    * runs a background rescan. Never throws. */
@@ -109,6 +119,9 @@ class ScanStore {
       this.summary = {
         total_bytes: resources.reduce((acc, r) => acc + r.size_bytes, 0),
         reclaimable_bytes: resources.reduce((acc, r) => acc + r.reclaimable_bytes, 0),
+        retention_blocked_bytes: resources
+          .filter((r) => !r.retention_eligible)
+          .reduce((acc, r) => acc + r.reclaimable_bytes, 0),
         providers,
         resources,
       };
@@ -122,12 +135,31 @@ class ScanStore {
     }
   }
 
-  async start() {
+  async rescanProviders(providers: string[]) {
+  const list = [...new Set(providers)];
+  if (list.length === 0) {
+    await this.start();
+    return;
+  }
+  for (const p of list) {
+    await this.rescanProvider(p);
+  }
+  // Only these providers were refreshed; the rest keep their last known
+  // figures, which the UI must say out loud (see SummaryPanel badge).
+  this.partialScan = list;
+  this.lastScannedAt = new Date();
+  this.fromCache = false;
+}
+
+async start() {
     this.scanning = true;
     this.cancelling = false;
     this.error = null;
     this.progress = null;
     this.fromCache = false;
+    this.partialScan = null;
+    this.activeProvider = null;
+    this.doneProviders = [];
     try {
       const s = await scanAll();
       this.applySummary(s);
@@ -136,6 +168,7 @@ class ScanStore {
     } finally {
       this.scanning = false;
       this.cancelling = false;
+      this.activeProvider = null;
     }
   }
 
@@ -151,6 +184,7 @@ class ScanStore {
       this.scanning = false;
       this.cancelling = false;
     }
+    this.activeProvider = null;
   }
 
   applySummary(s: ScanSummary) {
@@ -158,6 +192,8 @@ class ScanStore {
     this.lastScannedAt = new Date();
     this.scanning = false;
     this.cancelling = false;
+    this.activeProvider = null;
+    this.doneProviders = [];
     // Drop selections that no longer exist (e.g. after cleanup).
     const alive = new Set(s.resources.map((r) => r.id));
     this.selected = this.selected.filter((id) => alive.has(id));
@@ -168,9 +204,19 @@ class ScanStore {
       this.scanning = true;
       this.cancelling = false;
       this.progress = null;
+      this.activeProvider = null;
+      this.doneProviders = [];
+    });
+    onScanProviderStarted((provider) => {
+      this.activeProvider = provider;
     });
     onScanProgress((p) => {
       this.progress = p;
+      if (!this.doneProviders.includes(p.provider)) {
+        this.doneProviders = [...this.doneProviders, p.provider];
+      }
+      // The finished provider is no longer the running one.
+      if (this.activeProvider === p.provider) this.activeProvider = null;
     });
     onScanCompleted((s) => this.applySummary(s));
     onCleanupCompleted(() => {

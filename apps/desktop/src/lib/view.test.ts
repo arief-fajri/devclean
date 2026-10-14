@@ -1,10 +1,13 @@
 import { describe, expect, it } from "vitest";
 import {
+  addableCandidates,
+  alreadyAddedCount,
   applyView,
   countBySafety,
   DEFAULT_VIEW,
   matchesQuery,
   needsReview,
+  pruneExpanded,
   type ViewOptions,
 } from "./view";
 import type { Resource, ScanSummary } from "./tauri";
@@ -17,6 +20,9 @@ function res(o: Partial<Resource> & Pick<Resource, "id">): Resource {
     size_bytes: 100,
     reclaimable_bytes: 100,
     safety: "safe",
+    // v0.5.0: the backend always sends these; old caches omit them and the
+    // Rust side defaults them, so the TS defaults mirror that.
+    retention_eligible: true,
     ...o,
   };
 }
@@ -25,6 +31,7 @@ function summary(): ScanSummary {
   return {
     total_bytes: 1000,
     reclaimable_bytes: 900,
+    retention_blocked_bytes: 0,
     providers: [
       { provider: "docker", name: "Docker", total_bytes: 500, reclaimable_bytes: 500, resource_count: 1 },
       { provider: "go_cache", name: "Go cache", total_bytes: 400, reclaimable_bytes: 400, resource_count: 2 },
@@ -149,5 +156,64 @@ describe("countBySafety / needsReview / matchesQuery", () => {
 
   it("blank query matches everything", () => {
     expect(matchesQuery(res({ id: "a" }), "Docker", "   ")).toBe(true);
+  });
+});
+
+describe("addableCandidates", () => {
+  const c = (path: string, already = false) => ({
+    path,
+    already_configured: already,
+  });
+
+  it("drops candidates already configured on the backend", () => {
+    const list = [c("/a", true), c("/b")];
+    expect(addableCandidates(list, []).map((x) => x.path)).toEqual(["/b"]);
+  });
+
+  it("drops candidates already present in the unsaved draft", () => {
+    // Backend says "not configured" but the user just added it in the dialog.
+    const list = [c("/a"), c("/b")];
+    expect(addableCandidates(list, ["/a"]).map((x) => x.path)).toEqual(["/b"]);
+  });
+
+  it("never lists the same path twice — the reported Settings duplication", () => {
+    const list = [c("/a", true), c("/a"), c("/b")];
+    const addable = addableCandidates(list, ["/a"]);
+    expect(addable.map((x) => x.path)).toEqual(["/b"]);
+    expect(alreadyAddedCount(list, ["/a"])).toBe(2);
+  });
+
+  it("handles an empty candidate list", () => {
+    expect(addableCandidates([], [])).toEqual([]);
+    expect(alreadyAddedCount([], [])).toBe(0);
+  });
+});
+
+describe("pruneExpanded", () => {
+  it("keeps providers that are still present", () => {
+    expect(pruneExpanded(["a", "b"], ["a", "b", "c"])).toEqual(["a", "b"]);
+  });
+
+  it("drops a provider whose last item was cleaned", () => {
+    expect(pruneExpanded(["a", "gone"], ["a", "b"])).toEqual(["a"]);
+  });
+
+  it("never invents an id — a cleaned card must not shift onto another", () => {
+    // Regression for: expand A → clean A → another card appeared open.
+    const expanded = ["python_cache"];
+    const afterClean = pruneExpanded(expanded, ["docker", "node_modules"]);
+    expect(afterClean).toEqual([]);
+    expect(afterClean).not.toContain("docker");
+    expect(afterClean).not.toContain("node_modules");
+  });
+
+  it("keeps the stored array untouched", () => {
+    const expanded = ["a", "b"];
+    pruneExpanded(expanded, ["a"]);
+    expect(expanded).toEqual(["a", "b"]);
+  });
+
+  it("handles an empty list", () => {
+    expect(pruneExpanded([], ["a"])).toEqual([]);
   });
 });

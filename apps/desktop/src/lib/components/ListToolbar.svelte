@@ -53,32 +53,38 @@
 >
   <!-- Row 1: search + sort + select-safe (all h-8 via .control) -->
   <div class="flex items-center gap-2">
-    <span aria-hidden="true" class="flex shrink-0 text-zinc-400">
-      <Search size={16} />
-    </span>
-    <input
-      bind:this={searchEl}
-      type="search"
-      class="min-w-0 flex-1 bg-transparent text-sm outline-none placeholder:text-zinc-400"
-      placeholder="Search caches, projects…  ( / )"
-      bind:value={viewStore.query}
-      onkeydown={(e) => {
-        if (e.key === "Escape") viewStore.query = "";
-      }}
-      aria-label="Search caches and projects"
-    />
-    {#if viewStore.query}
-      <button
-        class="flex shrink-0 rounded p-0.5 text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-200"
-        onclick={() => {
-          viewStore.query = "";
-          searchEl?.focus();
+    <!-- The field owns the box (padding + focus ring) instead of the bare
+         input, so it lines up with the .control buttons beside it. -->
+    <div
+      class="flex h-9 min-w-0 flex-1 items-center gap-2 rounded-lg border border-zinc-200 bg-transparent px-2.5 transition-shadow focus-within:ring-2 focus-within:ring-emerald-600 dark:border-zinc-700"
+    >
+      <span aria-hidden="true" class="flex shrink-0 text-zinc-400">
+        <Search size={15} />
+      </span>
+      <input
+        bind:this={searchEl}
+        type="search"
+        class="min-w-0 flex-1 bg-transparent text-sm outline-none placeholder:text-zinc-400"
+        placeholder="Search caches, projects…  ( / )"
+        bind:value={viewStore.query}
+        onkeydown={(e) => {
+          if (e.key === "Escape") viewStore.query = "";
         }}
-        aria-label="Clear search"
-      >
-        <span aria-hidden="true" class="flex"><X size={14} /></span>
-      </button>
-    {/if}
+        aria-label="Search caches and projects"
+      />
+      {#if viewStore.query}
+        <button
+          class="flex shrink-0 rounded p-0.5 text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-200"
+          onclick={() => {
+            viewStore.query = "";
+            searchEl?.focus();
+          }}
+          aria-label="Clear search"
+        >
+          <span aria-hidden="true" class="flex"><X size={14} /></span>
+        </button>
+      {/if}
+    </div>
     <label class="flex shrink-0 items-center">
       <span class="sr-only">Sort results</span>
       <select
@@ -104,7 +110,7 @@
   </div>
 
   <!-- Row 2: filters + result count + paths toggle -->
-  <div class="mt-2 flex flex-wrap items-center gap-x-1.5 gap-y-2">
+  <div class="mt-3 flex flex-wrap items-center gap-x-1.5 gap-y-2">
     <div class="flex min-w-0 flex-1 flex-wrap items-center gap-1.5" role="group" aria-label="Safety filters">
       <button class={chip(viewStore.safety === "all" && !viewStore.staleOnly && !viewStore.selectedOnly)} onclick={() => { viewStore.safety = "all"; viewStore.staleOnly = false; viewStore.selectedOnly = false; }} aria-pressed={viewStore.safety === "all" && !viewStore.staleOnly && !viewStore.selectedOnly}>
         All · {totalCount}

@@ -4,7 +4,7 @@
 //! hence `Safe`.
 
 use super::provider::{
-    dir_size_checked, home_dir, impact, tool_output_dir, CleanupAction, Provider,
+    dir_size_checked, home_dir, impact, measure_dir, tool_output_dir, CleanupAction, Provider,
 };
 use devclean_core::{Resource, SafetyLevel};
 use std::path::{Path, PathBuf};
@@ -107,10 +107,16 @@ impl Provider for NpmCacheProvider {
                 reclaimable_bytes: size,
                 safety: SafetyLevel::Safe,
                 detail: None,
+                age_days: None,
+                retention_eligible: true,
                 impact: impact(m.consequence, Some(m.cost), Some(&clean_command(m))),
             });
         }
         out
+    }
+
+    fn measure(&self, path: &Path) -> Option<u64> {
+        measure_dir(path)
     }
 
     fn cleanup_action(&self, path: &Path) -> CleanupAction {

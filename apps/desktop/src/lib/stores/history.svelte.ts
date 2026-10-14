@@ -1,12 +1,17 @@
 /**
- * Cleanup history store: reads the backend JSONL log via `get_history`.
- * The log is append-only and written server-side after every cleanup.
+ * Cleanup-history store: reads the backend run log via `get_history_runs`.
+ *
+ * Runs, not raw entries — the log is append-only and never truncated, so
+ * an entry-level window would let one large cleanup hide every run before
+ * it (see `get_history_runs` in the contract).
  */
-import { getHistory } from "$lib/tauri";
-import type { HistoryEntry } from "$lib/tauri";
+import { getHistoryRuns } from "$lib/tauri";
+import type { CleanupRun } from "$lib/tauri";
 
 class HistoryStore {
-  entries = $state<HistoryEntry[]>([]);
+  runs = $state<CleanupRun[]>([]);
+  /** True when the backend may have more runs than we loaded. */
+  truncated = $state(false);
   open = $state(false);
   loading = $state(false);
   error = $state<string | null>(null);
@@ -24,7 +29,11 @@ class HistoryStore {
     this.loading = true;
     this.error = null;
     try {
-      this.entries = await getHistory(100);
+      const limit = 50;
+      this.runs = await getHistoryRuns(limit);
+      // The backend caps at 200; we ask for fewer so the dialog stays
+      // scannable, and say so honestly rather than implying "everything".
+      this.truncated = this.runs.length >= limit;
     } catch (e) {
       this.error = String(e);
     } finally {

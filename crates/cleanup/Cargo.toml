@@ -8,6 +8,8 @@ description = "Preview + safety-gated cleanup executor for DevClean"
 [dependencies]
 devclean-core.workspace = true
 devclean-providers.workspace = true
+walkdir.workspace = true
+rusqlite.workspace = true
 tokio.workspace = true
 tracing.workspace = true
 serde.workspace = true

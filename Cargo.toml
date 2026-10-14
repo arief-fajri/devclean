@@ -21,6 +21,9 @@ walkdir = "2"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 tauri-plugin-notification = "2"
+# opencode.db cleanup. `bundled` compiles SQLite from source so there is
+# no system-library dependency; statements are always fixed constants.
+rusqlite = { version = "0.32", features = ["bundled"] }
 
 devclean-core = { path = "crates/core" }
 devclean-providers = { path = "crates/providers" }

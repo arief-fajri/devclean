@@ -97,6 +97,55 @@ Evidence: `cargo test` 46 passed (incl. progress-callback + provider-toggle
 regression tests), clippy 0 warnings, fmt clean, `svelte-check` 0 errors
 0 warnings, `vite build` ok, `vitest` 29 passed.
 
+## v0.5.0 — Coverage + honest numbers ✅
+
+```text
+[x] Fix freed_bytes for subprocess-backed cleanup (was: always == requested)
+[x] Monotonic scan progress; new scan_provider_started event
+[x] Auto-detected scan roots + `detect_scan_roots`; empty-root migration
+[x] Age-based retention (`Settings.retention_days`, enforced by the engine)
+[x] AI history providers: opencode fs, opencode.db (SQLite + VACUUM), Claude
+[x] Docker images/volumes behind `docker_prune_scope` + privileged opt-in
+[x] Global system caches (Chrome, Homebrew, bun, VS Code, gopls, node-gyp, uv)
+[x] Backend-enforced confirmation (preview token), not a UI checkbox
+[x] UI: 4-tab Settings, scan progress replacing the safe bar, app/tray icon,
+      sticky modal headers with a close button
+```
+
+Evidence: 122 Rust tests + 30 frontend tests green; clippy 0 warnings; fmt
+clean; svelte-check 0 errors 0 warnings; vite build ok. Reclaimable went
+from **11.79 GB** to **82.60 GB** on the development machine — the gap was
+almost entirely the empty `scan_roots` array plus the missing AI and Docker
+providers.
+
+Three latent correctness bugs found and fixed along the way, all of the same
+shape ("a parse failure silently became 0"): the `docker system df` parser
+aborting on one bad line, the size parser rejecting Docker's `(83%)` suffix,
+and the SQLite cutoff computed in seconds against a millisecond column.
+
+## UI fixes round 2 ✅ (done)
+
+```text
+[x] History is run-level (contract v0.6.0): HistoryEntry.run_id, CleanupRun,
+    get_history_runs with tail-read. Fixed: one 289-resource cleanup consumed
+    the 100-entry budget and hid every earlier run, and the totals were taken
+    from that truncated window (132 KB shown instead of 10.8 GB).
+[x] scan_provider is genuinely targeted (ScanManager::scan_one) and merges into
+    state so other providers' ids still resolve; post-cleanup rescan touches
+    only the cleaned providers, flagged in the summary.
+[x] Settings: no more duplicate scan-root paths; Retention controls share one
+    size token; the disabled "Show filesystem path" row is gone (toolbar toggle
+    is the single control).
+[x] Provider expand can no longer open itself after a cleanup (pruned ids +
+    regression test); cleaned-to-empty providers show a short note.
+[x] Confirmation and result dialogs show the filesystem path, not just the name.
+[x] Search field has its own bordered box, padding and spacing.
+```
+
+Evidence: `cargo test` 46 passed (incl. the 289-vs-1 history regression),
+clippy 0 warnings, fmt clean, `svelte-check` 0 errors 0 warnings,
+`vite build` ok, `vitest` 42 passed.
+
 ## V1.0 (recommended scope)
 
 Dashboard, filesystem scanner, node_modules, npm/pnpm cache, Go cache,

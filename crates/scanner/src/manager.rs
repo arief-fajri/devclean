@@ -5,7 +5,7 @@ use devclean_providers::{all_providers, Provider, ProviderRegistry};
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::{
-    atomic::{AtomicBool, Ordering},
+    atomic::{AtomicBool, AtomicUsize, Ordering},
     Arc,
 };
 use std::time::Duration;
@@ -14,6 +14,11 @@ use tokio::sync::Semaphore;
 /// Progress callback invoked per completed provider (throttle at the caller
 /// to ~100-500ms for UI updates).
 pub type ProgressFn = Box<dyn Fn(&str, usize, usize) + Send + Sync>;
+
+/// Fired the moment a provider begins scanning, so the UI can show which
+/// one is running rather than only which ones are already done (contract
+/// v0.5.0). A no-op when not supplied.
+pub type StartedFn = Box<dyn Fn(&str) + Send + Sync>;
 
 pub struct ScanManager {
     providers: Vec<Arc<dyn Provider>>,
@@ -61,27 +66,90 @@ impl ScanManager {
         excluded: &[PathBuf],
         disabled: &[String],
         on_progress: Option<ProgressFn>,
+        on_started: Option<StartedFn>,
+    ) -> ScanSummary {
+        self.run(None, roots, excluded, disabled, on_progress, on_started)
+            .await
+    }
+
+    /// Scan exactly one provider. The others are never walked, never occupy
+    /// a semaphore slot, and never appear in progress totals — so refreshing
+    /// a single card after a cleanup costs that provider's scan, not a full
+    /// sweep. `progress` totals are `1/1`.
+    pub async fn scan_one(
+        &self,
+        provider: &str,
+        roots: Vec<PathBuf>,
+        excluded: &[PathBuf],
+        on_progress: Option<ProgressFn>,
+        on_started: Option<StartedFn>,
+    ) -> ScanSummary {
+        self.run(
+            Some(provider),
+            roots,
+            excluded,
+            &[],
+            on_progress,
+            on_started,
+        )
+        .await
+    }
+
+    /// Shared fan-out. `only` restricts the run to a single provider id;
+    /// `None` runs every provider that is not in `disabled`.
+    async fn run(
+        &self,
+        only: Option<&str>,
+        roots: Vec<PathBuf>,
+        excluded: &[PathBuf],
+        disabled: &[String],
+        on_progress: Option<ProgressFn>,
+        on_started: Option<StartedFn>,
     ) -> ScanSummary {
         self.cancelled.store(false, Ordering::SeqCst);
         let on_progress: Option<Arc<ProgressFn>> = on_progress.map(Arc::new);
+        let on_started: Option<Arc<StartedFn>> = on_started.map(Arc::new);
         let mut handles = Vec::new();
 
         let active: Vec<&Arc<dyn Provider>> = self
             .providers
             .iter()
             .filter(|p| !disabled.contains(&p.id().to_string()))
+            .filter(|p| only.is_none_or(|id| p.id() == id))
             .collect();
         let total = active.len();
-        for (idx, provider) in active.into_iter().enumerate() {
+        // Monotonic completion counter for THIS run. `scan_progress.done`
+        // must count providers that FINISHED, never their static position
+        // in the list — otherwise a fast provider at index 5 reports
+        // `done=6` before provider 0 reports `done=1`, the bar runs
+        // backwards and can read 9/9 with 4 still pending. Local (not a
+        // struct field) so two concurrent runs never share it.
+        let completed = Arc::new(AtomicUsize::new(0));
+        for provider in &active {
             let p = Arc::clone(provider);
             let roots = roots.clone();
             let sem = Arc::clone(&self.semaphore);
             let cancelled = Arc::clone(&self.cancelled);
             let cb = on_progress.clone();
+            let started = on_started.clone();
             let timeout = self.timeout;
+            let completed = Arc::clone(&completed);
             handles.push(tokio::spawn(async move {
                 let _permit = sem.acquire_owned().await.unwrap();
+                if let Some(started) = &started {
+                    started(p.id());
+                }
+                let report = |cb: &Option<Arc<ProgressFn>>, pid: &str| {
+                    // Fires exactly once per provider, on every exit path
+                    // (cancel, panic, timeout, success) so the UI bar can
+                    // never stall below its true total.
+                    let done = completed.fetch_add(1, Ordering::SeqCst) + 1;
+                    if let Some(cb) = cb {
+                        cb(pid, done, total);
+                    }
+                };
                 if cancelled.load(Ordering::SeqCst) {
+                    report(&cb, p.id());
                     return (p.id().to_string(), Vec::new());
                 }
                 let roots = roots.clone();
@@ -98,9 +166,7 @@ impl ScanManager {
                         Vec::new()
                     }
                 };
-                if let Some(cb) = cb {
-                    cb(&pid, idx + 1, total);
-                }
+                report(&cb, &pid);
                 (pid, found)
             }));
         }
@@ -166,6 +232,11 @@ fn aggregate(resources: Vec<Resource>) -> ScanSummary {
     ScanSummary {
         total_bytes: resources.iter().map(|r| r.size_bytes).sum(),
         reclaimable_bytes: resources.iter().map(|r| r.reclaimable_bytes).sum(),
+        retention_blocked_bytes: resources
+            .iter()
+            .filter(|r| !r.retention_eligible)
+            .map(|r| r.reclaimable_bytes)
+            .sum(),
         providers: summaries,
         resources,
     }
@@ -212,9 +283,14 @@ mod tests {
                     safety: SafetyLevel::Safe,
                     detail: None,
                     impact: None,
+                    age_days: None,
+                    retention_eligible: true,
                 });
             }
             out
+        }
+        fn measure(&self, _path: &Path) -> Option<u64> {
+            None
         }
         fn cleanup_action(&self, path: &Path) -> devclean_providers::CleanupAction {
             devclean_providers::CleanupAction::RemoveDir(path.to_path_buf())
@@ -235,7 +311,7 @@ mod tests {
         let mgr = Arc::new(mgr);
         let mgr2 = Arc::clone(&mgr);
         let handle = tokio::spawn(async move {
-            mgr2.scan_all(vec![PathBuf::from("/tmp")], &[], &[], None)
+            mgr2.scan_all(vec![PathBuf::from("/tmp")], &[], &[], None, None)
                 .await
         });
         // Let the scan start, then cancel and measure the settle time.
@@ -262,7 +338,7 @@ mod tests {
         let mgr = manager_with(slow, Duration::from_millis(100));
         let t0 = std::time::Instant::now();
         let summary = mgr
-            .scan_all(vec![PathBuf::from("/tmp")], &[], &[], None)
+            .scan_all(vec![PathBuf::from("/tmp")], &[], &[], None, None)
             .await;
         assert!(t0.elapsed() < Duration::from_secs(5));
         assert!(summary.resources.is_empty());
@@ -278,7 +354,7 @@ mod tests {
         mgr.cancel();
         // A fresh scan_all must not inherit the stale cancel flag.
         let summary = mgr
-            .scan_all(vec![PathBuf::from("/tmp")], &[], &[], None)
+            .scan_all(vec![PathBuf::from("/tmp")], &[], &[], None, None)
             .await;
         assert_eq!(summary.resources.len(), 5);
     }
@@ -297,11 +373,12 @@ mod tests {
                 &[PathBuf::from("/tmp")],
                 &[],
                 None,
+                None,
             )
             .await;
         assert!(summary.resources.is_empty());
         let summary = mgr
-            .scan_all(vec![PathBuf::from("/tmp")], &[], &[], None)
+            .scan_all(vec![PathBuf::from("/tmp")], &[], &[], None, None)
             .await;
         assert_eq!(summary.resources.len(), 3);
     }
@@ -325,6 +402,7 @@ mod tests {
                 vec![PathBuf::from("/tmp")],
                 &[],
                 &["slow".to_string()],
+                None,
                 None,
             )
             .await;
@@ -353,9 +431,186 @@ mod tests {
                 &[],
                 &["slow".to_string()],
                 None,
+                None,
             )
             .await;
         assert!(summary.resources.is_empty());
         assert!(summary.providers.is_empty());
+    }
+
+    /// Stub whose scan time DECREASES with its index, so a fast provider
+    /// finishes before a slow one listed earlier. This is the shape that
+    /// made the old `idx + 1` counter report out-of-order progress.
+    struct ReverseSpeedProvider {
+        tag: &'static str,
+        slices: usize,
+        delay_ms: u64,
+    }
+
+    impl Provider for ReverseSpeedProvider {
+        fn id(&self) -> &'static str {
+            self.tag
+        }
+        fn name(&self) -> &'static str {
+            "Reverse-speed stub"
+        }
+        fn default_safety(&self) -> SafetyLevel {
+            SafetyLevel::Safe
+        }
+        fn scan(&self, _roots: &[PathBuf], _cancel: &AtomicBool) -> Vec<Resource> {
+            std::thread::sleep(Duration::from_millis(self.delay_ms));
+            (0..self.slices)
+                .map(|i| Resource {
+                    id: String::new(),
+                    provider: self.id().to_string(),
+                    name: format!("{}-{i}", self.tag),
+                    path: Path::new("/tmp").to_path_buf(),
+                    size_bytes: 1,
+                    reclaimable_bytes: 1,
+                    safety: SafetyLevel::Safe,
+                    detail: None,
+                    impact: None,
+                    age_days: None,
+                    retention_eligible: true,
+                })
+                .collect()
+        }
+        fn measure(&self, _path: &Path) -> Option<u64> {
+            None
+        }
+        fn cleanup_action(&self, path: &Path) -> devclean_providers::CleanupAction {
+            devclean_providers::CleanupAction::RemoveDir(path.to_path_buf())
+        }
+    }
+
+    #[tokio::test]
+    async fn progress_done_counts_completions_and_is_monotonic() {
+        // Listed slowest-first; the last one finishes first. The old
+        // `idx + 1` counter would have emitted done=5 before done=1.
+        let providers: Vec<Arc<dyn Provider>> = vec![
+            Arc::new(ReverseSpeedProvider {
+                tag: "p0",
+                slices: 1,
+                delay_ms: 120,
+            }),
+            Arc::new(ReverseSpeedProvider {
+                tag: "p1",
+                slices: 1,
+                delay_ms: 90,
+            }),
+            Arc::new(ReverseSpeedProvider {
+                tag: "p2",
+                slices: 1,
+                delay_ms: 60,
+            }),
+            Arc::new(ReverseSpeedProvider {
+                tag: "p3",
+                slices: 1,
+                delay_ms: 30,
+            }),
+            Arc::new(ReverseSpeedProvider {
+                tag: "p4",
+                slices: 1,
+                delay_ms: 5,
+            }),
+        ];
+        let mgr = ScanManager::with_config(providers, Duration::from_secs(60));
+
+        let seen = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let sink = std::sync::Arc::clone(&seen);
+        let cb: ProgressFn = Box::new(move |_p, done, total| {
+            sink.lock().unwrap().push((done, total));
+        });
+        mgr.scan_all(vec![PathBuf::from("/tmp")], &[], &[], Some(cb), None)
+            .await;
+
+        let seen = seen.lock().unwrap().clone();
+        assert_eq!(seen.len(), 5, "one callback per provider, got {seen:?}");
+        assert!(
+            seen.iter().all(|(_, total)| *total == 5),
+            "total must stay constant, got {seen:?}"
+        );
+        let dones: Vec<usize> = seen.iter().map(|(d, _)| *d).collect();
+        assert_eq!(
+            dones,
+            vec![1, 2, 3, 4, 5],
+            "done must count completions in order, got {dones:?}"
+        );
+    }
+
+    /// v0.5.0: the UI needs to show WHICH provider is running, not only
+    /// which ones finished. One `started` event per provider, and never
+    /// for a provider that was disabled.
+    #[tokio::test]
+    async fn provider_started_fires_once_per_enabled_provider() {
+        let providers: Vec<Arc<dyn Provider>> = vec![
+            Arc::new(SlowProvider {
+                tag: "s0",
+                slices: 1,
+            }),
+            Arc::new(SlowProvider {
+                tag: "s1",
+                slices: 1,
+            }),
+            Arc::new(SlowProvider {
+                tag: "s2",
+                slices: 1,
+            }),
+        ];
+        let mgr = ScanManager::with_config(providers, Duration::from_secs(60));
+
+        let seen = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let sink = std::sync::Arc::clone(&seen);
+        let cb: StartedFn = Box::new(move |p| sink.lock().unwrap().push(p.to_string()));
+        mgr.scan_all(
+            vec![PathBuf::from("/tmp")],
+            &[],
+            &["s1".to_string()],
+            None,
+            Some(cb),
+        )
+        .await;
+
+        let seen = seen.lock().unwrap().clone();
+        assert_eq!(seen.len(), 2, "only the enabled providers: {seen:?}");
+        assert!(seen.contains(&"s0".to_string()));
+        assert!(seen.contains(&"s2".to_string()));
+        assert!(
+            !seen.contains(&"s1".to_string()),
+            "a disabled provider is silent"
+        );
+    }
+
+    #[tokio::test]
+    async fn cancelled_providers_still_emit_progress() {
+        // A cancel before the fan-out runs: every provider takes the early
+        // exit, and each must still tick the bar or it stalls forever.
+        let providers: Vec<Arc<dyn Provider>> = (0..3)
+            .map(|i| {
+                Arc::new(SlowProvider {
+                    tag: if i == 0 { "s0" } else { "s1" },
+                    slices: 100,
+                }) as Arc<dyn Provider>
+            })
+            .collect();
+        let mgr = Arc::new(ScanManager::with_config(providers, Duration::from_secs(60)));
+        mgr.cancel();
+        let runner = Arc::clone(&mgr);
+
+        let seen = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let sink = std::sync::Arc::clone(&seen);
+        let cb: ProgressFn = Box::new(move |_p, done, total| {
+            sink.lock().unwrap().push((done, total));
+        });
+        runner
+            .scan_all(vec![PathBuf::from("/tmp")], &[], &[], Some(cb), None)
+            .await;
+
+        let seen = seen.lock().unwrap().clone();
+        assert_eq!(seen.len(), 3, "cancel must not swallow callbacks: {seen:?}");
+        assert_eq!(
+            seen.iter().map(|(d, _)| *d).collect::<Vec<_>>(),
+            vec![1, 2, 3]
+        );
     }
 }

@@ -2,7 +2,7 @@
  * List-view store (Svelte 5 runes): global search / filter / sort.
  * Pure matching lives in `$lib/view` so it stays unit-testable.
  */
-import { DEFAULT_VIEW, type SafetyFilter, type SortKey, type ViewOptions } from "$lib/view";
+import { DEFAULT_VIEW, pruneExpanded, type SafetyFilter, type SortKey, type ViewOptions } from "$lib/view";
 
 class ViewStore {
   query = $state(DEFAULT_VIEW.query);
@@ -41,6 +41,15 @@ class ViewStore {
     this.expanded = this.expanded.includes(provider)
       ? this.expanded.filter((p) => p !== provider)
       : [...this.expanded, provider];
+  }
+
+  /**
+   * Forget expanded ids whose provider no longer exists (e.g. its last
+   * item was cleaned). Pure logic lives in `$lib/view` for testing.
+   */
+  pruneExpanded(present: string[]) {
+    const next = pruneExpanded(this.expanded, present);
+    if (next.length !== this.expanded.length) this.expanded = next;
   }
 
   reset() {

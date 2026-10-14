@@ -13,15 +13,20 @@ Disk usage
     ↓
 DevClean scan
     ↓
-47.8 GB reclaimable
+82.6 GB reclaimable
 
-Docker             15.2 GB
-node_modules       12.8 GB
-Go cache             8.4 GB
-Rust target          6.1 GB
+node_modules         14.8 GB
+Rust target          18.7 GB
+Docker images/vol    16.7 GB
+Go cache              8.4 GB
+System caches         5.8 GB
+opencode history     14.2 GB
     ↓
-[ Clean Safe Resources ]
+[ Review & clean selected ]
 ```
+
+(Measured on the development machine, where `~/VOLANTIS` and `~/EXP` are
+auto-detected as scan roots.)
 
 ## Quick start (5 minutes)
 
@@ -40,7 +45,7 @@ cargo tauri dev
 **Your setup works if:**
 
 - The DevClean window opens (Vite at `http://localhost:1420`)
-- The **Scan** button lists 4 providers (node, rust, go, docker)
+- The **Scan** button lists 14 providers and finds your projects without any setup (see below)
 - `cargo test --workspace` is green · `cargo clippy` has 0 warnings · `npm run check` has 0 errors
 
 Full details: [docs/development/developing.md](docs/development/developing.md).
@@ -53,10 +58,10 @@ devclean/
 │   ├── src/               # components, stores (runes), tauri bridge
 │   └── src-tauri/src/     # main.rs, commands.rs, events.rs, state.rs
 ├── crates/
-│   ├── core/              # types, SafetyValidator, settings, system helpers
-│   ├── providers/         # Provider trait + node/go/docker/rust_target
+│   ├── core/              # types, SafetyValidator, settings, preview tokens
+│   ├── providers/         # Provider trait + 14 resource providers
 │   ├── scanner/           # ScanManager (concurrent, cancellable) + cache
-│   └── cleanup/           # preview + safety-gated executor
+│   └── cleanup/           # preview + gated executor, retention, SQLite
 └── docs/
     ├── architecture/overview.md
     ├── development/{developing.md, roadmap.md, methodology/{system-model.md, guardrails.md}}
@@ -72,13 +77,46 @@ One-way dependencies: `core ← providers ← scanner/cleanup ← src-tauri ← 
 2. **Backend = authority.** Every deletion goes through `SafetyValidator`; paths are resolved server-side.
 3. **Stable contract.** Adding/changing a Tauri command or event requires a `docs/reference/tauri-contract.md` update + test.
 4. **Safety first.** Read [docs/security.md](docs/security.md) and the `G-SAFE-*` guardrails before touching cleanup code.
+5. **Numbers are measured.** `freed_bytes` is `before − after` for every branch, including subprocess-backed cleanup. When the after-state cannot be measured, the result says `0` and why — it never asserts the requested figure was freed.
+
+## Scan roots are detected, not typed
+
+Default roots cover the usual folders (`~/Projects`, `~/Code`, `~/Workspace`,
+`~/VOLANTIS`, `~/EXP`, `~/src`, `~/repos`, `~/dev`, `~/work`), filtered to those
+that exist. **Settings → Scan → Detect folders** discovers the rest — it walks
+`$HOME` at most two levels deep, never descends into a cache, and reports an
+estimated size per candidate so you can pick without opening anything.
+
+A pre-v0.5.0 `settings.json` with an empty `scan_roots` array is re-seeded from
+the defaults on load; otherwise the app would stay permanently blind to
+`node_modules` on a machine whose work lives outside `~/Projects`.
+
+## Relationship to the legacy `~/scripts/cleanup.sh`
+
+The two are **independent by design** and safe to run together — both are
+idempotent, and neither depends on the other:
+
+| Area | DevClean | `cleanup.sh` |
+|---|---|---|
+| Report | ✅ main UI | ✅ `check` |
+| Safe caches | ✅ | ✅ |
+| `node_modules` | ✅ | ✅ |
+| Docker images/volumes | ✅ via **Settings → Cleanup → Docker scope** | ✅ manual, asks first |
+| AI history (`opencode.db`, `claude`) | ✅ with a retention policy | ✅ `clean-ai --keep-days N` |
+| Scheduling | GUI only | cron/launchd |
+
+There is no bridge between them: DevClean never invokes the script, and the
+script never reads DevClean's state.
 
 New AI agents / developers start at [AGENTS.md](AGENTS.md).
 
 ## MVP roadmap
 
 - **M0** Foundation: workspace, Tauri+Svelte running, green CI ✅
-- **M1+M2** Scanner + safe cleanup: 4 providers, dashboard, preview → confirm → cleanup → result ✅
-- **M3** Safety hardening + UX: timeouts, persistent settings, history, tray, 9 providers ✅ (you are here)
+- **M1+M2** Scanner + safe cleanup ✅
+- **M3** Safety hardening + UX: timeouts, settings, history, tray ✅
+- **v0.5.0** Coverage + honest numbers: 14 providers, auto-detected scan roots,
+  age-based retention, AI history (opencode + Claude), configurable Docker
+  scope, backend-enforced confirmation ✅ (you are here)
 
 See [docs/development/roadmap.md](docs/development/roadmap.md).

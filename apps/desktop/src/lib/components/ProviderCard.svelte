@@ -3,7 +3,7 @@
   import { formatBytes, formatPct, isStaleSignal } from "$lib/format";
   import { providerMeta } from "$lib/providerMeta";
   import type { ProviderSummary, Resource } from "$lib/tauri";
-  import { ChevronDown, RotateCw } from "lucide-svelte";
+  import { ChevronDown, LoaderCircle, Lock, RotateCw } from "lucide-svelte";
 
   interface Props {
     summary: ProviderSummary;
@@ -15,6 +15,12 @@
     showPath: boolean;
     expanded: boolean;
     rescanning: boolean;
+    /** A full scan is running: selection is disabled and the card dims. */
+    scanning?: boolean;
+    /** This provider is the one scanning right now. */
+    active?: boolean;
+    /** This provider already finished this run. */
+    done?: boolean;
     onToggle: (id: string) => void;
     onToggleProvider: (provider: string) => void;
     onExpand: (provider: string) => void;
@@ -30,6 +36,9 @@
     showPath,
     expanded,
     rescanning,
+    scanning = false,
+    active = false,
+    done = false,
     onToggle,
     onToggleProvider,
     onExpand,
@@ -49,19 +58,28 @@
     resources.length > 0 && resources.every((r) => selected.includes(r.id)),
   );
   const barColor = $derived(reviewCount > 0 ? "bg-amber-500" : "bg-emerald-500");
+  /** Held back by the retention policy: visible, but not selectable. */
+  const blockedCount = $derived(resources.filter((r) => !r.retention_eligible).length);
 </script>
 
 <section
-  class="rounded-xl border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-900"
+  class="rounded-xl border bg-white p-4 transition-opacity dark:bg-zinc-900 {scanning
+    ? 'border-zinc-100 opacity-60 dark:border-zinc-800/60'
+    : 'border-zinc-200 dark:border-zinc-800'}"
+  data-testid="provider-card-{summary.provider}"
+  data-scanning={scanning}
 >
   <div class="flex items-start gap-3">
     <input
       type="checkbox"
-      class="mt-2.5 h-4 w-4 shrink-0 accent-emerald-600"
+      class="mt-2.5 h-4 w-4 shrink-0 accent-emerald-600 disabled:opacity-40"
       checked={allChecked}
+      disabled={scanning}
       onchange={() => onToggleProvider(summary.provider)}
       aria-label="Select all {resources.length} visible in {summary.name}"
-      title="Select all {resources.length} visible in {summary.name}"
+      title={scanning
+        ? "Not selectable while a scan is running"
+        : `Select all ${resources.length} visible in ${summary.name}`}
     />
     <!-- The whole summary row is ONE explicit expand control: collapsed
          shows only the summary, expanded reveals the item rows. -->
@@ -75,9 +93,19 @@
       <span class="flex items-center gap-3">
         <span
           aria-hidden="true"
-          class="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg {meta.tile}"
+          class="relative flex h-10 w-10 shrink-0 items-center justify-center rounded-lg {meta.tile}"
         >
-          <TileIcon size={20} class={meta.accent} />
+          <TileIcon size={20} class="{meta.accent} {active ? 'opacity-40' : ''}" />
+          {#if active}
+            <span class="absolute inset-0 flex items-center justify-center"
+              ><LoaderCircle size={18} class="animate-spin text-zinc-500" /></span
+            >
+          {:else if done}
+            <span
+              class="absolute -right-1 -bottom-1 flex h-4 w-4 items-center justify-center rounded-full bg-emerald-600 text-white"
+              ><meta.tick size={10} strokeWidth={3} /></span
+            >
+          {/if}
         </span>
         <span class="min-w-0 flex-1">
           <span class="flex items-baseline justify-between gap-2">
@@ -87,6 +115,16 @@
               {#if staleCount > 0}
                 <span class="ml-1 font-normal text-amber-600 dark:text-amber-400">
                   · {staleCount} stale
+                </span>
+              {/if}
+              {#if blockedCount > 0}
+                <span class="ml-1 font-normal text-zinc-400">
+                  · {blockedCount} kept by retention
+                </span>
+              {/if}
+              {#if active}
+                <span class="ml-1 font-normal text-emerald-600 dark:text-emerald-400">
+                  · scanning…
                 </span>
               {/if}
             </span>
@@ -128,7 +166,7 @@
     <button
       class="mt-1.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-zinc-200 text-zinc-500 hover:bg-zinc-100 disabled:opacity-50 dark:border-zinc-700 dark:hover:bg-zinc-800"
       onclick={() => onRescan(summary.provider)}
-      disabled={rescanning}
+      disabled={rescanning || scanning}
       aria-label="Rescan {summary.name}"
       title="Rescan this provider"
     >
@@ -144,6 +182,8 @@
         <ResourceRow
           resource={r}
           checked={selected.includes(r.id)}
+          locked={!r.retention_eligible}
+          disabled={scanning}
           {showPath}
           {onToggle}
           {onOpenDetail}

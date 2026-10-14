@@ -20,6 +20,43 @@ pub enum CleanupAction {
         program: &'static str,
         args: &'static [&'static str],
     },
+    /// Delete the entries under `dir` that are OLDER than `min_age_days`,
+    /// leaving recent ones untouched. `pattern` is a fixed glob (never user
+    /// input, G-SAFE-02); when `prune_empty_dirs` is set, directories left
+    /// empty by the pass are removed too.
+    ///
+    /// This is the retention primitive: it lets a user say "clear what I
+    /// have not touched in 30 days" instead of an all-or-nothing wipe
+    /// (I9). It never applies to global caches, whose items carry no
+    /// meaningful per-item age.
+    PruneOlderThan {
+        dir: PathBuf,
+        min_age_days: u32,
+        pattern: &'static str,
+        prune_empty_dirs: bool,
+        /// Names never deleted at ANY depth, whatever `pattern` matches
+        /// (I10). Defence in depth: a broad pattern like `*` must still
+        /// leave settings and credentials alone.
+        skip_names: &'static [&'static str],
+    },
+    /// Run fixed SQL against a SQLite file, then reclaim the space.
+    ///
+    /// `statements` and `checkpoint` are `&'static str` constants — no
+    /// caller can inject SQL (G-SAFE-02). The ONLY variable input is
+    /// `bound_cutoff`, which is passed as a bound parameter, never
+    /// interpolated into the statement text.
+    ///
+    /// `require_idle` names a process that must NOT be running. When it is,
+    /// the whole action is refused before the file is opened — writing to a
+    /// database its owner still holds open corrupts it.
+    RunSql {
+        db: PathBuf,
+        statements: &'static [&'static str],
+        bound_cutoff: i64,
+        checkpoint: &'static str,
+        vacuum: bool,
+        require_idle: Option<&'static str>,
+    },
 }
 
 pub trait Provider: Send + Sync {
@@ -40,6 +77,39 @@ pub trait Provider: Send + Sync {
     /// removed. Called only after the safety validator approves the path.
     fn cleanup_action(&self, path: &Path) -> CleanupAction;
 
+    /// Current reclaimable size of a resource, re-read NOW.
+    ///
+    /// `None` means **"this cannot be measured"** — the cleanup engine then
+    /// reports `freed_bytes: 0` together with a clear reason, rather than
+    /// assuming the whole requested figure was freed. `freed_bytes` is a
+    /// measurement (`before - after`), never an assertion (I8, G-REL-02).
+    ///
+    /// Directory-backed providers use [`measure_dir`]. Providers whose
+    /// resource is not a directory (e.g. Docker build cache) must re-query
+    /// their own source of truth.
+    fn measure(&self, path: &Path) -> Option<u64>;
+
+    /// Minimum age (in days) this provider's items must have before the
+    /// retention policy will let them go. `None` means the provider's items
+    /// carry no meaningful age (global caches) and are never held back by
+    /// age (I9).
+    ///
+    /// Only per-ITEM providers answer this. A stale project is a reclaim
+    /// hint, never a safety verdict — this feeds a user policy, not a gate.
+    fn retention_days(&self) -> Option<u32> {
+        None
+    }
+
+    /// The narrowest Docker scope this provider needs, or `None` when the
+    /// provider does not touch Docker at all.
+    ///
+    /// `None` and `Some(DockerPruneScope::Off)` mean different things and
+    /// must not be conflated: the first says "no gate applies", the second
+    /// says "the user turned Docker cleanup off, refuse".
+    fn required_docker_scope(&self) -> Option<devclean_core::DockerPruneScope> {
+        None
+    }
+
     /// Global cache directories this provider owns outside scan roots
     /// (e.g. `~/.cargo/registry`). The backend adds these to the validator's
     /// allowed roots; default is none. Only ever constant paths derived
@@ -47,6 +117,14 @@ pub trait Provider: Send + Sync {
     fn extra_allowed_roots(&self) -> Vec<PathBuf> {
         Vec::new()
     }
+}
+
+/// [`Provider::measure`] for providers whose resource is a real directory.
+/// A path that is not a directory (vanished cache, or a sentinel like
+/// `__docker__/build-cache`) is *unmeasurable*, not zero — the two mean
+/// different things and only one of them may be reported as a measurement.
+pub fn measure_dir(path: &Path) -> Option<u64> {
+    path.is_dir().then(|| dir_size(path))
 }
 
 /// Sum of file sizes under `path`. Symlinks are not followed (a symlink farm

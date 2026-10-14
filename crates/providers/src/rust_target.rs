@@ -2,7 +2,8 @@
 //! `target/` dir. Regenerable via `cargo build`, hence `Safe`.
 
 use super::provider::{
-    dir_size_checked, impact, project_detail, walk_cancelled, CleanupAction, Provider,
+    age_days, dir_size_checked, impact, measure_dir, project_detail, walk_cancelled, CleanupAction,
+    Provider,
 };
 use devclean_core::{Resource, SafetyLevel};
 use std::path::{Path, PathBuf};
@@ -55,6 +56,8 @@ impl Provider for RustTargetProvider {
                     reclaimable_bytes: size,
                     safety: SafetyLevel::Safe,
                     detail: Some(project_detail(&project_name, project, size)),
+                    age_days: age_days(project),
+                    retention_eligible: true,
                     impact: impact(
                         "Build artifacts only; your source code is untouched.",
                         Some("First build after cleanup recompiles from scratch"),
@@ -64,6 +67,10 @@ impl Provider for RustTargetProvider {
             });
         }
         out
+    }
+
+    fn measure(&self, path: &Path) -> Option<u64> {
+        measure_dir(path)
     }
 
     fn cleanup_action(&self, path: &Path) -> CleanupAction {

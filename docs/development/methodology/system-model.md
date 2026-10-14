@@ -44,15 +44,37 @@ Every non-trivial change must trace to at least one outcome:
 ## 4. Core invariants
 
 ```text
-I1. The frontend never supplies a raw path for deletion; it supplies a resource_id.
-I2. Directory deletion only happens for SafetyValidator-approved paths.
-I3. Docker is never cleaned by reading/deleting its internal storage.
-I4. Go is never cleaned by hand-deleting cache contents.
-I5. Scan and cleanup are cancellable and settle in <1s.
-I6. Cleanup is always preceded by a re-measured preview (unless settings disable
-    preview — default ON).
-I7. Protected paths (/, ~/Documents, ~/.ssh, …) are untouchable even if a provider claims them.
-I8. Every cleanup result is per resource: Success / Partial / Failed / Cancelled + numbers + reason.
+I1.  The frontend never supplies a raw path for deletion; it supplies a resource_id.
+I2.  Directory deletion only happens for SafetyValidator-approved paths.
+I3.  Docker is never cleaned by reading/deleting its internal storage.
+I4.  Go is never cleaned by hand-deleting cache contents.
+I5.  Scan and cleanup are cancellable and settle in <1s.
+I6.  Cleanup is always preceded by a re-measured preview (unless settings disable
+     preview — default ON).
+I7.  Protected paths (/, ~/Documents, ~/.ssh, …) are untouchable even if a provider claims them.
+I8.  Every cleanup result is per resource: Success / Partial / Failed / Cancelled + numbers + reason.
+I9.  Age-based pruning applies ONLY to resources with a meaningful per-item age.
+     A whole-tool cache (npm, cargo, go, Docker) has no age and is never held back.
+I10. AI configuration and credentials are never prune targets, at any depth, whatever
+    the pattern matches.
+I11. Retention, the privileged opt-in and the Docker scope are enforced by the BACKEND.
+     Disabling a checkbox in the UI is a convenience; sending the id anyway is refused.
+I12. freed_bytes is MEASURED (before − after), never asserted. When the after-state
+     cannot be measured, the result reports 0 with a reason.
 ```
 
 An invariant violation is release-blocking.
+
+### Why I11 and I12 exist (v0.5.0)
+
+Both were written down after finding that the guardrails claimed enforcement the
+code did not have:
+
+- **I11** — `require_confirmation` and `allow_privileged_operations` were stored,
+  rendered in the UI, and never read by any backend logic. `cleanup` logged
+  `tracing::debug!("cleanup requires UI confirmation")` and proceeded. Any caller
+  that skipped the dialog deleted immediately.
+- **I12** — `freed_bytes` for every `RunCommand` resource equalled
+  `requested_bytes`, because the engine measured the "after" state on the
+  resource's sentinel path (never a directory → always 0). The 10.82 GB recorded
+  in `history.jsonl` as "freed" was a *scan-time* figure replayed as a result.

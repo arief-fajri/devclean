@@ -5,8 +5,8 @@
 use crate::events::*;
 use crate::state::AppState;
 use devclean_core::{
-    CleanupPreview, CleanupResult, HistoryEntry, ProviderInfo, Resource, SafetyValidator,
-    ScanSummary, Settings,
+    CleanupPreview, CleanupResult, CleanupRun, DiskFree, HistoryEntry, ProviderInfo, Resource,
+    SafetyValidator, ScanRootCandidate, ScanSummary, Settings,
 };
 use devclean_providers::{all_providers, Provider};
 use std::collections::HashMap;
@@ -18,6 +18,22 @@ fn now_unix() -> u64 {
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_secs())
         .unwrap_or(0)
+}
+
+/// Unique id for one cleanup run. Groups every resource entry written by a
+/// single `cleanup` call so the history UI can show runs, not a flat sea of
+/// per-resource rows. Dependency-free: millis + monotonic counter.
+fn new_run_id() -> String {
+    static COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let millis = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or(0);
+    format!(
+        "{}-{}",
+        millis,
+        COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+    )
 }
 
 fn providers_map() -> HashMap<String, Arc<dyn Provider>> {
@@ -60,9 +76,14 @@ pub async fn run_scan(app: &AppHandle, state: &AppState) -> Result<ScanSummary, 
         );
     });
 
+    let app3 = app.clone();
+    let started: devclean_scanner::manager::StartedFn = Box::new(move |provider| {
+        let _ = app3.emit(SCAN_PROVIDER_STARTED, provider);
+    });
+
     let summary = state
         .scan
-        .scan_all(roots, &excluded, &disabled, Some(progress))
+        .scan_all(roots, &excluded, &disabled, Some(progress), Some(started))
         .await;
     state.store_resources(summary.resources.clone());
     // Best-effort instant paint for the next startup (M3 scan cache).
@@ -125,31 +146,57 @@ pub fn get_cached_scan(state: State<'_, AppState>) -> Result<Option<ScanSummary>
 }
 
 /// Re-scan a single provider and merge the result into the stored state.
-/// (MVP: implemented as a full scan filtered to one provider.)
+///
+/// Since v0.6.0 this walks **only** that provider (it used to run a full
+/// scan and filter the result, which made a per-card refresh as expensive
+/// as a whole sweep). The other providers' resources are kept in state so
+/// `preview_cleanup` / `cleanup` keep resolving their ids.
 #[tauri::command]
 pub async fn scan_provider(
     app: AppHandle,
     state: State<'_, AppState>,
     provider: String,
 ) -> Result<ScanSummary, String> {
-    let full = scan_all(app, state.clone()).await?;
-    let resources: Vec<Resource> = full
-        .resources
-        .into_iter()
-        .filter(|r| r.provider == provider)
-        .collect();
-    let total_bytes = resources.iter().map(|r| r.size_bytes).sum();
-    let reclaimable_bytes = resources.iter().map(|r| r.reclaimable_bytes).sum();
-    Ok(ScanSummary {
-        total_bytes,
-        reclaimable_bytes,
-        providers: full
-            .providers
-            .into_iter()
-            .filter(|p| p.provider == provider)
-            .collect(),
-        resources,
-    })
+    let (roots, excluded) = {
+        let s = state.settings.lock().unwrap();
+        (s.scan_roots.clone(), s.excluded_paths.clone())
+    };
+    app.emit(SCAN_STARTED, ()).map_err(|e| e.to_string())?;
+
+    let progress_app = app.clone();
+    let progress: devclean_scanner::manager::ProgressFn = Box::new(move |provider, done, total| {
+        let _ = progress_app.emit(
+            SCAN_PROGRESS,
+            ScanProgressPayload {
+                provider: provider.to_string(),
+                done,
+                total,
+            },
+        );
+    });
+    let started_app = app.clone();
+    let started: devclean_scanner::manager::StartedFn = Box::new(move |provider| {
+        let _ = started_app.emit(SCAN_PROVIDER_STARTED, provider);
+    });
+
+    let one = state
+        .scan
+        .scan_one(&provider, roots, &excluded, Some(progress), Some(started))
+        .await;
+
+    // Merge into the existing registry instead of replacing it: a targeted
+    // scan must not drop the other providers' id→path entries, or a
+    // preview/cleanup for them would fail to resolve.
+    {
+        let mut map = state.resources.lock().unwrap();
+        map.retain(|_, r| r.provider != provider);
+        for r in &one.resources {
+            map.insert(r.id.clone(), r.clone());
+        }
+    }
+
+    app.emit(SCAN_COMPLETED, &one).map_err(|e| e.to_string())?;
+    Ok(one)
 }
 
 /// Details for one resource id (drill-down view).
@@ -182,6 +229,17 @@ pub async fn preview_cleanup(
 /// Each resource reports its own status so partial failure is transparent
 /// (G-REL-02).
 ///
+/// ## Gates enforced HERE, not in the UI (v0.5.0)
+///
+/// 1. `preview_token` — when `require_confirmation` is on, the caller must
+///    present a token issued by `preview_cleanup` for exactly this id set,
+///    still unexpired (G-UI-01). Previously the backend only logged
+///    `tracing::debug!` and trusted the frontend to call preview first.
+/// 2. `allow_privileged_operations` + `docker_prune_scope` — anything past
+///    build-cache pruning is refused unless the user unlocked it (G-SAFE-03).
+/// 3. Retention — resources the age policy keeps are refused even if their
+///    ids are sent directly (I9).
+///
 /// Async + `spawn_blocking`: deletion + re-measurement walk the
 /// filesystem and previously froze the UI for the whole run (sync
 /// commands execute on the Tauri main thread).
@@ -190,13 +248,18 @@ pub async fn cleanup(
     app: AppHandle,
     state: State<'_, AppState>,
     ids: Vec<String>,
+    preview_token: Option<String>,
 ) -> Result<Vec<CleanupResult>, String> {
     let settings = state.settings.lock().unwrap().clone();
-    if settings.require_confirmation {
-        // Confirmation itself is a UI concern; the backend records that the
-        // gate exists. (Full "confirmed: bool" param arrives in M2.)
-        tracing::debug!("cleanup requires UI confirmation (G-UI-01)");
-    }
+
+    // Gate 1 — backend-enforced confirmation (G-UI-01).
+    devclean_core::authorize(
+        settings.require_confirmation,
+        preview_token.as_deref(),
+        &ids,
+    )
+    .map_err(|e| e.to_string())?;
+
     app.emit(CLEANUP_STARTED, &ids).map_err(|e| e.to_string())?;
 
     // Everything the blocking task needs is owned up front so the async
@@ -204,6 +267,8 @@ pub async fn cleanup(
     let engine = state.cleanup.clone();
     let resources = state.snapshot_resources();
     let roots = settings.scan_roots.clone();
+    let privileged = settings.allow_privileged_operations;
+    let scope = settings.docker_prune_scope;
     let progress_app = app.clone();
     let total_ids = ids.len();
     let results = tokio::task::spawn_blocking(move || {
@@ -220,13 +285,17 @@ pub async fn cleanup(
             Box::new(move |done, total, _result| {
                 let _ = progress_app.emit(CLEANUP_PROGRESS, CleanupProgressPayload { done, total });
             });
-        engine.execute(
+        engine.execute_gated(
             &ids,
             &resources,
             &providers,
             &validator,
             lookup,
             Some(on_progress),
+            &devclean_cleanup::CleanupPolicy {
+                allow_privileged_operations: privileged,
+                docker_prune_scope: scope,
+            },
         )
     })
     .await
@@ -236,9 +305,11 @@ pub async fn cleanup(
     // append is logged, never fatal to the cleanup itself.
     {
         let finished = now_unix();
+        let run_id = new_run_id();
         for r in &results {
             let src = state.resources.lock().unwrap().get(&r.resource_id).cloned();
             let entry = HistoryEntry {
+                run_id: run_id.clone(),
                 finished_at_unix: finished,
                 resource_id: r.resource_id.clone(),
                 provider: src.as_ref().map(|s| s.provider.clone()).unwrap_or_default(),
@@ -337,8 +408,28 @@ pub fn get_providers(state: State<'_, AppState>) -> Result<Vec<ProviderInfo>, St
         .collect())
 }
 
+/// Newest cleanup runs, newest first, with their per-resource entries
+/// attached (contract v0.6.0). `limit` counts **runs**, not entries, so one
+/// large cleanup cannot hide the runs before it. Defaults to 20, capped at
+/// 200. Reads the tail of the log, so cost tracks `limit`, not log size.
+#[tauri::command]
+pub fn get_history_runs(
+    state: State<'_, AppState>,
+    limit: Option<u32>,
+) -> Result<Vec<CleanupRun>, String> {
+    let limit = limit.unwrap_or(20).clamp(1, 200) as usize;
+    Ok(devclean_cleanup::read_history_runs(
+        &state.history_path,
+        limit,
+    ))
+}
+
 /// Newest cleanup history entries, oldest first (M3). `limit` defaults
 /// to 100 and is capped at 1000.
+///
+/// Superseded by `get_history_runs` for any UI: this entry-level limit lets
+/// a single large cleanup push every earlier run out of view. Kept for
+/// contract stability.
 #[tauri::command]
 pub fn get_history(
     state: State<'_, AppState>,
@@ -346,4 +437,56 @@ pub fn get_history(
 ) -> Result<Vec<HistoryEntry>, String> {
     let limit = limit.unwrap_or(100).clamp(1, 1000) as usize;
     Ok(devclean_cleanup::read_history(&state.history_path, limit))
+}
+
+/// Candidate scan roots discovered under `$HOME`, largest cache first.
+/// Backs the Settings "Detect folders" button: a machine whose work lives
+/// in `~/VOLANTIS` must never have to have that path typed by hand.
+/// Read-only and bounded — it never walks into a cache marker.
+#[tauri::command]
+pub async fn detect_scan_roots(
+    state: State<'_, AppState>,
+) -> Result<Vec<ScanRootCandidate>, String> {
+    let configured = state.settings.lock().unwrap().scan_roots.clone();
+    tokio::task::spawn_blocking(move || devclean_core::detect_scan_roots(&configured))
+        .await
+        .map_err(|e| e.to_string())
+}
+
+/// Free and total bytes of the volume holding `$HOME`. Lets the UI say
+/// "not enough space to back up the 13 GB database" BEFORE the user
+/// confirms a destructive SQLite cleanup.
+#[tauri::command]
+pub fn get_disk_free() -> Result<DiskFree, String> {
+    Ok(disk_free().unwrap_or(DiskFree {
+        available_bytes: 0,
+        total_bytes: 0,
+        known: false,
+    }))
+}
+
+fn disk_free() -> Option<DiskFree> {
+    let stat = std::process::Command::new("df")
+        .args(["-k", &home_for_df()])
+        .output()
+        .ok()
+        .filter(|o| o.status.success())?;
+    let text = String::from_utf8_lossy(&stat.stdout);
+    // macOS: "Filesystem 1024-blocks Used Available Capacity iused ...".
+    // Linux: "Filesystem 1K-blocks Used Available Use% Mounted on".
+    let last = text.lines().skip(1).find(|l| !l.starts_with("map "))?;
+    let cols: Vec<&str> = last.split_whitespace().collect();
+    let avail_kb = cols.get(3)?.parse::<u64>().ok()?;
+    let total_kb = cols.get(1)?.parse::<u64>().ok()?;
+    Some(DiskFree {
+        available_bytes: avail_kb.saturating_mul(1024),
+        total_bytes: total_kb.saturating_mul(1024),
+        known: true,
+    })
+}
+
+fn home_for_df() -> String {
+    devclean_core::home_dir()
+        .map(|p| p.display().to_string())
+        .unwrap_or_else(|| "/".to_string())
 }

@@ -58,6 +58,30 @@ body {
   select.control {
     @apply cursor-pointer bg-transparent;
   }
+
+  /* Text/number input twin of `.control` — same box so a field and a
+   * button sitting next to each other cannot drift apart. */
+  .field {
+    @apply h-8 min-w-0 rounded-lg border border-zinc-200 bg-transparent px-2.5 text-sm text-zinc-700 dark:border-zinc-700 dark:text-zinc-200;
+  }
+  .field::placeholder {
+    @apply text-zinc-400;
+  }
+  .field:focus {
+    @apply outline-none ring-2 ring-emerald-600 ring-offset-0;
+  }
+  /* Number inputs: the native spinner is misaligned with our controls. */
+  .field[type="number"] {
+    @apply appearance-none;
+  }
+  .field[type="number"]::-webkit-outer-spin-button,
+  .field[type="number"]::-webkit-inner-spin-button {
+    -webkit-appearance: none;
+    margin: 0;
+  }
+  .field[type="number"] {
+    -moz-appearance: textfield;
+  }
 }
 
 /* Consistent, visible keyboard focus (a11y). */

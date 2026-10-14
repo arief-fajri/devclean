@@ -2,16 +2,31 @@
   import { formatBytes, truncateMiddle } from "$lib/format";
   import { safetyMeta } from "$lib/safety";
   import type { Resource } from "$lib/tauri";
+  import { Lock } from "lucide-svelte";
 
   interface Props {
     resource: Resource;
     checked: boolean;
     showPath: boolean;
+    /** Held back by the retention policy — shown, but not selectable. */
+    locked?: boolean;
+    /** A scan is running; selection is unavailable. */
+    disabled?: boolean;
     onToggle: (id: string) => void;
     onOpenDetail: (id: string) => void;
   }
 
-  let { resource: r, checked, showPath, onToggle, onOpenDetail }: Props = $props();
+  let {
+    resource: r,
+    checked,
+    showPath,
+    locked = false,
+    disabled = false,
+    onToggle,
+    onOpenDetail,
+  }: Props = $props();
+
+  const unselectable = $derived(locked || disabled);
 
   const meta = $derived(safetyMeta(r.safety));
   const Icon = $derived(meta.icon);
@@ -22,13 +37,14 @@
   );
 </script>
 
-<li class="flex items-start gap-3 py-2">
+<li class="flex items-start gap-3 py-2 {locked ? 'opacity-60' : ''}">
   <input
     type="checkbox"
-    class="mt-1 h-4 w-4 shrink-0 accent-emerald-600"
+    class="mt-1 h-4 w-4 shrink-0 accent-emerald-600 disabled:opacity-40"
     checked={checked}
+    disabled={unselectable}
     onchange={() => onToggle(r.id)}
-    aria-label="Select {r.name}"
+    aria-label={locked ? `{r.name} is kept by your retention policy` : `Select ${r.name}`}
   />
   <div class="min-w-0 flex-1">
     <div class="flex items-baseline justify-between gap-2">
@@ -38,7 +54,15 @@
         onclick={() => onOpenDetail(r.id)}
       >
         {r.name}
-        {#if r.detail}
+        {#if locked}
+          <span
+            class="ml-1 inline-flex items-center gap-1 text-[11px] font-normal text-zinc-400"
+            title="Kept by your retention policy. The backend refuses it even if the id is sent directly."
+          >
+            <span aria-hidden="true" class="flex"><Lock size={10} /></span>
+            kept
+          </span>
+        {:else if r.detail}
           <span class="ml-1 text-xs font-normal text-zinc-400">{r.detail}</span>
         {/if}
       </button>

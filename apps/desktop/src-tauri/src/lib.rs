@@ -47,7 +47,10 @@ pub fn run() {
             update_settings,
             get_cached_scan,
             get_history,
-            get_providers
+            get_history_runs,
+            get_providers,
+            detect_scan_roots,
+            get_disk_free,
         ])
         .run(tauri::generate_context!())
         .expect("error while building tauri application");
@@ -72,10 +75,17 @@ fn setup_tray(app: &tauri::AppHandle) -> tauri::Result<()> {
     let scan = MenuItem::with_id(app, "scan", "Scan now", true, None::<&str>)?;
     let quit = MenuItem::with_id(app, "quit", "Quit DevClean", true, None::<&str>)?;
     let menu = Menu::with_items(app, &[&show, &scan, &quit])?;
-    let icon = tauri::image::Image::from_bytes(include_bytes!("../icons/32x32.png"))?;
+    // The app's own mark, not the default Tauri scaffold icon. The tray
+    // uses a macOS *template* image (black + alpha) so the menu bar
+    // recolours it for light/dark automatically; the 2x variant is what
+    // Retina displays actually sample.
+    // `tray.png` is authored as a macOS template image (black + alpha only);
+    // `icon_as_template` makes the system recolour it for light/dark menus.
+    let icon = tauri::image::Image::from_bytes(include_bytes!("../icons/tray.png"))?;
 
     TrayIconBuilder::with_id("main")
         .icon(icon)
+        .icon_as_template(true)
         .tooltip("DevClean")
         .menu(&menu)
         .show_menu_on_left_click(false)
