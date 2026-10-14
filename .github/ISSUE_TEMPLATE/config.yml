@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Report a security vulnerability
+    url: https://github.com/arief-fajri/devclean/security/advisories/new
+    about: Do not open a public issue for a safety bug. Anything that deletes or moves data it should not is P0.
+  - name: Question or idea
+    url: https://github.com/arief-fajri/devclean/discussions
+    about: For open-ended questions rather than a bug or a concrete request.

@@ -8,6 +8,9 @@ DevClean monitors disk-hungry development resources (Docker build cache,
 
 Stack: **Rust + Tauri 2 + Svelte 5 + Tailwind** (no React, no heavy UI kit).
 
+[![CI](https://github.com/arief-fajri/devclean/actions/workflows/ci.yml/badge.svg)](https://github.com/arief-fajri/devclean/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+
 ```text
 Disk usage
     ↓
@@ -28,17 +31,42 @@ opencode history     14.2 GB
 (Measured on the development machine, where `~/VOLANTIS` and `~/EXP` are
 auto-detected as scan roots.)
 
-## Quick start (5 minutes)
+## Install
+
+### Download
+
+Grab the `.dmg` from the [latest release][releases], open it, and drag DevClean
+to Applications.
+
+[releases]: https://github.com/arief-fajri/devclean/releases/latest
+
+> **First launch on macOS.** The build is not signed or notarized, so macOS
+> refuses to open it with *"Apple cannot check it for malicious software."*
+> That is expected. To open it once:
+>
+> - **Right-click** (or Control-click) DevClean in Applications → **Open** →
+>   **Open**, or
+> - `xattr -d com.apple.quarantine /Applications/DevClean.app`
+>
+> Either is needed once per machine. Signing and notarization need an Apple
+> Developer account; until then this is documented rather than hidden.
+
+### From source
 
 ```bash
-# 1. Prereqs: Rust 1.90+, Node 22+, Tauri CLI 2
+# Prereqs: Rust (pinned by rust-toolchain.toml), Node 22+, Tauri CLI 2
 cargo install tauri-cli --version "^2" --locked
 
-# 2. Backend + frontend deps
-cargo build -p devclean
-cd apps/desktop && npm install && cd ../..
+npm --prefix apps/desktop ci
+cargo tauri build
+# → apps/desktop/src-tauri/target/release/bundle/dmg/*.dmg
+```
 
-# 3. Run in dev mode
+## Development
+
+```bash
+cargo build -p devclean
+npm --prefix apps/desktop ci
 cargo tauri dev
 ```
 
@@ -49,7 +77,8 @@ cargo tauri dev
   providers without any setup (see below)
 - `cargo test --workspace` is green · `cargo clippy` has 0 warnings · `npm run check` has 0 errors
 
-Full details: [docs/development/developing.md](docs/development/developing.md).
+Full details: [docs/development/developing.md](docs/development/developing.md),
+and [CONTRIBUTING.md](CONTRIBUTING.md) for the rules a change has to follow.
 
 ## Platform support
 
@@ -84,6 +113,35 @@ devclean/
 ```
 
 One-way dependencies: `core ← providers ← scanner/cleanup ← src-tauri ← UI`.
+
+## Safety
+
+A tool that deletes files earns trust by what it refuses to do. DevClean:
+
+- **Moves to the Trash by default.** Permanent deletion is an explicit opt-out,
+  and a trashed item is recoverable until you empty it. The summary says what
+  moved rather than what was freed, because the space has not come back yet.
+- **Never touches your documents.** `/`, `~/Documents`, `~/Desktop`,
+  `~/Downloads`, `~/Pictures`, `~/Videos`, `~/.ssh`, `~/.gnupg` and `~/.config`
+  are refused from every direction — equal, inside, or ancestor.
+- **Never deletes outside your scan roots.** The roots widen where caches are
+  *found*; they never widen what may be *deleted*.
+- **Refuses what it cannot explain.** Every resource that cannot be cleaned
+  carries a reason (`retention`, `ai_read_only`, `privileged_required`,
+  `docker_scope`, `protected`), stamped at scan time and enforced by the
+  backend — not by a disabled checkbox.
+- **Leaves AI history alone unless asked.** Session transcripts and agent state
+  are shown with their sizes but stay unselectable until you enable them in
+  Settings.
+- **Never reports a number it did not measure.** `freed_bytes` is
+  `before − after`; when the after-state cannot be measured, the result says `0`
+  and why.
+- **Never runs a shell.** Cleanup subprocesses use fixed `(program, args)` pairs
+  declared by a provider, never anything derived from input.
+
+The design rationale is in [docs/security.md](docs/security.md); the reporting
+policy is in [SECURITY.md](SECURITY.md). A bug that deletes or moves data it
+should not is treated as P0.
 
 ## Ground rules (summary)
 
@@ -144,13 +202,27 @@ script never reads DevClean's state.
 
 New AI agents / developers start at [AGENTS.md](AGENTS.md).
 
-## MVP roadmap
+## Status
 
-- **M0** Foundation: workspace, Tauri+Svelte running, green CI ✅
-- **M1+M2** Scanner + safe cleanup ✅
-- **M3** Safety hardening + UX: timeouts, settings, history, tray ✅
-- **v0.5.0** Coverage + honest numbers: 14 providers, auto-detected scan roots,
-  age-based retention, AI history (opencode + Claude), configurable Docker
-  scope, backend-enforced confirmation ✅ (you are here)
+**`0.1.0` — public alpha, macOS only.** The product works end to end: it scans
+14 providers, reports sizes that match `du`, and cleans up recoverably. What is
+still missing is listed in the [roadmap](docs/development/roadmap.md); what has
+shipped is in the [changelog](CHANGELOG.md).
 
-See [docs/development/roadmap.md](docs/development/roadmap.md).
+Not yet done, and worth knowing before you rely on it:
+
+- **Git-aware classification.** Activity comes from filesystem mtime alone, and
+  nothing knows whether an artifact is committed.
+- **Broad ecosystem coverage.** Ruby, Flutter, Android and LLM model stores are
+  not scanned yet.
+- **A CLI.** There is no way to run this from cron or a script.
+- **Unsigned builds.** See [Install](#install).
+
+## Documentation
+
+- [docs/README.md](docs/README.md) — index of everything under `docs/`
+- [docs/development/roadmap.md](docs/development/roadmap.md) — what is next
+- [CHANGELOG.md](CHANGELOG.md) — what has shipped
+- [docs/reference/tauri-contract.md](docs/reference/tauri-contract.md) — the
+  public behaviour contract
+- [CONTRIBUTING.md](CONTRIBUTING.md) — how to build, test and contribute

@@ -1,0 +1,150 @@
+name: release
+
+# Manual on purpose. For a tool that deletes files, every tag is a support
+# statement — it should be a decision, not a side effect of a merge. The tag is
+# created first (and reviewed as a commit), then this workflow attaches
+# artifacts to it. It never creates the tag itself, so nothing is released that
+# nobody looked at.
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag to release (must already exist, e.g. v0.1.0)"
+        required: true
+        type: string
+      draft:
+        description: "Create the release as a draft"
+        required: false
+        type: boolean
+        default: true
+
+permissions:
+  contents: write # required to create the release; the default is read
+
+jobs:
+  # Do not trust that main was green. The tag is what ships, so verify the tag.
+  verify:
+    name: verify ${{ inputs.tag }}
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag }}
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.90"
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: apps/desktop/package-lock.json
+
+      - name: Confirm the tag matches the declared versions
+        run: |
+          set -euo pipefail
+          TAG="${{ inputs.tag }}"
+          CARGO=$(grep -m1 '^version' Cargo.toml | sed 's/.*"\(.*\)".*/\1/')
+          TAURI=$(python3 -c "import json;print(json.load(open('apps/desktop/src-tauri/tauri.conf.json'))['version'])")
+          echo "tag=$TAG cargo=$CARGO tauri=$TAURI"
+          if [ "v$CARGO" != "$TAG" ] || [ "$CARGO" != "$TAURI" ]; then
+            echo "::error::tag $TAG does not match Cargo.toml ($CARGO) / tauri.conf.json ($TAURI)"
+            exit 1
+          fi
+
+      - run: cargo fmt --all -- --check
+      - run: cargo clippy --workspace --all-targets -- -D warnings
+      - run: cargo test --workspace
+      - run: npm ci
+        working-directory: apps/desktop
+      - run: npm run check
+        working-directory: apps/desktop
+      - run: npm test
+        working-directory: apps/desktop
+
+  build:
+    name: build .app + .dmg
+    needs: verify
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag }}
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.90"
+      - uses: Swatinem/rust-cache@v2
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: apps/desktop/package-lock.json
+
+      # `cargo tauri build` runs `beforeBuildCommand: npm run build`, so the
+      # frontend deps must exist before it starts.
+      - run: npm ci
+        working-directory: apps/desktop
+
+      - uses: tauri-apps/tauri-action@v0
+        id: tauri
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          # No signing identity or notarization credentials are configured, so
+          # the build is unsigned by design. The README documents the one-time
+          # Gatekeeper step this requires.
+          projectPath: apps/desktop
+          args: --bundles app,dmg
+
+      - name: Checksums
+        run: |
+          set -euo pipefail
+          cd apps/desktop/src-tauri/target/release/bundle
+          find . -type f \( -name '*.dmg' -o -name '*.app.tar.gz' \) -print0 \
+            | xargs -0 shasum -a 256 > SHA256SUMS
+          cat SHA256SUMS
+
+      - name: Stage artifacts
+        run: |
+          set -euo pipefail
+          mkdir -p dist-artifacts
+          cp apps/desktop/src-tauri/target/release/bundle/dmg/*.dmg dist-artifacts/
+          cp apps/desktop/src-tauri/target/release/bundle/SHA256SUMS dist-artifacts/
+          # The .app bundle as a zip, for people who prefer not to mount a dmg.
+          ditto -c -k --sequesterRsrc --keepParent \
+            apps/desktop/src-tauri/target/release/bundle/macos/DevClean.app \
+            "dist-artifacts/DevClean_${{ inputs.tag }}_aarch64.app.zip"
+          ls -la dist-artifacts
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: devclean-${{ inputs.tag }}
+          path: dist-artifacts/*
+          if-no-files-found: error
+
+  publish:
+    name: publish release
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag }}
+      - uses: actions/download-artifact@v4
+        with:
+          name: devclean-${{ inputs.tag }}
+          path: dist-artifacts
+
+      # gh is preinstalled on GitHub runners, so no third-party release action
+      # is needed. --verify-tag refuses to create a release for a tag that does
+      # not exist, which is the whole point of the manual flow.
+      - name: Create the release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          ARGS=(--verify-tag --title "${{ inputs.tag }}" --generate-notes)
+          if [ "${{ inputs.draft }}" = "true" ]; then ARGS+=(--draft); fi
+          gh release create "${{ inputs.tag }}" "${ARGS[@]}" dist-artifacts/*

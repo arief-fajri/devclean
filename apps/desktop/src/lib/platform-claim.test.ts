@@ -1,4 +1,4 @@
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 
@@ -95,5 +95,53 @@ describe("G-PUB-01 — platform claims match reality", () => {
   it("runs the Rust tests on more than one runner", () => {
     const runners = [...ci.matchAll(/runs-on:\s*(\S+)/g)].map((m) => m[1]);
     expect(runners.length).toBeGreaterThanOrEqual(2);
+  });
+});
+
+describe("G-PUB-04 — README screenshots come from the fixture", () => {
+  const readme = read("README.md");
+
+  it("finds the README it is meant to check (the guard must not pass vacuously)", () => {
+    expect(readme.length).toBeGreaterThan(100);
+  });
+
+  it("references no image outside demo/", () => {
+    // A screenshot of a real machine leaks project names and sizes into a
+    // public repository. Anything the README shows must come from
+    // `demo/make-fixture.sh`, so the only accepted LOCAL image path is `demo/`.
+    //
+    // Absolute URLs are badges (shields.io), not screenshots — they render
+    // live and contain no local data.
+    const images = [...readme.matchAll(/!\[[^\]]*\]\(([^)]+)\)/g)]
+      .map((m) => m[1])
+      .filter((src) => !/^https?:\/\//.test(src));
+    const outsideDemo = images.filter((src) => !src.startsWith("demo/"));
+    expect(
+      outsideDemo,
+      `these images are not from demo/: ${outsideDemo.join(", ")}`,
+    ).toEqual([]);
+  });
+
+  it("references only images that exist on disk", () => {
+    // A README that points at a file nobody generated renders a broken image.
+    // This also means the README cannot be updated to show screenshots until
+    // they have actually been produced by `demo/make-fixture.sh`.
+    const images = [...readme.matchAll(/!\[[^\]]*\]\(([^)]+)\)/g)]
+      .map((m) => m[1])
+      .filter((src) => !/^https?:\/\//.test(src));
+    for (const src of images) {
+      const onDisk = resolve(ROOT, src);
+      expect(existsSync(onDisk), `README references ${src}, which does not exist`).toBe(true);
+    }
+  });
+
+  it("keeps the fixture script that produces them", () => {
+    const script = read("demo/make-fixture.sh");
+    expect(script).toContain("build_node_project");
+    expect(script).toContain("build_rust_project");
+    expect(script).toContain("build_python_project");
+    // The virtualenv must stay present in the fixture: it is the false
+    // positive the scan is supposed to skip.
+    expect(script).toContain(".venv");
   });
 });

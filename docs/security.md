@@ -1,8 +1,12 @@
-# Security (safety is a core feature)
+# Security design (safety is a core feature)
 
 > DevClean can delete data. Security here means one thing: making sure the
 > Clean button never deletes what it shouldn't. Read alongside the G-SAFE-*
 > guardrails.
+>
+> **This file is the design rationale.** The reporting policy — what counts as
+> a vulnerability, how to report one, and response times — is in
+> [SECURITY.md](../SECURITY.md).
 
 ## Threat model (summary)
 
@@ -149,8 +153,9 @@ check is not needed for safety — SQLite's `DELETE` and `VACUUM` are both
 transactional, so a damaged database fails the operation and leaves the
 original file untouched.
 
-## Reporting a safety issue
+## Reporting
 
-A safety bug is P0. Never fix it silently: classify it (C — missing
-guardrail, if a forbidden state was reached), add a guardrail + test, and
-record it in the PR.
+See [SECURITY.md](../SECURITY.md) for how to report a vulnerability and what
+counts as one. The short version for maintainers: a safety bug is P0, never
+fixed silently, and always ships with a guardrail that has a real enforcement
+mechanism.

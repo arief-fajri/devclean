@@ -105,6 +105,12 @@ G-PUB-01  A platform claim in README.md must be backed by CI, and
            tauri.conf.json must build no artifact for an untested platform.
            Enforcement: test — apps/desktop/src/lib/platform-claim.test.ts ✅ ·
            CI — the frontend job runs `npm test` ✅
+G-PUB-04  Every local image in README.md comes from `demo/` and exists on disk.
+           A screenshot of a real machine leaks project names and sizes into a
+           public repository; a reference to a file nobody generated renders a
+           broken image.
+           Enforcement: test — platform-claim.test.ts ·
+           script — demo/make-fixture.sh produces the environment ✅
 ```
 
 ## 6. UI (G-UI)

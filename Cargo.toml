@@ -9,7 +9,7 @@ members = [
 version = "0.1.0"
 edition = "2021"
 license = "MIT"
-authors = ["DevClean Developers"]
+authors = ["Arief Fajri"]
 
 [workspace.dependencies]
 serde = { version = "1", features = ["derive"] }

@@ -1,0 +1,60 @@
+name: Feature request
+description: Suggest a capability, a provider, or a change
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Before opening: the [roadmap](https://github.com/arief-fajri/devclean/blob/main/docs/development/roadmap.md)
+        lists what is already planned, and its **Non-goals** section lists what
+        this project will deliberately not do. A request that matches a non-goal
+        will be closed with a link to it.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem does this solve?
+      description: |
+        Describe the situation, not the solution. "My Ruby projects' vendor
+        directories are never found" is more useful than "add a Ruby provider".
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: What would you like to happen?
+    validations:
+      required: true
+
+  - type: dropdown
+    id: kind
+    attributes:
+      label: What kind of change is this?
+      options:
+        - A new provider (a new ecosystem or cache to scan)
+        - A new capability on an existing provider
+        - A change to the interface
+        - Something else
+    validations:
+      required: true
+
+  - type: textarea
+    id: reclaimable
+    attributes:
+      label: If this is a new provider, how much does it reclaim?
+      description: |
+        Rough sizes on a real machine help prioritise. A provider that finds
+        200 MB is a different proposal from one that finds 20 GB.
+    validations:
+      required: false
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Before submitting
+      options:
+        - label: I checked the roadmap and its non-goals
+          required: true
+        - label: I searched existing issues
+          required: true

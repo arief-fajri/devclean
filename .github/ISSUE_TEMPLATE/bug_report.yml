@@ -1,0 +1,90 @@
+name: Bug report
+description: Something is broken, wrong, or misleading
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        **Is this a safety bug?** If DevClean deleted, moved or offered to delete
+        something it should not have, do **not** open an issue — report it
+        privately via [SECURITY.md](https://github.com/arief-fajri/devclean/blob/main/SECURITY.md).
+        A bug that reaches data is treated as P0.
+
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: What you did, and what DevClean did instead.
+      placeholder: |
+        I clicked "Scan now" and the Docker row showed 0 B, but `docker system df`
+        reports 8 GB of build cache.
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: What you expected
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: DevClean version
+      description: Shown in the app, or the tag you built from.
+      placeholder: "0.1.0"
+    validations:
+      required: true
+
+  - type: input
+    id: macos
+    attributes:
+      label: macOS version
+      placeholder: "15.1 (Sequoia)"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: install
+    attributes:
+      label: How did you install it?
+      options:
+        - Downloaded the .dmg from Releases
+        - Built from source (cargo tauri build)
+        - Running in dev mode (cargo tauri dev)
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Log output
+      description: |
+        The full output of `cargo tauri dev`, or Console.app filtered to
+        "DevClean" for a release build. Please include it — most issues here are
+        diagnosable from the log alone.
+      render: shell
+    validations:
+      required: false
+
+  - type: textarea
+    id: settings
+    attributes:
+      label: Anything non-default in Settings?
+      description: |
+        Scan roots, retention, Docker scope, privileged operations, AI cleanup.
+        Several bugs in this project have been a setting that did not do what it
+        said, so this is worth stating even if it looks unrelated.
+    validations:
+      required: false
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Before submitting
+      options:
+        - label: I searched existing issues
+          required: true
+        - label: This is not a safety bug (those go through SECURITY.md)
+          required: true
