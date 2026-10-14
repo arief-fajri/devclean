@@ -290,7 +290,7 @@
     </p>
   </div>
 {:else}
-  <p class="mt-2 text-center text-sm text-zinc-500" role="status">
+  <p class="mt-2 text-center text-sm text-zinc-500 flex items-center justify-center" style="height: calc(100% - 200px);" role="status">
     {scanStatus ?? "Starting scan…"}
   </p>
 {/if}
