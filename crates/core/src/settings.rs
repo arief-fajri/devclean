@@ -198,7 +198,7 @@ mod tests {
     }
 
     /// Regression: a v0.4.x settings file with `scan_roots: []` kept the
-    /// app permanently blind to `~/VOLANTIS` and `~/EXP`, because the file
+    /// app permanently blind to the user's dev folders, because the file
     /// shadowed the default list forever.
     #[test]
     fn empty_scan_roots_are_reseeded_from_defaults() {

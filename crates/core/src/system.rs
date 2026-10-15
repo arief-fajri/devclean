@@ -35,8 +35,6 @@ const DEV_FOLDER_NAMES: &[&str] = &[
     "Repos",
     "Src",
     "Work",
-    "VOLANTIS",
-    "EXP",
 ];
 
 /// Default roots DevClean scans: well-known dev folders under `$HOME`,
@@ -83,6 +81,16 @@ pub fn detect_scan_roots(configured: &[std::path::PathBuf]) -> Vec<ScanRootCandi
     let Some(home) = home_dir() else {
         return Vec::new();
     };
+    detect_scan_roots_in(&home, configured)
+}
+
+/// [`detect_scan_roots`] against an explicit home directory. Taking the home
+/// as an argument is what lets the tests run against a fixture instead of
+/// whatever happens to be in the developer's `$HOME` (G-CI-03).
+fn detect_scan_roots_in(
+    home: &std::path::Path,
+    configured: &[std::path::PathBuf],
+) -> Vec<ScanRootCandidate> {
     let mut out = Vec::new();
 
     // Depth 1: the well-known names, always worth showing.
@@ -94,7 +102,7 @@ pub fn detect_scan_roots(configured: &[std::path::PathBuf]) -> Vec<ScanRootCandi
     }
 
     // Depth 2: anything that looks like a project collection.
-    let Ok(entries) = std::fs::read_dir(&home) else {
+    let Ok(entries) = std::fs::read_dir(home) else {
         return sort_candidates(out);
     };
     for e in entries.flatten() {
@@ -284,9 +292,9 @@ mod tests {
     }
 
     /// Regression: the old list was `Projects, Code, Workspace` only. On a
-    /// machine whose work lives in `~/VOLANTIS` and `~/EXP`, that produced
-    /// an EMPTY root list, so every root-driven provider (node_modules,
-    /// rust_target, python_cache) found nothing at all.
+    /// machine whose work lives in a dev folder outside those three, that
+    /// produced an EMPTY root list, so every root-driven provider
+    /// (node_modules, rust_target, python_cache) found nothing at all.
     #[test]
     fn default_roots_cover_the_common_dev_folder_names() {
         let roots = default_scan_roots();
@@ -322,22 +330,31 @@ mod tests {
         }
     }
 
+    /// Runs against a fixture home, not the machine's own. The earlier version
+    /// looked for `~/VOLANTIS` and returned early when it was absent, so on CI
+    /// it asserted nothing at all (G-CI-03).
     #[test]
     fn detect_marks_already_configured_roots() {
-        let volantis = home().join("VOLANTIS");
-        if !volantis.is_dir() {
-            return; // nothing to assert on this machine
-        }
-        let found = detect_scan_roots(std::slice::from_ref(&volantis));
+        let home = std::env::temp_dir().join(format!("devclean-detect-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&home);
+        let project = home.join("Projects").join("web");
+        std::fs::create_dir_all(&project).unwrap();
+        std::fs::write(project.join("package.json"), "{}").unwrap();
+
+        let configured = home.join("Projects");
+        let found = detect_scan_roots_in(&home, std::slice::from_ref(&configured));
         let c = found
             .iter()
-            .find(|c| c.path == volantis)
-            .expect("~/VOLANTIS must be offered");
+            .find(|c| c.path == configured)
+            .expect("~/Projects must be offered");
         assert!(c.already_configured);
+
         // …and the same path is NOT marked when it is not configured.
-        let found = detect_scan_roots(&[]);
-        let c = found.iter().find(|c| c.path == volantis).unwrap();
+        let found = detect_scan_roots_in(&home, &[]);
+        let c = found.iter().find(|c| c.path == configured).unwrap();
         assert!(!c.already_configured);
+
+        let _ = std::fs::remove_dir_all(&home);
     }
 
     #[test]

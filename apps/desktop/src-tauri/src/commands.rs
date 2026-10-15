@@ -565,7 +565,8 @@ pub fn get_history(
 
 /// Candidate scan roots discovered under `$HOME`, largest cache first.
 /// Backs the Settings "Detect folders" button: a machine whose work lives
-/// in `~/VOLANTIS` must never have to have that path typed by hand.
+/// in a dev folder outside the well-known names must never have to have that
+/// path typed by hand.
 /// Read-only and bounded — it never walks into a cache marker.
 #[tauri::command]
 pub async fn detect_scan_roots(
