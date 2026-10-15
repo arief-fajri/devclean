@@ -22,6 +22,12 @@ Capturing the screen needs the macOS **Screen Recording** permission, and a
 process that lacks it fails with `could not create image from display`. There is
 no way around that from a script, so the capture is a two-command manual step.
 
+The fixture is about **950 MB** and takes ~20 seconds to build. Docker is
+disabled in its settings: those providers query the daemon rather than a path,
+so a scan under the fixture would report the *real* machine's Docker figures —
+16.7 GB here, enough to dominate the dashboard and make every other provider
+look like a rounding error.
+
 ## Procedure
 
 ```bash
@@ -36,8 +42,9 @@ demo/make-fixture.sh run
 #      to capture the window rather than a region)
 
 # 3. Save as:
-#      demo/overview.png
-#      demo/confirm.png
+#      demo/overview.png    the dashboard
+#      demo/confirm.png     the confirmation dialog (select items first)
+#      demo/settings.png    Settings
 
 # 4. Tear the fixture down
 demo/make-fixture.sh clean
@@ -45,11 +52,8 @@ demo/make-fixture.sh clean
 
 ## Wiring them into the README
 
-Add the two images to the README, e.g. after the opening paragraph:
-
-```markdown
-![DevClean overview](demo/overview.png)
-```
+The three images are already referenced. `G-PUB-04` asserts two things and will
+fail the build if either is violated:
 
 `G-PUB-04` asserts two things and will fail the build if either is violated:
 

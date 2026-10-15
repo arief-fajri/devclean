@@ -97,26 +97,44 @@ jobs:
           # Gatekeeper step this requires.
           projectPath: apps/desktop
           args: --bundles app,dmg
+          # Packaging a .dmg on CI is the flakiest step in this pipeline, and a
+          # failure costs the whole ~10 minute build. The action retries the
+          # build (and the upload) rather than the job.
+          retryAttempts: 2
 
-      - name: Checksums
-        run: |
-          set -euo pipefail
-          cd apps/desktop/src-tauri/target/release/bundle
-          find . -type f \( -name '*.dmg' -o -name '*.app.tar.gz' \) -print0 \
-            | xargs -0 shasum -a 256 > SHA256SUMS
-          cat SHA256SUMS
-
+      # Stage first, checksum second. The checksum file must describe exactly
+      # what is uploaded: an earlier version hashed everything under `bundle/`
+      # — including the `.app.tar.gz` the action creates — while staging copied
+      # only the `.dmg` and a separate `ditto` zip. The result listed a file
+      # that was not in the release and omitted one that was.
       - name: Stage artifacts
         run: |
           set -euo pipefail
+          BUNDLE=apps/desktop/src-tauri/target/release/bundle
           mkdir -p dist-artifacts
-          cp apps/desktop/src-tauri/target/release/bundle/dmg/*.dmg dist-artifacts/
-          cp apps/desktop/src-tauri/target/release/bundle/SHA256SUMS dist-artifacts/
-          # The .app bundle as a zip, for people who prefer not to mount a dmg.
-          ditto -c -k --sequesterRsrc --keepParent \
-            apps/desktop/src-tauri/target/release/bundle/macos/DevClean.app \
-            "dist-artifacts/DevClean_${{ inputs.tag }}_aarch64.app.zip"
+
+          cp "$BUNDLE"/dmg/*.dmg dist-artifacts/
+          # The action has already packaged the .app as a .tar.gz; reuse it
+          # rather than making a second archive of the same thing.
+          cp "$BUNDLE"/macos/*.app.tar.gz dist-artifacts/
+
           ls -la dist-artifacts
+
+      - name: Checksums over exactly what is uploaded
+        working-directory: dist-artifacts
+        run: |
+          set -euo pipefail
+          # Everything staged, except the checksum file being written — `*`
+          # would match it on a re-run and hash the file into itself. This is
+          # the same set `upload-artifact` sends, so the two cannot drift.
+          find . -maxdepth 1 -type f ! -name SHA256SUMS -print0 \
+            | sort -z \
+            | xargs -0 shasum -a 256 > SHA256SUMS
+          cat SHA256SUMS
+          # A checksum file listing fewer than two artifacts means staging
+          # produced nothing, which must fail loudly rather than publish an
+          # empty release.
+          test "$(wc -l < SHA256SUMS)" -ge 2
 
       - uses: actions/upload-artifact@v4
         with:

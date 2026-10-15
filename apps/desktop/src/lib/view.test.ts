@@ -33,7 +33,7 @@ function summary(): ScanSummary {
   return {
     total_bytes: 1000,
     reclaimable_bytes: 900,
-    retention_blocked_bytes: 0,
+    blocked_bytes: 0,
     providers: [
       { provider: "docker", name: "Docker", total_bytes: 500, reclaimable_bytes: 500, resource_count: 1 },
       { provider: "go_cache", name: "Go cache", total_bytes: 400, reclaimable_bytes: 400, resource_count: 2 },
@@ -234,7 +234,7 @@ describe("topProviders", () => {
     return {
       total_bytes: 1000,
       reclaimable_bytes: providers.reduce((a, p) => a + p.reclaimable_bytes, 0),
-      retention_blocked_bytes: 0,
+      blocked_bytes: 0,
       providers,
       resources: [],
     };

@@ -77,7 +77,7 @@ mod tests {
 
     fn summary() -> ScanSummary {
         ScanSummary {
-            retention_blocked_bytes: 0,
+            blocked_bytes: 0,
             total_bytes: 10,
             reclaimable_bytes: 10,
             providers: vec![],
@@ -144,7 +144,7 @@ mod tests {
         let path = cache_path("v1");
         let _ = std::fs::remove_file(&path);
         let v1 = r#"{"version":1,"roots":[],"saved_at_unix":0,"summary":{
-            "total_bytes":10,"reclaimable_bytes":10,"retention_blocked_bytes":0,
+            "total_bytes":10,"reclaimable_bytes":10,"blocked_bytes":0,
             "providers":[],"resources":[]}}"#;
         std::fs::write(&path, v1).unwrap();
         assert!(

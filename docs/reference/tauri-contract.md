@@ -75,8 +75,9 @@ interface ProviderSummary { provider: string; name: string; total_bytes: number;
 
 interface ScanSummary { total_bytes: number; reclaimable_bytes: number;
   providers: ProviderSummary[]; resources: Resource[];
-  /** Bytes held back by the retention policy, reported separately. */
-  retention_blocked_bytes: number }
+  /** Bytes the backend will refuse to clean, for ANY reason — retention,
+   *  AI report-only, privileged opt-in, Docker scope, git protection. */
+  blocked_bytes: number }
 
 interface CleanupPreviewItem { resource_id: string; name: string; bytes: number;
   safety: SafetyLevel; warning?: string }
@@ -227,7 +228,7 @@ is no destructive item — see G-UI-02 in `docs/development/methodology/guardrai
     (breaking to the type; nothing else consumed the old field).
   - **`retention_eligible` was never set to `false` in production code**, so
     `Settings.retention_days` had no effect on any cleanup and
-    `ScanSummary.retention_blocked_bytes` was permanently zero. Measured after
+    `ScanSummary.blocked_bytes` was permanently zero. Measured after
     the fix with a 10-year policy: **106/106 resources blocked, 69.6 GB held
     back**; before it, the same policy blocked **zero**.
   - `+Settings.ai_cleanup_enabled: boolean` (additive, `#[serde(default)]` →
@@ -299,7 +300,7 @@ is no destructive item — see G-UI-02 in `docs/development/methodology/guardrai
   `preview_token?`. **Events:** `+scan_provider_started`.
   **Types (all additive, `#[serde(default)]` so older `settings.json` and
   scan caches still load):** `Resource.age_days`, `Resource.retention_eligible`,
-  `ScanSummary.retention_blocked_bytes`, `CleanupPreview.preview_token` +
+  `ScanSummary.blocked_bytes`, `CleanupPreview.preview_token` +
   `expires_at_unix`, `Settings.retention_days`, `Settings.docker_prune_scope`,
   `Settings.sqlite_backup`.
   **Behaviour:** measured `freed_bytes`; monotonic `scan_progress.done`;

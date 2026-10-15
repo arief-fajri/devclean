@@ -331,7 +331,7 @@ pub fn from_summary(summary: &ScanSummary, age: String, disk: &DiskFree) -> Tray
         .map(|p| (p.provider.clone(), p.name.clone(), p.reclaimable_bytes))
         .collect();
 
-    let kept = summary.retention_blocked_bytes;
+    let kept = summary.blocked_bytes;
     let headline = if kept > 0 {
         format!(
             "{} reclaimable · {} kept",
@@ -505,7 +505,7 @@ mod tests {
         ScanSummary {
             total_bytes: 1_000,
             reclaimable_bytes: providers.iter().map(|p| p.2).sum(),
-            retention_blocked_bytes: kept,
+            blocked_bytes: kept,
             providers: providers
                 .into_iter()
                 .map(|(id, name, bytes)| ProviderSummary {

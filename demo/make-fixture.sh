@@ -19,12 +19,11 @@
 # Screenshots are taken by hand (see docs/operations/screenshots.md); this
 # script only produces the environment they are taken in.
 #
-# One exception to the isolation: Docker has no filesystem path — its providers
-# query the daemon over `docker system df`. A scan under this fixture therefore
-# reports the REAL machine's Docker figures. That is harmless (image sizes are
-# not personal) but it does mean the fixture is hermetic for everything except
-# Docker. Set `disabled_providers: ["docker", "docker_pruned"]` in the fixture
-# settings if you need a fully hermetic run.
+# Docker is disabled in the fixture's settings. Its providers query the daemon
+# over `docker system df` rather than a path, so a scan under this fixture would
+# report the REAL machine's Docker figures — which on this machine is 16.7 GB
+# of images, enough to dominate the dashboard and make every other provider
+# look like a rounding error. The screenshot is meant to show the fixture.
 
 set -euo pipefail
 
@@ -33,8 +32,12 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 # A believable amount of content, small enough to create in seconds. Real
 # sizes are not the point — the layout and the categories are.
-FILE_COUNT="${DEVCLEAN_FIXTURE_FILES:-40}"
-FILE_SIZE_KB="${DEVCLEAN_FIXTURE_FILE_KB:-256}"
+# Sized so the dashboard shows a realistic shape — hundreds of MB spread over
+# several providers — rather than a few MB per row. `mkfile` allocates real
+# blocks on APFS, so this is real disk: about 1.4 GB and a few seconds to build.
+# Override both to shrink it.
+FILE_COUNT="${DEVCLEAN_FIXTURE_FILES:-100}"
+FILE_SIZE_KB="${DEVCLEAN_FIXTURE_FILE_KB:-512}"
 
 log()  { printf '[fixture] %s\n' "$*"; }
 
@@ -181,7 +184,7 @@ build_settings() {
   "allow_privileged_operations": false,
   "scan_automatically": false,
   "theme": "light",
-  "disabled_providers": [],
+  "disabled_providers": ["docker", "docker_pruned"],
   "retention_days": null,
   "docker_prune_scope": "build-cache",
   "sqlite_backup": false,

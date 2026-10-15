@@ -25,9 +25,8 @@
     safeBytes: number;
     safeCategories: number;
     reviewCategories: number;
-    /** Bytes held back by the retention policy. */
-    retentionBlocked: number;
-    retentionDays: number | null;
+    /** Bytes the backend will refuse to clean, for any reason. */
+    blockedBytes: number;
     onScan: () => void;
     onCancelScan: () => void;
   }
@@ -49,8 +48,7 @@
     safeBytes,
     safeCategories,
     reviewCategories,
-    retentionBlocked,
-    retentionDays,
+    blockedBytes,
     onScan,
     onCancelScan,
   }: Props = $props();
@@ -90,16 +88,17 @@
     </div>
   </div>
 
-  {#if retentionBlocked > 0}
+  {#if blockedBytes > 0}
     <div
       class="mt-4 flex flex-wrap items-center gap-2 rounded-lg bg-zinc-100 px-3 py-2 text-xs dark:bg-zinc-800"
-      data-testid="retention-blocked"
+      data-testid="blocked-bytes"
     >
       <span class="font-medium text-zinc-700 dark:text-zinc-300">
-        {formatBytes(retentionBlocked)} held by your {retentionDays ?? 0}-day retention
+        {formatBytes(blockedBytes)} held back
       </span>
       <span class="text-zinc-500">
-        — those items are shown but cannot be selected for cleanup.
+        — shown so you can see it exists, but not selectable. Each item says why, and
+        the fix is in Settings.
       </span>
     </div>
   {/if}

@@ -11,25 +11,25 @@ Stack: **Rust + Tauri 2 + Svelte 5 + Tailwind** (no React, no heavy UI kit).
 [![CI](https://github.com/arief-fajri/devclean/actions/workflows/ci.yml/badge.svg)](https://github.com/arief-fajri/devclean/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-```text
-Disk usage
-    ↓
-DevClean scan
-    ↓
-82.6 GB reclaimable
+![DevClean overview](demo/overview.png)
 
+<sub>The screenshots are generated from a fixture home by
+[`demo/make-fixture.sh`](demo/make-fixture.sh) — realistic output, no real
+project names or sizes. See
+[docs/operations/screenshots.md](docs/operations/screenshots.md).</sub>
+
+On a real machine the numbers are much larger. The development machine this was
+built on reports **82.6 GB** reclaimable across `~/VOLANTIS` and `~/EXP`, which
+it auto-detects as scan roots:
+
+```text
 node_modules         14.8 GB
 Rust target          18.7 GB
 Docker images/vol    16.7 GB
 Go cache              8.4 GB
 System caches         5.8 GB
 opencode history     14.2 GB
-    ↓
-[ Review & clean selected ]
 ```
-
-(Measured on the development machine, where `~/VOLANTIS` and `~/EXP` are
-auto-detected as scan roots.)
 
 ## Install
 
@@ -139,6 +139,11 @@ A tool that deletes files earns trust by what it refuses to do. DevClean:
 - **Never runs a shell.** Cleanup subprocesses use fixed `(program, args)` pairs
   declared by a provider, never anything derived from input.
 
+![The confirmation dialog](demo/confirm.png)
+
+<sub>Nothing is deleted until you acknowledge the list. Sizes are re-measured at
+this moment, because the numbers from the scan can go stale.</sub>
+
 The design rationale is in [docs/security.md](docs/security.md); the reporting
 policy is in [SECURITY.md](SECURITY.md). A bug that deletes or moves data it
 should not is treated as P0.
@@ -217,6 +222,11 @@ Not yet done, and worth knowing before you rely on it:
   not scanned yet.
 - **A CLI.** There is no way to run this from cron or a script.
 - **Unsigned builds.** See [Install](#install).
+
+![Settings](demo/settings.png)
+
+<sub>Four tabs, and every provider can be switched off. A tool that is not
+installed simply reports nothing.</sub>
 
 ## Documentation
 

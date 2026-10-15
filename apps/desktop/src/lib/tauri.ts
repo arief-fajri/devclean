@@ -65,7 +65,7 @@ export interface ScanSummary {
   resources: Resource[];
   /** Bytes held back by the retention policy — reported separately so the
    * headline number never silently shrinks. */
-  retention_blocked_bytes: number;
+  blocked_bytes: number;
 }
 
 export interface CleanupPreviewItem {

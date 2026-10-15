@@ -161,11 +161,19 @@ pub struct ScanSummary {
     pub reclaimable_bytes: u64,
     pub providers: Vec<ProviderSummary>,
     pub resources: Vec<Resource>,
-    /// Bytes held back by the active retention policy. Reported separately
-    /// so the dashboard can say "12.4 GB reclaimable · 3.1 GB kept" instead
-    /// of silently shrinking the headline (I9).
+    /// Bytes the backend will refuse to clean, for ANY reason — retention,
+    /// AI report-only, a missing privileged opt-in, the Docker scope, git
+    /// protection. Reported separately so the dashboard can say
+    /// "12.4 GB reclaimable · 3.1 GB held back" instead of silently shrinking
+    /// the headline (I9, I11).
+    ///
+    /// Named `blocked_bytes`, not `retention_blocked_bytes`: it was the latter
+    /// while it already summed every reason, and the dashboard rendered it as
+    /// "held by your N-day retention". On a machine with no retention policy
+    /// at all that read "16.7 GB held by your 0-day retention" — for 16.7 GB
+    /// of Docker images held back by the privileged opt-in.
     #[serde(default)]
-    pub retention_blocked_bytes: u64,
+    pub blocked_bytes: u64,
 }
 
 /// One line of a cleanup preview (shown in the confirmation dialog).

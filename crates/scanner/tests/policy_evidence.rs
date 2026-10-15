@@ -2,7 +2,7 @@
 //!
 //! Before v0.8.0, `Settings.retention_days` had no effect on any cleanup: the
 //! backing field was never set to `false` anywhere in production code, so
-//! `retention_blocked_bytes` summed a filter that could never match. These
+//! `blocked_bytes` summed a filter that could never match. These
 //! tests prove the scan now stamps a reason from the live policy.
 //!
 //! ## Why every provider here is a stub
@@ -130,7 +130,7 @@ async fn the_ai_gate_reaches_the_scan() {
         "a blocked resource must explain itself"
     );
     assert_eq!(
-        s.retention_blocked_bytes, 1024,
+        s.blocked_bytes, 1024,
         "held-back bytes must be reported separately, not silently dropped"
     );
 
@@ -143,7 +143,7 @@ async fn the_ai_gate_reaches_the_scan() {
         s.resources[0].blocked_reason, None,
         "enabling AI cleanup must make it selectable"
     );
-    assert_eq!(s.retention_blocked_bytes, 0);
+    assert_eq!(s.blocked_bytes, 0);
 }
 
 /// The regression this whole module exists for: a retention policy that had no

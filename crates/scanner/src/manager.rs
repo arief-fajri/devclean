@@ -299,7 +299,7 @@ fn aggregate(resources: Vec<Resource>) -> ScanSummary {
     ScanSummary {
         total_bytes: resources.iter().map(|r| r.size_bytes).sum(),
         reclaimable_bytes: resources.iter().map(|r| r.reclaimable_bytes).sum(),
-        retention_blocked_bytes: resources
+        blocked_bytes: resources
             .iter()
             .filter(|r| r.blocked_reason.is_some())
             .map(|r| r.reclaimable_bytes)

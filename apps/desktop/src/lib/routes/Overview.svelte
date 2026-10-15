@@ -121,8 +121,7 @@
     {safeBytes}
     safeCategories={categoryCounts.safe}
     reviewCategories={categoryCounts.review}
-    retentionBlocked={scanStore.summary.retention_blocked_bytes}
-    retentionDays={settingsStore.settings?.retention_days ?? null}
+    blockedBytes={scanStore.summary.blocked_bytes}
     onScan={() => scanStore.start()}
     onCancelScan={() => scanStore.cancel()}
   />

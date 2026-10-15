@@ -72,6 +72,28 @@ were disabled.
   **106 of 106 resources** are blocked (96 by retention, 10 by AI report-only),
   holding back 69.6 GB. Before the fix the same policy blocked **zero**.
 
+## Correction: the aggregate was named after one of its reasons
+
+`ScanSummary.retention_blocked_bytes` summed every resource carrying a
+`blocked_reason` — but it was named for retention, and the dashboard rendered
+it as *"X held by your N-day retention"*. With no retention policy configured
+the summary read:
+
+```text
+16.7 GB held by your 0-day retention
+```
+
+for 16.7 GB of Docker images held back by the *privileged opt-in*. The number
+was right; the sentence was wrong, and it pointed the user at a setting that
+would not have changed anything.
+
+Renamed to `blocked_bytes`, and the dashboard now says "held back" without
+naming a cause — the per-resource badge already names one for each item.
+
+Found by taking a screenshot, which is a reminder that a rendered sentence can
+be wrong in a way no assertion about the number catches. `blocked_reason` had
+tests for every gate; nothing tested what the *summary* claimed they were.
+
 ## Rejected alternatives
 
 - **Keep the boolean and add the missing assignment.** Rejected: it would fix

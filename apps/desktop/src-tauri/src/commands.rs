@@ -660,7 +660,7 @@ mod preview_deadline_tests {
         let summary = ScanSummary {
             total_bytes: 10,
             reclaimable_bytes: 10,
-            retention_blocked_bytes: 0,
+            blocked_bytes: 0,
             providers: vec![devclean_core::ProviderSummary {
                 provider: "node_modules".into(),
                 name: "node_modules".into(),
