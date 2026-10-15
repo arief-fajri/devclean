@@ -2,7 +2,7 @@
 
 > The single document defining what the frontend may see. Changing this file
 > = changing the contract → requires human approval (Level B) + a regression
-> test. Version: **v0.8.0 (honest sizes, recoverable deletes, real gates)**.
+> test. Version: **v0.9.0 (cache-first startup)**.
 
 ## Commands (15)
 
@@ -17,7 +17,7 @@
 | `cancel_cleanup` | — | `()` | Cancels the remaining queue; the in-flight item finishes |
 | `get_settings` | — | `Settings` | Loaded from disk at startup; empty `scan_roots` are re-seeded from the defaults |
 | `update_settings` | `{settings: Settings}` | `Settings` | Persists to disk |
-| `get_cached_scan` | — | `ScanSummary \| null` | Last scan iff roots match; `null` otherwise. Also seeds the id registry from the cache, so a cleanup started before the first scan finishes still resolves its ids (v0.7.2) |
+| `get_cached_scan` | — | `CachedScan \| null` | Last scan + its `saved_at_unix`, iff roots match; `null` otherwise. Also seeds the id registry from the cache, so a cleanup started before the first scan finishes still resolves its ids (v0.7.2). Return shape changed in v0.9.0 from `ScanSummary \| null` to carry the scan's age |
 | `get_history` | `{limit?: number}` | `HistoryEntry[]` | Newest entries, oldest first; default 100, cap 1000 |
 | `get_providers` | — | `ProviderInfo[]` | Every registered provider + its enabled state |
 | `detect_scan_roots` | — | `ScanRootCandidate[]` | Candidate folders under `$HOME`, largest cache first (v0.5.0) |
@@ -78,6 +78,9 @@ interface ScanSummary { total_bytes: number; reclaimable_bytes: number;
   /** Bytes the backend will refuse to clean, for ANY reason — retention,
    *  AI report-only, privileged opt-in, Docker scope, git protection. */
   blocked_bytes: number }
+
+/** v0.9.0: the on-disk cache as the UI sees it. */
+interface CachedScan { summary: ScanSummary; saved_at_unix: number }
 
 interface CleanupPreviewItem { resource_id: string; name: string; bytes: number;
   safety: SafetyLevel; warning?: string }
@@ -171,6 +174,16 @@ Not:
    refresh when a cleanup finishes. `get_disk_free` also stops spawning `df`
    on the boot path (v0.7.3): it is measured with `statvfs`, and a
    regression test compares the two so the substitution cannot silently drift.
+9. **Startup paints from the cache and rests (v0.9.0).** The app used to run a
+   full scan on every launch, unconditionally: `scan_automatically` (default
+   OFF) was stored and rendered but never read, and the window opened onto a
+   loader nobody asked for. Now the shell paints `get_cached_scan` and runs a
+   scan **only when `scan_automatically` is on** (or when the user clicks Scan
+   Now / Scan again, or a cleanup finished). With no cache the dashboard shows
+   an explicit "You haven't scanned yet" warning instead of scanning on its own.
+   Because the cache is now the resting state, `CachedScan.saved_at_unix` is
+   surfaced so the summary can report the scan's real age and flag a stale
+   cache rather than presenting old numbers as current.
 
 ## Menu bar surface (v0.7.0)
 
@@ -193,6 +206,24 @@ is no destructive item — see G-UI-02 in `docs/development/methodology/guardrai
 
 ## Contract changelog
 
+- `v0.9.0` — cache-first startup. **One command re-typed; no command added or
+  removed.**
+  - `get_cached_scan` now returns `CachedScan | null` (`{ summary,
+    saved_at_unix }`) instead of `ScanSummary | null`, so the UI can report the
+    scan's real age. `devclean_core::CachedScan` and
+    `devclean_scanner::load_cached_scan` are new; `load_cached_summary` stays
+    for the menu bar, which reads the file's mtime for age.
+  - **Behaviour:** a scan runs on launch only when `Settings.scan_automatically`
+    is on. The shell paints the cache and rests; with no cache it shows a
+    "You haven't scanned yet" warning. Previously the launch scan was
+    unconditional and `scan_automatically` was a control with no effect.
+  - **Behaviour:** the summary reports the cached scan's age (from
+    `saved_at_unix`) and flags a cache older than 7 days, instead of stamping
+    the paint with the launch time.
+  - Regression tests: `the_cache_carries_the_time_it_was_saved` (Rust),
+    `the_cached_summary_seeds_the_id_registry` (now asserts `saved_at_unix`),
+    and `cache-first startup` (frontend: the launch scan is gated, the cached
+    paint derives its age).
 - `v0.8.0` — honest sizes, recoverable deletes, and gates that actually run.
   **No command added, removed or re-typed.** Three coupled changes; the third
   fixes a control that had never worked.
