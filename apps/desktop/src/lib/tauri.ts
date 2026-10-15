@@ -68,6 +68,13 @@ export interface ScanSummary {
   blocked_bytes: number;
 }
 
+/** The last scan as read from the on-disk cache, with the moment it was taken
+ * so the UI can show its real age rather than the launch time. */
+export interface CachedScan {
+  summary: ScanSummary;
+  saved_at_unix: number;
+}
+
 export interface CleanupPreviewItem {
   resource_id: string;
   name: string;
@@ -254,7 +261,7 @@ export const cancelCleanup = () => invoke<void>("cancel_cleanup");
 export const getSettings = () => invoke<Settings>("get_settings");
 export const updateSettings = (settings: Settings) =>
   invoke<Settings>("update_settings", { settings });
-export const getCachedScan = () => invoke<ScanSummary | null>("get_cached_scan");
+export const getCachedScan = () => invoke<CachedScan | null>("get_cached_scan");
 export const getHistory = (limit?: number) =>
   invoke<HistoryEntry[]>("get_history", { limit });
 /** v0.6.0: newest cleanup **runs** (default 20, cap 200). Use this for any

@@ -38,17 +38,22 @@ class ScanStore {
    * check/spinner/dot state while a scan is in flight. */
   doneProviders = $state<string[]>([]);
 
-  /** Instant paint from the last scan (if roots match), then the caller
-   * runs a background rescan. Never throws. */
+  /** Instant paint from the last scan (if roots match). The caller runs a
+   * scan only when the user asked for one (`scan_automatically` or a click),
+   * so this is the resting state, not a paint before a guaranteed rescan.
+   * Never throws. */
   async loadCached() {
     try {
-      const s = await getCachedScan();
-      if (s) {
-        this.applySummary(s);
+      const cached = await getCachedScan();
+      if (cached) {
+        this.applySummary(cached.summary);
+        // The scan's real age, not the moment we launched — otherwise the
+        // dashboard would claim a week-old cache was measured just now.
+        this.lastScannedAt = new Date(cached.saved_at_unix * 1000);
         this.fromCache = true;
       }
     } catch {
-      // No cache — the full scan that follows covers it.
+      // No cache — the first-run state stands until the user scans.
     }
   }
 

@@ -27,7 +27,7 @@ pub use system::{
     app_data_dir, default_scan_roots, detect_scan_roots, home_dir, platform_name, ScanRootCandidate,
 };
 pub use types::{
-    BlockReason, CleanupPreview, CleanupPreviewItem, CleanupResult, CleanupRun, CleanupStatus,
-    DiskFree, HistoryEntry, ProviderInfo, ProviderSummary, Resource, ResourceImpact, SafetyLevel,
-    ScanSummary, Sizing,
+    BlockReason, CachedScan, CleanupPreview, CleanupPreviewItem, CleanupResult, CleanupRun,
+    CleanupStatus, DiskFree, HistoryEntry, ProviderInfo, ProviderSummary, Resource, ResourceImpact,
+    SafetyLevel, ScanSummary, Sizing,
 };

@@ -43,13 +43,15 @@
       if (action.filter === "safe") viewStore.safety = "safe";
       navStore.open(action.route);
     });
-    // Settings first (persisted theme), then instant cache paint,
-    // then an honest background rescan.
+    // Settings first (persisted theme), then the instant cache paint. A scan
+    // runs on launch only when the user enabled it — otherwise the app rests
+    // on the last scan and waits for a click, so the window is never held by
+    // a loader the user did not ask for.
     void (async () => {
       await settingsStore.load();
       applyTheme(settingsStore.settings?.theme);
       await scanStore.loadCached();
-      await scanStore.start();
+      if (settingsStore.settings?.scan_automatically) await scanStore.start();
     })();
   });
 

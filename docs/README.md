@@ -34,6 +34,7 @@ rejected, it is a note, not a decision.
 |---|---|
 | [development/developing.md](development/developing.md) | Build, test and lint commands. The source of truth for how to run this. |
 | [development/roadmap.md](development/roadmap.md) | What is left, plus known gaps and non-goals. |
+| [development/plans/git-aware-classification.md](development/plans/git-aware-classification.md) | Phase 2 in detail. Proposed; not approved, not started. |
 | [development/methodology/guardrails.md](development/methodology/guardrails.md) | What behaviour is never allowed, and the mechanism that enforces each one. |
 
 ## Operations

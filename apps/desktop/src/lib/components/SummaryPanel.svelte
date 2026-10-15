@@ -56,6 +56,28 @@
   const activeLabel = $derived(
     activeProvider ? (providerMeta(activeProvider).label ?? activeProvider) : null,
   );
+
+  /** A cached scan is the resting state now, so past this age the numbers get
+   * a visible warning instead of being presented as current. */
+  const STALE_CACHE_DAYS = 7;
+
+  function relativeAge(date: Date): string {
+    const secs = Math.max(0, (Date.now() - date.getTime()) / 1000);
+    if (secs < 60) return "just now";
+    const mins = Math.floor(secs / 60);
+    if (mins < 60) return `${mins} ${mins === 1 ? "minute" : "minutes"} ago`;
+    const hours = Math.floor(mins / 60);
+    if (hours < 24) return `${hours} ${hours === 1 ? "hour" : "hours"} ago`;
+    const days = Math.floor(hours / 24);
+    return `${days} ${days === 1 ? "day" : "days"} ago`;
+  }
+
+  const cacheIsStale = $derived(
+    fromCache &&
+      !scanning &&
+      lastScannedAt !== null &&
+      Date.now() - lastScannedAt.getTime() >= STALE_CACHE_DAYS * 86_400_000,
+  );
 </script>
 
 <section
@@ -198,12 +220,24 @@
   >
     <p class="text-xs text-zinc-400">
       {#if lastScannedAt}
-        Last scan {lastScannedAt.toLocaleTimeString()}
+        Last scan {relativeAge(lastScannedAt)}
       {:else}
         Never scanned
       {/if}
       {#if fromCache && !scanning} · cached{/if}
     </p>
+    {#if cacheIsStale && lastScannedAt}
+      <p
+        class="mt-2 flex items-start gap-1.5 rounded-lg bg-amber-50 px-2.5 py-1.5 text-[11px] text-amber-800 dark:bg-amber-950/40 dark:text-amber-200"
+        data-testid="stale-cache-note"
+      >
+        <span aria-hidden="true" class="mt-0.5 flex shrink-0"><TriangleAlert size={12} /></span>
+        <span>
+          This is a cached scan from {relativeAge(lastScannedAt)}. Scan again to refresh the numbers
+          before acting on them.
+        </span>
+      </p>
+    {/if}
     {#if partialScan && !scanning}
       <p
         class="mt-2 flex items-start gap-1.5 rounded-lg bg-amber-50 px-2.5 py-1.5 text-[11px] text-amber-800 dark:bg-amber-950/40 dark:text-amber-200"

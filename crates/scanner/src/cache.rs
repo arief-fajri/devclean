@@ -5,7 +5,7 @@
 //! roots changed (or the schema bumped), the cache is ignored rather than
 //! shown stale.
 
-use devclean_core::ScanSummary;
+use devclean_core::{CachedScan, ScanSummary};
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
@@ -19,7 +19,7 @@ use std::path::{Path, PathBuf};
 const CACHE_VERSION: u32 = 2;
 
 #[derive(Debug, Serialize, Deserialize)]
-struct CachedScan {
+struct CacheEnvelope {
     version: u32,
     roots: Vec<PathBuf>,
     saved_at_unix: u64,
@@ -47,7 +47,7 @@ pub fn save_cached_summary(
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
     }
-    let envelope = CachedScan {
+    let envelope = CacheEnvelope {
         version: CACHE_VERSION,
         roots: roots.to_vec(),
         saved_at_unix: now_unix(),
@@ -57,17 +57,27 @@ pub fn save_cached_summary(
 }
 
 /// Load the cache only when it matches `current_roots` and the schema
-/// version. Anything else → `None` (caller rescans).
-pub fn load_cached_summary(path: &Path, current_roots: &[PathBuf]) -> Option<ScanSummary> {
+/// version. Anything else → `None` (caller rescans). Carries `saved_at_unix`
+/// so the UI can show how old the last scan is.
+pub fn load_cached_scan(path: &Path, current_roots: &[PathBuf]) -> Option<CachedScan> {
     let text = std::fs::read_to_string(path).ok()?;
-    let envelope: CachedScan = serde_json::from_str(&text).ok()?;
+    let envelope: CacheEnvelope = serde_json::from_str(&text).ok()?;
     if envelope.version != CACHE_VERSION {
         return None;
     }
     if !same_roots(&envelope.roots, current_roots) {
         return None;
     }
-    Some(envelope.summary)
+    Some(CachedScan {
+        summary: envelope.summary,
+        saved_at_unix: envelope.saved_at_unix,
+    })
+}
+
+/// Summary-only view of the cache, for callers that do not need the age
+/// (the menu bar reads the file's mtime for that instead).
+pub fn load_cached_summary(path: &Path, current_roots: &[PathBuf]) -> Option<ScanSummary> {
+    load_cached_scan(path, current_roots).map(|c| c.summary)
 }
 
 #[cfg(test)]
@@ -112,6 +122,22 @@ mod tests {
         let loaded = load_cached_summary(&path, &[PathBuf::from("/b"), PathBuf::from("/a")]);
         assert!(loaded.is_some());
         assert_eq!(loaded.unwrap().resources.len(), 1);
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn the_cache_carries_the_time_it_was_saved() {
+        // The UI rests on the cache now instead of always rescanning, so it
+        // must be able to show how old the numbers are — not the launch time.
+        let path = cache_path("saved-at");
+        let _ = std::fs::remove_file(&path);
+        save_cached_summary(&path, &[], &summary()).unwrap();
+        let loaded = load_cached_scan(&path, &[]).expect("cache loads");
+        assert!(
+            loaded.saved_at_unix > 0,
+            "a saved scan must carry its timestamp"
+        );
+        assert_eq!(loaded.summary.resources.len(), 1);
         let _ = std::fs::remove_file(&path);
     }
 

@@ -5,9 +5,71 @@
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>DevClean</title>
+    <!--
+      Boot splash. Inline and plain CSS on purpose: it must paint as soon as
+      the document parses, before the module bundle loads. Until the app mounts
+      the webview otherwise shows its own white surface, and in dev the first
+      navigation also waits on Vite's on-demand transform of the module graph.
+      main.ts removes this once the app has painted a frame.
+    -->
+    <style>
+      html,
+      body {
+        height: 100%;
+        margin: 0;
+      }
+      body {
+        background: #fafafa;
+      }
+      @media (prefers-color-scheme: dark) {
+        body {
+          background: #09090b;
+        }
+      }
+      #splash {
+        position: fixed;
+        inset: 0;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 16px;
+        font-family: ui-sans-serif, system-ui, -apple-system, sans-serif;
+        font-size: 14px;
+        letter-spacing: 0.02em;
+        color: #71717a;
+        background: inherit;
+      }
+      #splash .ring {
+        width: 26px;
+        height: 26px;
+        border-radius: 9999px;
+        border: 3px solid currentColor;
+        border-top-color: transparent;
+        animation: splash-spin 0.8s linear infinite;
+      }
+      @media (prefers-reduced-motion: reduce) {
+        #splash .ring {
+          animation: none;
+        }
+      }
+      @keyframes splash-spin {
+        to {
+          transform: rotate(360deg);
+        }
+      }
+      #splash.hide {
+        opacity: 0;
+        transition: opacity 200ms ease;
+      }
+    </style>
   </head>
   <body>
     <div id="app"></div>
+    <div id="splash" role="status" aria-live="polite">
+      <div class="ring" aria-hidden="true"></div>
+      <span>DevClean</span>
+    </div>
     <script type="module" src="/src/main.ts"></script>
   </body>
 </html>

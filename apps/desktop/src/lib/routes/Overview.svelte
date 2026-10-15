@@ -272,17 +272,26 @@
     </div>
   </div>
 {:else if !scanStore.scanning}
-  <div class="mt-2 rounded-2xl border border-dashed border-zinc-300 p-8 text-center dark:border-zinc-700">
-    <p class="text-sm text-zinc-600 dark:text-zinc-300">
-      DevClean scans the folders you point it at, measures what each provider holds, and tells you
-      what is safe to remove.
+  <div
+    class="mt-2 rounded-2xl border border-amber-300 bg-amber-50 p-8 text-center dark:border-amber-800 dark:bg-amber-950/30"
+    role="status"
+  >
+    <p
+      class="inline-flex items-center gap-2 text-sm font-medium text-amber-800 dark:text-amber-200"
+    >
+      <span aria-hidden="true" class="flex"><TriangleAlert size={15} /></span>
+      You haven't scanned yet
+    </p>
+    <p class="mx-auto mt-2 max-w-md text-sm text-amber-900/80 dark:text-amber-100/80">
+      DevClean measures what each provider holds before it can tell you what is safe to remove.
+      Run a scan to see your reclaimable space.
     </p>
     <button
       class="mt-4 inline-flex items-center gap-2 rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-700"
       onclick={() => scanStore.start()}
     >
       <span aria-hidden="true" class="flex"><RefreshCw size={15} /></span>
-      Run the first scan
+      Scan Now
     </button>
     <p class="mt-3 text-xs text-zinc-500">
       Nothing is deleted without your confirmation. Scan roots live in Settings.

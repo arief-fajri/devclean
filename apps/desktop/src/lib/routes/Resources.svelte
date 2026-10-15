@@ -17,7 +17,7 @@
   import { settingsStore } from "$lib/stores/settings.svelte";
   import { viewStore } from "$lib/stores/view.svelte";
   import { applyView, countBySafety } from "$lib/view";
-  import { CircleCheck, RefreshCw } from "lucide-svelte";
+  import { CircleCheck, RefreshCw, TriangleAlert } from "lucide-svelte";
 
   const route = routeDef("resources");
 
@@ -131,14 +131,25 @@
     </div>
   {/if}
 {:else if !scanStore.scanning}
-  <div class="mt-2 rounded-xl border border-dashed border-zinc-300 p-6 text-center dark:border-zinc-700">
-    <p class="text-sm text-zinc-500">Nothing scanned yet — run a scan to list what is reclaimable.</p>
+  <div
+    class="mt-2 rounded-xl border border-amber-300 bg-amber-50 p-6 text-center dark:border-amber-800 dark:bg-amber-950/30"
+    role="status"
+  >
+    <p
+      class="inline-flex items-center gap-2 text-sm font-medium text-amber-800 dark:text-amber-200"
+    >
+      <span aria-hidden="true" class="flex"><TriangleAlert size={15} /></span>
+      You haven't scanned yet
+    </p>
+    <p class="mt-2 text-sm text-amber-900/80 dark:text-amber-100/80">
+      Run a scan to list what is reclaimable.
+    </p>
     <button
       class="mt-3 inline-flex items-center gap-2 rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-700"
       onclick={() => scanStore.start()}
     >
       <span aria-hidden="true" class="flex"><RefreshCw size={15} /></span>
-      Scan now
+      Scan Now
     </button>
   </div>
 {:else}

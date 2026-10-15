@@ -7,8 +7,9 @@ use crate::events::*;
 use crate::metrics::MemSample;
 use crate::state::AppState;
 use devclean_core::{
-    format_bytes, CleanupPreview, CleanupResult, CleanupRun, DiskFree, HistoryEntry, ProviderInfo,
-    Resource, SafetyValidator, ScanRootCandidate, ScanSummary, Settings, PREVIEW_TIMEOUT,
+    format_bytes, CachedScan, CleanupPreview, CleanupResult, CleanupRun, DiskFree, HistoryEntry,
+    ProviderInfo, Resource, SafetyValidator, ScanRootCandidate, ScanSummary, Settings,
+    PREVIEW_TIMEOUT,
 };
 use devclean_providers::{all_providers, Provider};
 use std::collections::HashMap;
@@ -149,25 +150,27 @@ fn notify_if_background(app: &AppHandle, title: &str, body: &str) {
     }
 }
 
-/// Last scan, instantly, if the cache matches the current scan roots.
-/// The UI shows this first, then runs a background rescan.
+/// Last scan, instantly, if the cache matches the current scan roots. Carries
+/// `saved_at_unix` so the UI can report the scan's real age. The UI paints
+/// this and rests; a fresh scan runs on launch only when `scan_automatically`
+/// is on (or when the user asks).
 #[tauri::command]
-pub fn get_cached_scan(state: State<'_, AppState>) -> Result<Option<ScanSummary>, String> {
+pub fn get_cached_scan(state: State<'_, AppState>) -> Result<Option<CachedScan>, String> {
     cached_scan(&state)
 }
 
 /// Shared body of [`get_cached_scan`], separable so it can be tested without a
 /// Tauri `State` (which only exists inside a running app).
-fn cached_scan(state: &AppState) -> Result<Option<ScanSummary>, String> {
+fn cached_scan(state: &AppState) -> Result<Option<CachedScan>, String> {
     let roots = state.settings.lock().unwrap().scan_roots.clone();
-    let cached = devclean_scanner::load_cached_summary(&state.scan_cache_path, &roots);
-    if let Some(summary) = &cached {
+    let cached = devclean_scanner::load_cached_scan(&state.scan_cache_path, &roots);
+    if let Some(cached) = &cached {
         // Seed the id registry from the cache too. Without this the window can
         // show resources (from the cache) while the backend still knows none of
         // them, and a cleanup started in that window re-measures to an empty
         // preview — "Clean 0 B from 0 resources?". A full scan replaces all of
         // this anyway; this only closes the window between launch and scan.
-        state.store_resources(summary.resources.clone());
+        state.store_resources(cached.summary.resources.clone());
     }
     Ok(cached)
 }
@@ -707,7 +710,12 @@ mod preview_deadline_tests {
         };
 
         let cached = cached_scan(&state).expect("cached scan");
-        assert!(cached.is_some(), "the cache should have loaded");
+        let cached = cached.expect("the cache should have loaded");
+        assert!(
+            cached.saved_at_unix > 0,
+            "the UI shows the scan's real age, so the command must carry it"
+        );
+        assert_eq!(cached.summary.resources.len(), 1);
         assert_eq!(
             state.snapshot_resources().len(),
             1,

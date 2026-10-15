@@ -5,5 +5,5 @@
 pub mod cache;
 pub mod manager;
 
-pub use cache::{load_cached_summary, save_cached_summary};
+pub use cache::{load_cached_scan, load_cached_summary, save_cached_summary};
 pub use manager::ScanManager;

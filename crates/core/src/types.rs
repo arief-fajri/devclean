@@ -176,6 +176,15 @@ pub struct ScanSummary {
     pub blocked_bytes: u64,
 }
 
+/// The last scan as the UI receives it from the cache: the summary plus the
+/// moment it was taken, so a cache painted at startup can report its real age
+/// instead of claiming it was measured just now.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CachedScan {
+    pub summary: ScanSummary,
+    pub saved_at_unix: u64,
+}
+
 /// One line of a cleanup preview (shown in the confirmation dialog).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CleanupPreviewItem {
