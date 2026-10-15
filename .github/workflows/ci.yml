@@ -4,6 +4,12 @@ on:
   push:
   pull_request:
 
+# Two pushes in a row would otherwise run two full sweeps of a suite that
+# compiles a Tauri app twice. The older run is cancelled rather than raced.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   # Formatting, lints and tests on BOTH runners.
   #
@@ -23,7 +29,7 @@ jobs:
         os: [macos-latest, ubuntu-24.04]
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@master
         with:
           # Pinned by rust-toolchain.toml, not "stable": a cleanup tool that
@@ -59,7 +65,7 @@ jobs:
     name: frontend
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: actions/setup-node@v4
         with:
           node-version: 22

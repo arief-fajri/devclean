@@ -384,9 +384,12 @@ mod tests {
 
     #[tokio::test]
     async fn cancel_settles_in_under_one_second() {
+        // 100 slices × 20ms = ~2s of work, which is still running when the
+        // cancel arrives 100ms in. 500 slices made this test cost 10s of wall
+        // clock for the same assertion.
         let slow = Arc::new(SlowProvider {
             tag: "slow",
-            slices: 500,
+            slices: 100,
         });
         let mgr = manager_with(slow, Duration::from_secs(60));
         let mgr = Arc::new(mgr);
@@ -413,15 +416,16 @@ mod tests {
             t0.elapsed()
         );
         // Partial results are fine; the point is it stopped early.
-        assert!(summary.resources.len() < 500);
+        assert!(summary.resources.len() < 100);
     }
 
     #[tokio::test]
     async fn provider_timeout_yields_empty_without_hanging() {
-        // 500 slices × 20ms = ~10s of work, timeout 100ms.
+        // 100 slices × 20ms = ~2s of work, timeout 100ms: the timeout must
+        // fire long before the work would finish.
         let slow = Arc::new(SlowProvider {
             tag: "slow",
-            slices: 500,
+            slices: 100,
         });
         let mgr = manager_with(slow, Duration::from_millis(100));
         let t0 = std::time::Instant::now();
@@ -499,9 +503,12 @@ mod tests {
             tag: "fast",
             slices: 3,
         });
+        // The expensive stub is disabled, so its slice count only matters if
+        // the filter is wrong and it runs anyway — which the elapsed check
+        // below catches. 100 is enough to be unmistakable without costing 10s.
         let slow = Arc::new(SlowProvider {
             tag: "slow",
-            slices: 500,
+            slices: 100,
         });
         let mgr = ScanManager::with_config(vec![fast, slow], Duration::from_secs(60));
         // Disabling the expensive stub must both drop its rows and make
@@ -711,7 +718,7 @@ mod tests {
             .map(|i| {
                 Arc::new(SlowProvider {
                     tag: if i == 0 { "s0" } else { "s1" },
-                    slices: 100,
+                    slices: 50,
                 }) as Arc<dyn Provider>
             })
             .collect();

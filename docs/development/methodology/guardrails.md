@@ -189,10 +189,56 @@ G-CI-02  Every guardrail enforced by a test must run in CI. A test nobody runs
            G-UI-02/03/04/05 and G-PUB-01/04 are actually executed ✅ ·
            test — platform-claim.test.ts asserts that `npm test` is in the
            workflow ✅
+G-CI-03  A test may not depend on the machine's state: the contents of $HOME,
+           whether an external tool is installed, the user's git configuration,
+           or filesystem case-sensitivity. A fixture states everything it needs
+           rather than reading it from the machine.
+           Enforcement: test — test-hygiene.test.ts scans crates/*/tests and
+           fails on `default_scan_roots()`, `app_data_dir()`, `home_dir()` or
+           `default_trash_dir()` outside a named exception ✅ ·
+           test — disk::the_app_data_directory_really_is_on_the_home_volume
+           resolves to the nearest EXISTING ancestor instead of assuming the
+           directory exists ✅ · test — policy_evidence.rs uses stub providers
+           rather than scanning the real machine ✅
 G-AI-01  AI Level A is for internal & reversible changes only. Contract/security/
            destructive/dependency changes = Level B, requiring explicit human
            approval. See AGENTS.md.
            Enforcement: process ✅
+```
+
+### What G-CI-03 is for, and how to satisfy it
+
+Twice a test passed locally and failed on a clean CI runner, because it
+asserted something about *the machine* while its name claimed to assert
+something about the product:
+
+| Test | What it really asserted |
+|---|---|
+| `disk::the_app_data_directory_really_is_on_the_home_volume` | "this machine has run DevClean" — `app_data_dir()` does not exist until it has |
+| `policy_evidence::retention_and_ai_gates_now_reach_the_scan` | "this machine has AI history" — a runner has never run opencode or Claude |
+
+Neither was visible from a green local run. Both are only found on a machine
+that has never been used.
+
+**Writing a test that satisfies it:**
+
+- Build the thing you are testing. `ScanManager::with_config` takes any
+  `Provider`, so a stub can exercise the scan pipeline without a real
+  directory existing.
+- Compare against a fixture you created in this test, never against what
+  happens to be on disk.
+- When a path may not exist yet, resolve to the nearest existing ancestor
+  rather than assuming.
+
+**Git fixtures (phase 2 of the roadmap):** every setting a fixture depends on
+must be passed explicitly, never read from the machine's configuration. A
+runner has no global git identity, and a user's `core.excludesFile` or
+`core.fileMode` changes what `check-ignore` and `status` report.
+
+```rust
+git -c init.defaultBranch=main init
+git -c user.name=test -c user.email=test@example.invalid commit -m "..."
+git -c core.excludesFile=/dev/null -c core.fileMode=false check-ignore <path>
 ```
 
 ### What changed in v0.5.0, and why the claims above changed

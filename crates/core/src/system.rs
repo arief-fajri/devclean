@@ -14,13 +14,19 @@ pub fn home_dir() -> Option<std::path::PathBuf> {
 }
 
 /// Folder names that commonly hold developer work, in the order we prefer
-/// them. Both cases are checked because macOS is case-insensitive but the
-/// filesystem may be case-sensitive, and users do create `~/EXP` next to
-/// `~/exp`.
+/// them.
 ///
-/// This list is a *guess*. [`detect_scan_roots`] is the discovery path —
-/// Settings offers both, because a machine with projects in `~/work/oss`
-/// would otherwise need the path typed by hand.
+/// This list is a *guess*, not a discovery mechanism —
+/// [`detect_scan_roots`] is the discovery path, and Settings offers both. A
+/// machine with projects in `~/work/oss` would otherwise need the path typed
+/// by hand.
+///
+/// Note the case behaviour: macOS and Windows are case-insensitive by default,
+/// so `Work` also matches an existing `~/work`. That is intended for a user's
+/// own `~/work`, and it has one visible side effect worth knowing about —
+/// GitHub's macOS runners create `/Users/runner/work` as their working
+/// directory, so a scan there reports the runner's own build tree. Tests must
+/// not depend on which folders this returns; see G-CI-03.
 const DEV_FOLDER_NAMES: &[&str] = &[
     "Projects",
     "Code",
