@@ -1,12 +1,8 @@
 # AGENTS.md — instructions for AI agents & developers
 
-DevClean is a **Rust + Tauri 2 + Svelte 5** desktop app for monitoring and
-cleaning development resources. This file is the **single entry point for
-every work session**. Read it first, before any other file.
+DevClean is a **Rust + Tauri 2 + Svelte 5** desktop app for monitoring and cleaning development resources. This file is the **single entry point for every work session**. Read it first, before any other file.
 
-Public behavior contract: `docs/reference/tauri-contract.md`. Caller-visible
-changes (commands/events/responses) must be deliberate, tested, and written
-there.
+Public behavior contract: `docs/reference/tauri-contract.md`. Caller-visible changes (commands/events/responses) must be deliberate, tested, and written there.
 
 ---
 
@@ -16,10 +12,7 @@ there.
 MODEL → GUARDRAIL → IMPLEMENT → OBSERVE → TEST → EVALUATE → RECORD
 ```
 
-Details: [system-model.md](docs/development/methodology/system-model.md) (what
-system we are building),
-[guardrails.md](docs/development/methodology/guardrails.md) (what must never
-happen).
+Details: [system-model.md](docs/development/methodology/system-model.md) (what system we are building), [guardrails.md](docs/development/methodology/guardrails.md) (what must never happen).
 
 ### Definition of Done (6 steps, answered before & after coding)
 
@@ -30,8 +23,7 @@ happen).
 5. **How is it tested?** (`cargo test`, `svelte-check`, manual scenario)
 6. **What evidence proves it works?** (test output / before-after bytes freed)
 
-Answers 1–3 are written **before** coding (PR comment/summary), 4–6 attached
-**after**. Without them, the task is not done.
+Answers 1–3 are written **before** coding (PR comment/summary), 4–6 attached **after**. Without them, the task is not done.
 
 ### Failure classification — classify BEFORE fixing
 
@@ -43,8 +35,7 @@ Answers 1–3 are written **before** coding (PR comment/summary), 4–6 attached
 | **D — Missing observability** | Failed but the operator can't tell why | Add measurement/log/event |
 | **E — Wrong acceptance** | Checklist passed but behavior was unsafe | Fix the criteria + test |
 
-Never jump from a failing test straight to a patch without recording the
-classification.
+Never jump from a failing test straight to a patch without recording the classification.
 
 ### Decision authority
 
@@ -88,13 +79,9 @@ cargo tauri dev                        # run from root (frontendDist ../dist)
 - `crates/cleanup/` — `preview` + safety-validated executor.
 - `apps/desktop/src-tauri/src/` — thin layer: `commands.rs` (15 commands), `events.rs`, `state.rs`. No filesystem logic beyond wiring.
 - `apps/desktop/src/` — Svelte 5 (runes) + Tailwind only:
-  - `App.svelte` — the shell: sidebar, page switch, selection bar, resource
-    drawer, and the cleanup-flow modal (the only modal; G-UI-03).
-  - `lib/routes/` — one file per page (Overview, Resources, History,
-    Settings). Pages may not call the cleanup API (`architecture.test.ts`).
-  - `lib/nav.ts` — pure page ids, titles, ⌘-shortcuts, and the validation the
-    `tray_action` event is checked against. Pure + unit-tested, like
-    `lib/view.ts`.
+  - `App.svelte` — the shell: sidebar, page switch, selection bar, resource drawer, and the cleanup-flow modal (the only modal; G-UI-03).
+  - `lib/routes/` — one file per page (Overview, Resources, History, Settings). Pages may not call the cleanup API (`architecture.test.ts`).
+  - `lib/nav.ts` — pure page ids, titles, ⌘-shortcuts, and the validation the `tray_action` event is checked against. Pure + unit-tested, like `lib/view.ts`.
   - `lib/tauri.ts`, `lib/stores/`, `lib/components/` (incl. `Sidebar`).
 
 ## Hard rules

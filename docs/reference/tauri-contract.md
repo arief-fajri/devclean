@@ -1,8 +1,6 @@
 # Tauri Contract (public behavior contract)
 
-> The single document defining what the frontend may see. Changing this file
-> = changing the contract → requires a deliberate review and a regression test.
-> Version: **v0.9.0 (cache-first startup)**.
+> The single document defining what the frontend may see. Changing this file = changing the contract → requires a deliberate review and a regression test. Version: **v0.9.0 (cache-first startup)**.
 
 ## Commands (15)
 
@@ -134,61 +132,20 @@ Not:
 
 ## Behavioural notes (no type change, but caller-visible)
 
-1. **`CleanupResult.freed_bytes` is now measured, never assumed.** For a
-   `RunCommand` resource the engine reads the provider's `measure()` before
-   and after the command. Before v0.5.0 it compared against the resource's
-   sentinel path — never a directory — so `after` was always `0` and
-   `freed` always equalled `requested`. A prune that reclaimed 3 GB of a
-   10 GB cache reported 10 GB. When the after-state cannot be measured at
-   all, `freed_bytes` is `0` and `error` says so.
-2. **`scan_progress.done` is monotonic.** It counts providers that *finished*
-   (was: their static position in the provider list, which could run
-   backwards or report `N/N` with work pending).
-3. `cleanup` returns `Err` (not a per-item failure) when a required
-   `preview_token` is missing, expired, or covers a different id set.
-3. **`preview_cleanup` is bounded (v0.7.2).** Re-measuring walks every
-   selected path; over 120s it fails with an explanation instead of leaving the
-   dialog waiting forever (G-REL-01, which previously covered scans and
-   subprocesses but not this).
-4. **A partial preview is reported, not hidden.** `preview_cleanup` silently
-   omitted ids it could not resolve; the UI now shows how many of the selected
-   resources were found, and refuses to present an empty preview as work.
-5. **Closing the window hides it (v0.7.0).** The app keeps running in the menu
-   bar; only `Quit DevClean` exits. Before this, closing the last window made
-   the runtime exit (`tauri-runtime-writ` exits on `RunEvent::ExitRequested`
-   when the last window is destroyed), which silently removed the tray icon
-   and made every menu action unreachable.
-6. **Navigation is frontend-local.** The page id lives in `$lib/nav` and is
-   never sent to the backend; a reload always starts on Overview. No command
-   was added to support the sidebar.
-7. **The Dock icon opens the window (v0.7.3).** Closing the window hides it
-   (note 5), which left the Dock icon on screen and inert: macOS sends
-   `applicationShouldHandleReopen` on a Dock click, but `Builder::run` installs
-   an *empty* event handler (`build()?.run(|_, _| {})`), so nothing acted on
-   it. The shell now runs its own loop and handles `RunEvent::Reopen` by
-   calling the same `show_main` the menu bar uses. The Dock, the tray icon and
-   the menu all reveal the window through one function, so they cannot drift.
-8. **Free space is re-measured where it moves (v0.7.3).** The dashboard read
-   `get_disk_free` once at launch, so after a cleanup the card quoted the
-   pre-deletion figure. Both the UI store and the menu bar's cached copy now
-   refresh when a cleanup finishes. `get_disk_free` also stops spawning `df`
-   on the boot path (v0.7.3): it is measured with `statvfs`, and a
-   regression test compares the two so the substitution cannot silently drift.
-9. **Startup paints from the cache and rests (v0.9.0).** The app used to run a
-   full scan on every launch, unconditionally: `scan_automatically` (default
-   OFF) was stored and rendered but never read, and the window opened onto a
-   loader nobody asked for. Now the shell paints `get_cached_scan` and runs a
-   scan **only when `scan_automatically` is on** (or when the user clicks Scan
-   Now / Scan again, or a cleanup finished). With no cache the dashboard shows
-   an explicit "You haven't scanned yet" warning instead of scanning on its own.
-   Because the cache is now the resting state, `CachedScan.saved_at_unix` is
-   surfaced so the summary can report the scan's real age and flag a stale
-   cache rather than presenting old numbers as current.
+1. **`CleanupResult.freed_bytes` is now measured, never assumed.** For a `RunCommand` resource the engine reads the provider's `measure()` before and after the command. Before v0.5.0 it compared against the resource's sentinel path — never a directory — so `after` was always `0` and `freed` always equalled `requested`. A prune that reclaimed 3 GB of a 10 GB cache reported 10 GB. When the after-state cannot be measured at all, `freed_bytes` is `0` and `error` says so.
+2. **`scan_progress.done` is monotonic.** It counts providers that *finished* (was: their static position in the provider list, which could run backwards or report `N/N` with work pending).
+3. `cleanup` returns `Err` (not a per-item failure) when a required `preview_token` is missing, expired, or covers a different id set.
+3. **`preview_cleanup` is bounded (v0.7.2).** Re-measuring walks every selected path; over 120s it fails with an explanation instead of leaving the dialog waiting forever (G-REL-01, which previously covered scans and subprocesses but not this).
+4. **A partial preview is reported, not hidden.** `preview_cleanup` silently omitted ids it could not resolve; the UI now shows how many of the selected resources were found, and refuses to present an empty preview as work.
+5. **Closing the window hides it (v0.7.0).** The app keeps running in the menu bar; only `Quit DevClean` exits. Before this, closing the last window made the runtime exit (`tauri-runtime-writ` exits on `RunEvent::ExitRequested` when the last window is destroyed), which silently removed the tray icon and made every menu action unreachable.
+6. **Navigation is frontend-local.** The page id lives in `$lib/nav` and is never sent to the backend; a reload always starts on Overview. No command was added to support the sidebar.
+7. **The Dock icon opens the window (v0.7.3).** Closing the window hides it (note 5), which left the Dock icon on screen and inert: macOS sends `applicationShouldHandleReopen` on a Dock click, but `Builder::run` installs an *empty* event handler (`build()?.run(|_, _| {})`), so nothing acted on it. The shell now runs its own loop and handles `RunEvent::Reopen` by calling the same `show_main` the menu bar uses. The Dock, the tray icon and the menu all reveal the window through one function, so they cannot drift.
+8. **Free space is re-measured where it moves (v0.7.3).** The dashboard read `get_disk_free` once at launch, so after a cleanup the card quoted the pre-deletion figure. Both the UI store and the menu bar's cached copy now refresh when a cleanup finishes. `get_disk_free` also stops spawning `df` on the boot path (v0.7.3): it is measured with `statvfs`, and a regression test compares the two so the substitution cannot silently drift.
+9. **Startup paints from the cache and rests (v0.9.0).** The app used to run a full scan on every launch, unconditionally: `scan_automatically` (default OFF) was stored and rendered but never read, and the window opened onto a loader nobody asked for. Now the shell paints `get_cached_scan` and runs a scan **only when `scan_automatically` is on** (or when the user clicks Scan Now / Scan again, or a cleanup finished). With no cache the dashboard shows an explicit "You haven't scanned yet" warning instead of scanning on its own. Because the cache is now the resting state, `CachedScan.saved_at_unix` is surfaced so the summary can report the scan's real age and flag a stale cache rather than presenting old numbers as current.
 
 ## Menu bar surface (v0.7.0)
 
-Not an IPC contract, but caller-visible: the menu bar is the only part of
-DevClean a user can reach when the window is closed.
+Not an IPC contract, but caller-visible: the menu bar is the only part of DevClean a user can reach when the window is closed.
 
 | Item | Action |
 |---|---|
@@ -199,163 +156,56 @@ DevClean a user can reach when the window is closed.
 | `settings` | Show the window on the Settings page |
 | `quit` | Exit the app |
 
-One click of either button opens the menu (`show_menu_on_left_click`); the
-info block above the actions is rebuilt from the on-disk scan cache, and
-`open`/`review`/`history`/`settings` additionally emit `tray_action`. There
-is no destructive item — see G-UI-02 in `docs/development/methodology/guardrails.md`.
+One click of either button opens the menu (`show_menu_on_left_click`); the info block above the actions is rebuilt from the on-disk scan cache, and `open`/`review`/`history`/`settings` additionally emit `tray_action`. There is no destructive item — see G-UI-02 in `docs/development/methodology/guardrails.md`.
 
 ## Contract changelog
 
-Contract versions are their own sequence, independent of the product version in
-`Cargo.toml` — the frontend and backend always ship together, so the contract
-changes on its own schedule. The two are aligned at 1.0.
+Contract versions are their own sequence, independent of the product version in `Cargo.toml` — the frontend and backend always ship together, so the contract changes on its own schedule. The two are aligned at 1.0.
 
-- `v0.9.0` — cache-first startup. **One command re-typed; no command added or
-  removed.**
-  - `get_cached_scan` now returns `CachedScan | null` (`{ summary,
-    saved_at_unix }`) instead of `ScanSummary | null`, so the UI can report the
-    scan's real age. `devclean_core::CachedScan` and
-    `devclean_scanner::load_cached_scan` are new; `load_cached_summary` stays
-    for the menu bar, which reads the file's mtime for age.
-  - **Behaviour:** a scan runs on launch only when `Settings.scan_automatically`
-    is on. The shell paints the cache and rests; with no cache it shows a
-    "You haven't scanned yet" warning. Previously the launch scan was
-    unconditional and `scan_automatically` was a control with no effect.
-  - **Behaviour:** the summary reports the cached scan's age (from
-    `saved_at_unix`) and flags a cache older than 7 days, instead of stamping
-    the paint with the launch time.
-  - Regression tests: `the_cache_carries_the_time_it_was_saved` (Rust),
-    `the_cached_summary_seeds_the_id_registry` (now asserts `saved_at_unix`),
-    and `cache-first startup` (frontend: the launch scan is gated, the cached
-    paint derives its age).
-- `v0.8.0` — honest sizes, recoverable deletes, and gates that actually run.
-  **No command added, removed or re-typed.** Three coupled changes; the third
-  fixes a control that had never worked.
+- `v0.9.0` — cache-first startup. **One command re-typed; no command added or removed.**
+  - `get_cached_scan` now returns `CachedScan | null` (`{ summary, saved_at_unix }`) instead of `ScanSummary | null`, so the UI can report the scan's real age. `devclean_core::CachedScan` and `devclean_scanner::load_cached_scan` are new; `load_cached_summary` stays for the menu bar, which reads the file's mtime for age.
+  - **Behaviour:** a scan runs on launch only when `Settings.scan_automatically` is on. The shell paints the cache and rests; with no cache it shows a "You haven't scanned yet" warning. Previously the launch scan was unconditional and `scan_automatically` was a control with no effect.
+  - **Behaviour:** the summary reports the cached scan's age (from `saved_at_unix`) and flags a cache older than 7 days, instead of stamping the paint with the launch time.
+  - Regression tests: `the_cache_carries_the_time_it_was_saved` (Rust), `the_cached_summary_seeds_the_id_registry` (now asserts `saved_at_unix`), and `cache-first startup` (frontend: the launch scan is gated, the cached paint derives its age).
+- `v0.8.0` — honest sizes, recoverable deletes, and gates that actually run. **No command added, removed or re-typed.** Three coupled changes; the third fixes a control that had never worked.
 
-  **1. Sizes that match `du`.**
-  - `Resource.size_bytes` now means **allocated blocks** (`st_blocks * 512`),
-    i.e. what deleting the resource frees — it was a sum of file *lengths*,
-    which read up to 19% low on trees full of small files and up to 145% high
-    on trees full of hard links (measured: this repo's own `target/` reported
-    26.6 GB against `du`'s 10.8 GB). Hard-linked inodes are counted once per
-    artifact via `(dev, ino)`.
-  - `+Resource.apparent_bytes?: number | null` (additive, `#[serde(default)]`)
-    — the logical size, present only when materially larger than `size_bytes`,
-    so sparse files can be shown as `8.6 GB (appears as 460 GB)`.
-  - The on-disk scan cache is versioned `1 → 2`: a v1 cache holds logical
-    sizes and is rejected rather than displayed.
+**1. Sizes that match `du`.**
+  - `Resource.size_bytes` now means **allocated blocks** (`st_blocks * 512`), i.e. what deleting the resource frees — it was a sum of file *lengths*, which read up to 19% low on trees full of small files and up to 145% high on trees full of hard links (measured: this repo's own `target/` reported 26.6 GB against `du`'s 10.8 GB). Hard-linked inodes are counted once per artifact via `(dev, ino)`.
+  - `+Resource.apparent_bytes?: number | null` (additive, `#[serde(default)]`) — the logical size, present only when materially larger than `size_bytes`, so sparse files can be shown as `8.6 GB (appears as 460 GB)`.
+  - The on-disk scan cache is versioned `1 → 2`: a v1 cache holds logical sizes and is rejected rather than displayed.
   - Decision record: [docs/decisions/allocated-vs-apparent.md](../decisions/allocated-vs-apparent.md).
 
-  **2. Recoverable deletes.**
-  - `+Settings.delete_mode: "trash" | "permanent"` (additive,
-    `#[serde(default)]` → `trash`). Path removal moves the artifact to
-    `~/.Trash` by default instead of deleting it.
-  - `+CleanupResult.moved_to_trash: boolean`, `+HistoryEntry.moved_to_trash`
-    (additive). **Under `trash`, `freed_bytes` is 0**: the space is still on
-    disk and returns only when the user empties the Trash.
-  - The mode governs path removal only — `RunCommand` and `RunSql` have no
-    undo and are never reported as trashed.
+**2. Recoverable deletes.**
+  - `+Settings.delete_mode: "trash" | "permanent"` (additive, `#[serde(default)]` → `trash`). Path removal moves the artifact to `~/.Trash` by default instead of deleting it.
+  - `+CleanupResult.moved_to_trash: boolean`, `+HistoryEntry.moved_to_trash` (additive). **Under `trash`, `freed_bytes` is 0**: the space is still on disk and returns only when the user empties the Trash.
+  - The mode governs path removal only — `RunCommand` and `RunSql` have no undo and are never reported as trashed.
   - Decision record: [docs/decisions/trash-by-default.md](../decisions/trash-by-default.md).
 
-  **3. Blocked reasons — a control that never ran, fixed.**
-  - `Resource.retention_eligible: boolean` is **replaced** by
-    `blocked_reason?: BlockReason | null` + `blocked_detail?: string | null`
-    (breaking to the type; nothing else consumed the old field).
-  - **`retention_eligible` was never set to `false` in production code**, so
-    `Settings.retention_days` had no effect on any cleanup and
-    `ScanSummary.blocked_bytes` was permanently zero. With a 10-year policy the
-    gate now blocks every resource it should; before it, the same policy
-    blocked **none**.
-  - `+Settings.ai_cleanup_enabled: boolean` (additive, `#[serde(default)]` →
-    `false`). AI conversation history is reported with sizes but not
-    selectable until the user opts in (`blocked_reason: "ai_read_only"`).
-  - `+HistoryEntry.sizing?: "apparent" | "allocated"` and
-    `+CleanupRun.pre_allocated_sizing: boolean` (additive). Rows written
-    before v0.8.0 read as `"apparent"`; the history page labels those runs
-    "before 0.1.0".
-  - The scan stamps the reason; the engine refuses what is stamped. Both call
-    the same `devclean_core::policy::block_reason_for`, so the explanation the
-    user reads is the one that is enforced (I11).
+**3. Blocked reasons — a control that never ran, fixed.**
+  - `Resource.retention_eligible: boolean` is **replaced** by `blocked_reason?: BlockReason | null` + `blocked_detail?: string | null` (breaking to the type; nothing else consumed the old field).
+  - **`retention_eligible` was never set to `false` in production code**, so `Settings.retention_days` had no effect on any cleanup and `ScanSummary.blocked_bytes` was permanently zero. With a 10-year policy the gate now blocks every resource it should; before it, the same policy blocked **none**.
+  - `+Settings.ai_cleanup_enabled: boolean` (additive, `#[serde(default)]` → `false`). AI conversation history is reported with sizes but not selectable until the user opts in (`blocked_reason: "ai_read_only"`).
+  - `+HistoryEntry.sizing?: "apparent" | "allocated"` and `+CleanupRun.pre_allocated_sizing: boolean` (additive). Rows written before v0.8.0 read as `"apparent"`; the history page labels those runs "before 0.1.0".
+  - The scan stamps the reason; the engine refuses what is stamped. Both call the same `devclean_core::policy::block_reason_for`, so the explanation the user reads is the one that is enforced (I11).
   - Decision record: [docs/decisions/blocked-reason.md](../decisions/blocked-reason.md).
 
-  **Regression tests:** `allocated_counts_blocks_not_payload`,
-  `an_empty_directory_measures_zero`,
-  `a_hardlinked_file_is_counted_once_within_an_artifact`,
-  `apparent_is_reported_only_when_materially_larger`,
-  `a_v1_cache_with_logical_sizes_is_rejected`,
-  `trash_mode_moves_aside_and_reports_pending_not_freed`,
-  `permanent_mode_removes_and_reports_freed`,
-  `command_backed_actions_are_never_marked_as_trashed`,
-  the `devclean_core::policy` suite, `retention_and_ai_gates_now_reach_the_scan`,
-  `blocked_ids_are_collected_for_the_engine` (Rust); `cleanupOutcome` and
-  `blocked` suites (frontend).
-- `v0.7.2` — bounded cleanup preview. **No command added, removed or
-  re-typed.**
-  - `preview_cleanup` now fails with an explanation after `PREVIEW_TIMEOUT`
-    (120s) rather than blocking indefinitely; `PREVIEW_TIMEOUT` is a new
-    `devclean_core::limits` constant.
-  - `get_cached_scan` seeds the id registry from the cache, so the launch
-    window between the cached paint and the first scan can no longer produce
-    an empty preview.
-  - Regression tests: `work_that_overruns_its_budget_fails_instead_of_hanging`,
-    `work_that_finishes_in_time_is_returned_untouched`,
-    `a_failed_preview_reports_its_own_error`,
-    `the_cached_summary_seeds_the_id_registry` (Rust);
-    `previewPhase`/`previewCoverage`/`coverageNote` (frontend).
-  - G-REL-01's "no external operation may block forever" now covers the
-    preview as well as scans and cleanup subprocesses.
-- `v0.7.0` — menu bar quick actions + page navigation. **No command was
-  added or changed.**
-  - `+tray_action` event (`{route, filter?}`), emitted only after the window
-    is shown; the frontend validates the route id.
+**Regression tests:** `allocated_counts_blocks_not_payload`, `an_empty_directory_measures_zero`, `a_hardlinked_file_is_counted_once_within_an_artifact`, `apparent_is_reported_only_when_materially_larger`, `a_v1_cache_with_logical_sizes_is_rejected`, `trash_mode_moves_aside_and_reports_pending_not_freed`, `permanent_mode_removes_and_reports_freed`, `command_backed_actions_are_never_marked_as_trashed`, the `devclean_core::policy` suite, `retention_and_ai_gates_now_reach_the_scan`, `blocked_ids_are_collected_for_the_engine` (Rust); `cleanupOutcome` and `blocked` suites (frontend).
+- `v0.7.2` — bounded cleanup preview. **No command added, removed or re-typed.**
+  - `preview_cleanup` now fails with an explanation after `PREVIEW_TIMEOUT` (120s) rather than blocking indefinitely; `PREVIEW_TIMEOUT` is a new `devclean_core::limits` constant.
+  - `get_cached_scan` seeds the id registry from the cache, so the launch window between the cached paint and the first scan can no longer produce an empty preview.
+  - Regression tests: `work_that_overruns_its_budget_fails_instead_of_hanging`, `work_that_finishes_in_time_is_returned_untouched`, `a_failed_preview_reports_its_own_error`, `the_cached_summary_seeds_the_id_registry` (Rust); `previewPhase`/`previewCoverage`/`coverageNote` (frontend).
+  - G-REL-01's "no external operation may block forever" now covers the preview as well as scans and cleanup subprocesses.
+- `v0.7.0` — menu bar quick actions + page navigation. **No command was added or changed.**
+  - `+tray_action` event (`{route, filter?}`), emitted only after the window is shown; the frontend validates the route id.
   - Closing the window hides it instead of exiting (behavioural note 5).
-  - Menu bar: one click opens a read-only info block (reclaimable, kept,
-    top three providers, stale count, low-disk warning) plus the six actions
-    above. Numbers come from the scan cache and from free space measured once
-    per scan — opening the menu never spawns a process or starts a scan.
-  - Regression tests: `the_menu_can_only_do_the_six_reviewed_actions`,
-    `chips_are_square_and_actually_paint_something`, `headline_reports_reclaimable_and_kept`,
-    `low_disk_only_speaks_up_when_the_disk_is_actually_low` (Rust);
-    `keeps destructive calls out of the tray module`,
-    `keeps destructive calls out of every page`, `stays out of the way while
-    the user types`, `navigates on ⌘1…⌘4` (frontend).
+  - Menu bar: one click opens a read-only info block (reclaimable, kept, top three providers, stale count, low-disk warning) plus the six actions above. Numbers come from the scan cache and from free space measured once per scan — opening the menu never spawns a process or starts a scan.
+  - Regression tests: `the_menu_can_only_do_the_six_reviewed_actions`, `chips_are_square_and_actually_paint_something`, `headline_reports_reclaimable_and_kept`, `low_disk_only_speaks_up_when_the_disk_is_actually_low` (Rust); `keeps destructive calls out of the tray module`, `keeps destructive calls out of every page`, `stays out of the way while the user types`, `navigates on ⌘1…⌘4` (frontend).
 - `v0.6.0` — run-level history + targeted provider scan.
-  - `+get_history_runs` → `CleanupRun[]`; `HistoryEntry.run_id?`
-    (`#[serde(default)]`, so every pre-v0.6 history line still reads — legacy
-    entries are grouped by `finished_at_unix`).
-  - `scan_provider` now scans **only** the requested provider instead of a
-    full scan plus a filter, and merges the result into `AppState::resources`
-    so the other providers' id→path entries survive.
-  - Regression tests: `a_huge_run_no_longer_hides_earlier_runs`,
-    `legacy_lines_without_run_id_are_grouped_by_timestamp`,
-    `tail_read_handles_multi_chunk_files_and_straddling_lines`,
-    `run_totals` (frontend).
-- `v0.5.0` — retention, AI data, backend-enforced gates.
-  **Commands:** `+detect_scan_roots`, `+get_disk_free`; `cleanup` gains
-  `preview_token?`. **Events:** `+scan_provider_started`.
-  **Types (all additive, `#[serde(default)]` so older `settings.json` and
-  scan caches still load):** `Resource.age_days`, `Resource.retention_eligible`,
-  `ScanSummary.blocked_bytes`, `CleanupPreview.preview_token` +
-  `expires_at_unix`, `Settings.retention_days`, `Settings.docker_prune_scope`,
-  `Settings.sqlite_backup`.
-  **Behaviour:** measured `freed_bytes`; monotonic `scan_progress.done`;
-  backend now enforces confirmation, retention and Docker scope.
-  Providers 9 → 14 (`+docker_pruned`, `+global_cache`, `+opencode_fs`,
-  `+opencode_db`, `+claude`).
-  Regression tests: `old_cached_scans_without_impact_still_deserialize`,
-  `pre_v04_settings_file_without_disabled_providers_enables_everything`,
-  `empty_scan_roots_are_reseeded_from_defaults`,
-  `cleanup_rejects_without_a_valid_preview_token`,
-  `cleanup_rejects_expired_preview_token`,
-  `retention_blocked_resource_is_refused_by_the_engine`,
-  `privileged_scope_is_refused_until_the_user_opts_in`,
-  `runcommand_freed_bytes_is_measured_not_assumed`,
-  `progress_done_counts_completions_and_is_monotonic`,
-  `provider_started_fires_once_per_enabled_provider`,
-  `the_cutoff_is_computed_in_milliseconds_to_match_the_schema`.
-- `v0.4.0` — Provider toggles: `+get_providers` → `ProviderInfo[]`, and
-  `Settings.disabled_providers`. `cleanup_progress` fires **once per
-  finished item**.
+  - `+get_history_runs` → `CleanupRun[]`; `HistoryEntry.run_id?` (`#[serde(default)]`, so every pre-v0.6 history line still reads — legacy entries are grouped by `finished_at_unix`).
+  - `scan_provider` now scans **only** the requested provider instead of a full scan plus a filter, and merges the result into `AppState::resources` so the other providers' id→path entries survive.
+  - Regression tests: `a_huge_run_no_longer_hides_earlier_runs`, `legacy_lines_without_run_id_are_grouped_by_timestamp`, `tail_read_handles_multi_chunk_files_and_straddling_lines`, `run_totals` (frontend).
+- `v0.5.0` — retention, AI data, backend-enforced gates. **Commands:** `+detect_scan_roots`, `+get_disk_free`; `cleanup` gains `preview_token?`. **Events:** `+scan_provider_started`. **Types (all additive, `#[serde(default)]` so older `settings.json` and scan caches still load):** `Resource.age_days`, `Resource.retention_eligible`, `ScanSummary.blocked_bytes`, `CleanupPreview.preview_token` + `expires_at_unix`, `Settings.retention_days`, `Settings.docker_prune_scope`, `Settings.sqlite_backup`. **Behaviour:** measured `freed_bytes`; monotonic `scan_progress.done`; backend now enforces confirmation, retention and Docker scope. Providers 9 → 14 (`+docker_pruned`, `+global_cache`, `+opencode_fs`, `+opencode_db`, `+claude`). Regression tests: `old_cached_scans_without_impact_still_deserialize`, `pre_v04_settings_file_without_disabled_providers_enables_everything`, `empty_scan_roots_are_reseeded_from_defaults`, `cleanup_rejects_without_a_valid_preview_token`, `cleanup_rejects_expired_preview_token`, `retention_blocked_resource_is_refused_by_the_engine`, `privileged_scope_is_refused_until_the_user_opts_in`, `runcommand_freed_bytes_is_measured_not_assumed`, `progress_done_counts_completions_and_is_monotonic`, `provider_started_fires_once_per_enabled_provider`, `the_cutoff_is_computed_in_milliseconds_to_match_the_schema`.
+- `v0.4.0` — Provider toggles: `+get_providers` → `ProviderInfo[]`, and `Settings.disabled_providers`. `cleanup_progress` fires **once per finished item**.
 - `v0.3.0` — UI polish: `Resource.impact?`, additive.
 - `v0.2.0` — `+get_history`, `+get_cached_scan`, `Settings.theme`.
 - `v0.1.0` — initial 9 commands + 6 events.

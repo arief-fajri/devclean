@@ -52,14 +52,7 @@ UI selects ids → preview_cleanup() [re-measure + warnings]
 
 ## Key decisions
 
-1. **Sync trait, async manager.** `Provider::scan` is synchronous (walkdir is
-   blocking anyway); concurrency belongs to `ScanManager` via
-   `spawn_blocking`. The trait stays object-safe (`Arc<dyn Provider>`).
-2. **Opaque ids from the registry.** Providers return resources with an empty
-   `id`; `ProviderRegistry` fills in `nm:0001` etc. after the scan.
-3. **Docker is virtual.** Its path is a `__docker__/…` sentinel — no path
-   validation applies because no path is ever deleted; only the allowlisted
-   `docker builder prune -af` runs.
-4. **State lives in the backend.** `AppState.resources` is the single id→path
-   map. Restarting the app drops the map, so stale ids can never be reused
-   (safe by design).
+1. **Sync trait, async manager.** `Provider::scan` is synchronous (walkdir is blocking anyway); concurrency belongs to `ScanManager` via `spawn_blocking`. The trait stays object-safe (`Arc<dyn Provider>`).
+2. **Opaque ids from the registry.** Providers return resources with an empty `id`; `ProviderRegistry` fills in `nm:0001` etc. after the scan.
+3. **Docker is virtual.** Its path is a `__docker__/…` sentinel — no path validation applies because no path is ever deleted; only the allowlisted `docker builder prune -af` runs.
+4. **State lives in the backend.** `AppState.resources` is the single id→path map. Restarting the app drops the map, so stale ids can never be reused (safe by design).

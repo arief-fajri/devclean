@@ -1,9 +1,6 @@
 # System Model
 
-> An engineering note: the canonical DevClean model — what system we are
-> building, where its boundaries are, and which properties must always hold.
-> It describes how the project is built rather than how to use it. Guardrails
-> live in [guardrails.md](./guardrails.md).
+> An engineering note: the canonical DevClean model — what system we are building, where its boundaries are, and which properties must always hold. It describes how the project is built rather than how to use it. Guardrails live in [guardrails.md](./guardrails.md).
 
 ## 1. System boundary
 
@@ -21,8 +18,7 @@ src-tauri: commands + state (thin wiring, no filesystem logic)
      OS filesystem / `go` / `docker` CLI
 ```
 
-External dependencies are part of the model: the `go` and `docker` CLIs may
-be absent (providers return empty — absence is normal, not an error).
+External dependencies are part of the model: the `go` and `docker` CLIs may be absent (providers return empty — absence is normal, not an error).
 
 ## 2. Desired outcomes
 
@@ -68,15 +64,7 @@ An invariant violation is release-blocking.
 
 ### Why I11 and I12 exist
 
-Both were written down after finding that the guardrails claimed enforcement the
-code did not have:
+Both were written down after finding that the guardrails claimed enforcement the code did not have:
 
-- **I11** — `require_confirmation` and `allow_privileged_operations` were stored,
-  rendered in the UI, and never read by any backend logic. `cleanup` logged
-  `tracing::debug!("cleanup requires UI confirmation")` and proceeded. Any caller
-  that skipped the dialog deleted immediately.
-- **I12** — `freed_bytes` for every `RunCommand` resource equalled
-  `requested_bytes`, because the engine measured the "after" state on the
-  resource's sentinel path (never a directory → always 0). The figure recorded
-  in `history.jsonl` as "freed" was a *scan-time* number replayed as a result,
-  which is why a prune that reclaimed a few gigabytes could report ten.
+- **I11** — `require_confirmation` and `allow_privileged_operations` were stored, rendered in the UI, and never read by any backend logic. `cleanup` logged `tracing::debug!("cleanup requires UI confirmation")` and proceeded. Any caller that skipped the dialog deleted immediately.
+- **I12** — `freed_bytes` for every `RunCommand` resource equalled `requested_bytes`, because the engine measured the "after" state on the resource's sentinel path (never a directory → always 0). The figure recorded in `history.jsonl` as "freed" was a *scan-time* number replayed as a result, which is why a prune that reclaimed a few gigabytes could report ten.

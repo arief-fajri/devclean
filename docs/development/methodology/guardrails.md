@@ -1,12 +1,8 @@
 # Guardrails
 
-> An engineering note: the constraints that keep DevClean out of unacceptable
-> states. It describes how the project is built rather than how to use it.
+> An engineering note: the constraints that keep DevClean out of unacceptable states. It describes how the project is built rather than how to use it.
 > - A **test** answers: *did we observe the expected behavior?*
-> - A **guardrail** answers: *what behavior is never allowed?*
->
-> Every entry names its **enforcement mechanism** — without enforcement, a
-> guardrail is just a suggestion. System model: [system-model.md](./system-model.md).
+> - A **guardrail** answers: *what behavior is never allowed?* Every entry names its **enforcement mechanism** — without enforcement, a guardrail is just a suggestion. System model: [system-model.md](./system-model.md).
 
 ## Reading the enforcement column
 
@@ -209,32 +205,22 @@ G-AI-01  An automated change is for internal & reversible work only. Contract,
 
 ### What G-CI-03 is for, and how to satisfy it
 
-Twice a test passed locally and failed on a clean CI runner, because it
-asserted something about *the machine* while its name claimed to assert
-something about the product:
+Twice a test passed locally and failed on a clean CI runner, because it asserted something about *the machine* while its name claimed to assert something about the product:
 
 | Test | What it really asserted |
 |---|---|
 | `disk::the_app_data_directory_really_is_on_the_home_volume` | "this machine has run DevClean" — `app_data_dir()` does not exist until it has |
 | `policy_evidence::retention_and_ai_gates_now_reach_the_scan` | "this machine has AI history" — a runner has never run opencode or Claude |
 
-Neither was visible from a green local run. Both are only found on a machine
-that has never been used.
+Neither was visible from a green local run. Both are only found on a machine that has never been used.
 
 **Writing a test that satisfies it:**
 
-- Build the thing you are testing. `ScanManager::with_config` takes any
-  `Provider`, so a stub can exercise the scan pipeline without a real
-  directory existing.
-- Compare against a fixture you created in this test, never against what
-  happens to be on disk.
-- When a path may not exist yet, resolve to the nearest existing ancestor
-  rather than assuming.
+- Build the thing you are testing. `ScanManager::with_config` takes any `Provider`, so a stub can exercise the scan pipeline without a real directory existing.
+- Compare against a fixture you created in this test, never against what happens to be on disk.
+- When a path may not exist yet, resolve to the nearest existing ancestor rather than assuming.
 
-**Git fixtures (Wave B of the roadmap):** every setting a fixture depends on
-must be passed explicitly, never read from the machine's configuration. A
-runner has no global git identity, and a user's `core.excludesFile` or
-`core.fileMode` changes what `check-ignore` and `status` report.
+**Git fixtures (Wave B of the roadmap):** every setting a fixture depends on must be passed explicitly, never read from the machine's configuration. A runner has no global git identity, and a user's `core.excludesFile` or `core.fileMode` changes what `check-ignore` and `status` report.
 
 ```rust
 git -c init.defaultBranch=main init
@@ -244,9 +230,7 @@ git -c core.excludesFile=/dev/null -c core.fileMode=false check-ignore <path>
 
 ### Why these guardrails exist
 
-Every entry above names a mechanism a test can fail against. That is the whole
-point of the file, and it was learned the hard way: several controls shipped
-with prose that named an enforcement they did not have.
+Every entry above names a mechanism a test can fail against. That is the whole point of the file, and it was learned the hard way: several controls shipped with prose that named an enforcement they did not have.
 
 | Was | Now | What caught it |
 |---|---|---|
@@ -258,27 +242,10 @@ with prose that named an enforcement they did not have.
 | the Trash mode did not exist, so every delete was permanent | `delete_mode` defaults to `trash`; `freed_bytes` is 0 for a trashed artifact | `trash_mode_moves_aside_and_reports_pending_not_freed` |
 | the frontend tests — including G-UI-02/03/05 — were never run by CI | the `frontend` job runs `npm test` | `platform-claim.test.ts` asserts it |
 
-G-CI-01 and G-AI-01 were dropped once while this file was restructured, and
-nothing noticed — a guardrail document is not covered by a test that fails when
-an entry disappears. They are restored above. It is the same failure class as
-everything else here: a control that existed only as prose stopped existing,
-and the only reason it was found is that a CI job failed and sent someone
-looking.
+G-CI-01 and G-AI-01 were dropped once while this file was restructured, and nothing noticed — a guardrail document is not covered by a test that fails when an entry disappears. They are restored above. It is the same failure class as everything else here: a control that existed only as prose stopped existing, and the only reason it was found is that a CI job failed and sent someone looking.
 
 ## Open gaps
 
-- **G-SAFE-06 — the confirmation token is a workflow gate, not an
-  authentication boundary.** A fully compromised frontend can mint its own
-  preview and then call `cleanup`. What the token buys is real: an id set
-  that was never shown to the user is refused, and numbers cannot go stale
-  between preview and execute. What it cannot buy is protection from a
-  hostile UI, which would need an out-of-process frontend. Accepted as a
-  limitation rather than chased — see the [roadmap](../roadmap.md).
+- **G-SAFE-06 — the confirmation token is a workflow gate, not an authentication boundary.** A fully compromised frontend can mint its own preview and then call `cleanup`. What the token buys is real: an id set that was never shown to the user is refused, and numbers cannot go stale between preview and execute. What it cannot buy is protection from a hostile UI, which would need an out-of-process frontend. Accepted as a limitation rather than chased — see the [roadmap](../roadmap.md).
 
-- **G-REL-05 — scan-time CLI probes have no timeout.** `run_tool` (provider
-  queries) and `go_env` spawn processes without a deadline, and
-  `tokio::time::timeout` around a `spawn_blocking` task does not kill the
-  blocking thread — it only stops awaiting. Bounded in practice by
-  `PROVIDER_SCAN_TIMEOUT` returning, but a hung probe leaves a thread parked.
-  Planned to close in Wave B of the [roadmap](../roadmap.md), which adds git
-  subprocesses that need a deadline helper anyway.
+- **G-REL-05 — scan-time CLI probes have no timeout.** `run_tool` (provider queries) and `go_env` spawn processes without a deadline, and `tokio::time::timeout` around a `spawn_blocking` task does not kill the blocking thread — it only stops awaiting. Bounded in practice by `PROVIDER_SCAN_TIMEOUT` returning, but a hung probe leaves a thread parked. Planned to close in Wave B of the [roadmap](../roadmap.md), which adds git subprocesses that need a deadline helper anyway.
