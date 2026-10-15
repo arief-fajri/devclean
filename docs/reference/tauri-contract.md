@@ -1,8 +1,8 @@
 # Tauri Contract (public behavior contract)
 
 > The single document defining what the frontend may see. Changing this file
-> = changing the contract → requires human approval (Level B) + a regression
-> test. Version: **v0.9.0 (cache-first startup)**.
+> = changing the contract → requires a deliberate review and a regression test.
+> Version: **v0.9.0 (cache-first startup)**.
 
 ## Commands (15)
 
@@ -206,6 +206,10 @@ is no destructive item — see G-UI-02 in `docs/development/methodology/guardrai
 
 ## Contract changelog
 
+Contract versions are their own sequence, independent of the product version in
+`Cargo.toml` — the frontend and backend always ship together, so the contract
+changes on its own schedule. The two are aligned at 1.0.
+
 - `v0.9.0` — cache-first startup. **One command re-typed; no command added or
   removed.**
   - `get_cached_scan` now returns `CachedScan | null` (`{ summary,
@@ -259,9 +263,9 @@ is no destructive item — see G-UI-02 in `docs/development/methodology/guardrai
     (breaking to the type; nothing else consumed the old field).
   - **`retention_eligible` was never set to `false` in production code**, so
     `Settings.retention_days` had no effect on any cleanup and
-    `ScanSummary.blocked_bytes` was permanently zero. Measured after
-    the fix with a 10-year policy: **106/106 resources blocked, 69.6 GB held
-    back**; before it, the same policy blocked **zero**.
+    `ScanSummary.blocked_bytes` was permanently zero. With a 10-year policy the
+    gate now blocks every resource it should; before it, the same policy
+    blocked **none**.
   - `+Settings.ai_cleanup_enabled: boolean` (additive, `#[serde(default)]` →
     `false`). AI conversation history is reported with sizes but not
     selectable until the user opts in (`blocked_reason: "ai_read_only"`).
@@ -353,5 +357,5 @@ is no destructive item — see G-UI-02 in `docs/development/methodology/guardrai
   `Settings.disabled_providers`. `cleanup_progress` fires **once per
   finished item**.
 - `v0.3.0` — UI polish: `Resource.impact?`, additive.
-- `v0.2.0` — M3: `+get_history`, `+get_cached_scan`, `Settings.theme`.
+- `v0.2.0` — `+get_history`, `+get_cached_scan`, `Settings.theme`.
 - `v0.1.0` — initial 9 commands + 6 events.

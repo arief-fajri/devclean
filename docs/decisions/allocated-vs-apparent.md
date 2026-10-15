@@ -12,9 +12,9 @@ not the space it occupies. Measuring three real `node_modules` trees against
 
 | Tree | DevClean (logical) | `du` (allocated) | Delta |
 |---|---|---|---|
-| `v3-web/node_modules` | 0.95 GB | 1.17 GB | **−19%** |
-| `Sophia/node_modules` | 1.13 GB | 1.15 GB | −2% |
-| `volantis-platform/frontend/node_modules` | 0.79 GB | 0.78 GB | +1% |
+| A Svelte app's `node_modules` | 0.95 GB | 1.17 GB | **−19%** |
+| A Node service's `node_modules` | 1.13 GB | 1.15 GB | −2% |
+| A monorepo frontend's `node_modules` | 0.79 GB | 0.78 GB | +1% |
 
 Two independent effects were cancelling each other out:
 
@@ -27,14 +27,14 @@ $ stat -f "blocks=%b size=%z" one-byte
 blocks=8 size=1          →  8 × 512 = 4096 bytes allocated for 1 byte of payload
 ```
 
-A tree full of small files (`v3-web`) therefore has far more allocated bytes
-than its payload sum. This is the −19%.
+A tree full of small files (the first row above) therefore has far more
+allocated bytes than its payload sum. This is the −19%.
 
 ### Effect 2 — hard links over-report (duplicated inodes)
 
 `len()` is summed once per directory entry. A hard link is a second *name* for
-the same inode, so it was counted a second time. Measured on this project's own
-Rust `target/`:
+the same inode, so it was counted a second time. Measured on this repository's
+own Rust `target/`:
 
 ```text
 du -sk target           10.78 GB   ← the truth
@@ -64,7 +64,8 @@ actually frees.
 2. **Hard links are counted once per artifact**, keyed by `(dev, ino)`. The
    dedup is scoped to the artifact: an inode shared *between* two artifacts is
    still counted in both, because each one genuinely frees those blocks when
-   deleted alone. Netting that out is a total-level concern, deferred to A1b.
+   deleted alone. Netting that out is a total-level concern, deferred to the
+   cross-artifact deduplication in the [roadmap](../development/roadmap.md).
 
 3. **`apparent_bytes` is reported separately**, and only when it is materially
    *larger* than allocated — the sparse-file case (a 460 GB-declared disk image
@@ -83,8 +84,10 @@ actually frees.
   rejected rather than displayed. A dashboard that quietly disagrees with `du`
   is worse than a rescan.
 - `Resource.apparent_bytes` is a new optional contract field, additive.
-- A scan that previously reported 82.16 GB now reports 68.47 GB — **not** a
-  regression: 15.6 GB of it was the Rust `target/` hard-link double count.
+- Reported totals fall on any tree with hard links. On this repository's own
+  Rust `target/`, 15.6 GB of the old figure was the hard-link double count, so
+  the number dropping by that much is the figure becoming true, **not** a
+  regression.
 - Verified `delta = +0.0%` against `du` on six `node_modules` trees.
 
 ## Rejected alternatives
@@ -95,6 +98,6 @@ actually frees.
 - **Use allocated everywhere including cross-artifact.** Rejected for now: it
   would make a `node_modules` that is 100% hard-linked into a pnpm store read
   as `0` and vanish from the list. Per-artifact figures stay honest; only the
-  total deduplicates (A1b).
+  total deduplicates.
 - **Count directory blocks too.** Rejected: platform-dependent, and it breaks
   `allocated == 0 ⟺ empty`.

@@ -21,14 +21,14 @@ fixtures. Consequences:
 - The UI disabled nothing.
 
 A user could set "keep anything younger than 30 days", watch the setting
-persist, and still have a 3-day-old `node_modules` deleted. This is the fourth
-instance of the same failure class in this project: **a documented control with
-no enforcement mechanism**.
+persist, and still have a 3-day-old `node_modules` deleted. It is the same
+failure class this project has hit before: **a documented control with no
+enforcement mechanism**.
 
 A boolean was also the wrong shape. It could say "no" but never "why", so a
-user staring at an unselectable 13 GB row had no way to learn that AI history
-is report-only, or that a Docker scope was off, or that privileged operations
-were disabled.
+user staring at an unselectable row had no way to learn that AI history is
+report-only, or that a Docker scope was off, or that privileged operations were
+disabled.
 
 ## Decision
 
@@ -68,9 +68,9 @@ were disabled.
   figures. `#[serde(default)]` → `Apparent`, which is what every line written
   before v0.8.0 actually used, and the history page labels such runs
   "before 0.1.0" rather than silently comparing them with allocated totals.
-- Measured after the fix, on this machine: with a 10-year retention policy,
-  **106 of 106 resources** are blocked (96 by retention, 10 by AI report-only),
-  holding back 69.6 GB. Before the fix the same policy blocked **zero**.
+- With a 10-year retention policy the gate now blocks **every** resource it
+  should — by retention or by AI report-only — where before the fix the same
+  policy blocked **none**.
 
 ## Correction: the aggregate was named after one of its reasons
 

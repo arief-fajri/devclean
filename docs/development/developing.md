@@ -12,7 +12,7 @@ git clone <repo> && cd devclean
 cargo test --workspace
 
 # Frontend
-cd apps/desktop && npm install && cd ../..
+npm --prefix apps/desktop ci
 
 # Run
 cargo tauri dev
@@ -68,9 +68,10 @@ on expiry). Cancel settles in <1s (tested).
 
 - `cargo tauri dev` opens a window (Vite at `http://localhost:1420`)
 - No `curl` needed — verify via the UI: Scan lists the enabled providers
-  (`node_modules`, `Rust target`, `Go cache`, `Docker`, npm/pnpm/yarn,
-  Python, Cargo registry, Gradle, Xcode — absent tools simply report empty,
-  and providers disabled in Settings never appear)
+  (up to 14 — `node_modules`, Rust `target/`, Go cache, Docker, npm/pnpm/yarn
+  caches, Python caches, Cargo registry, Gradle caches, Xcode DerivedData,
+  opencode and Claude data; absent tools simply report empty, and providers
+  disabled in Settings never appear)
 - `cargo test --workspace` is green, `cargo clippy` has 0 warnings, `npm run check` has 0 errors, `npm test` (vitest) is green
 
 ## Prerequisites
@@ -108,17 +109,10 @@ cargo tauri dev                         # dev mode (from the repo root)
 cargo tauri build                       # native bundle (DMG/MSI/deb)
 ```
 
-## Adding a new provider (example: Ruby gems)
+## Adding a new provider
 
-1. Create `crates/providers/src/ruby.rs` implementing the `Provider` trait
-   (`id`, `name`, `default_safety`, `scan(roots, cancel)`, `cleanup_action`,
-   plus `extra_allowed_roots` if it owns a global cache outside scan roots).
-2. Register it in `all_providers()` + add an id prefix in `ScanManager`
-   (`short_prefix`).
-3. Write a test: dummy folder → scan finds it → `SafetyValidator` rejects
-   paths outside scan roots (and siblings of any extra root).
-4. Contract update? Not needed for a provider alone (types are unchanged) —
-   but note it in the roadmap + PR.
+See [CONTRIBUTING.md](../../CONTRIBUTING.md#adding-a-provider) — the steps live
+there so there is one place to keep them current.
 
 ## Troubleshooting
 

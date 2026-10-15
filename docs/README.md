@@ -1,26 +1,22 @@
 # Documentation
 
-Start with the [README](../README.md) if you want to install or use DevClean.
-This page is the index for everything under `docs/`.
+Start with the [README](../README.md) if you want to install or use DevClean. This page is the index for everything under `docs/`.
 
 ## Reference
 
 | Document | What it is |
 |---|---|
-| [reference/tauri-contract.md](reference/tauri-contract.md) | **The public behaviour contract.** Every command, event and field the frontend may see, with a changelog. Changing it requires human approval and a regression test. |
+| [reference/tauri-contract.md](reference/tauri-contract.md) | **The public behaviour contract.** Every command, event and field the frontend may see, with a changelog. Changing it requires a deliberate review and a regression test. |
 
 ## Architecture
 
 | Document | What it is |
 |---|---|
 | [architecture/overview.md](architecture/overview.md) | How the crates fit together and which way dependencies point. |
-| [development/methodology/system-model.md](development/methodology/system-model.md) | What system this is, where its boundaries are, and the invariants that must always hold. |
 
 ## Decisions
 
-Why things are the way they are, and what was rejected. Each record states a
-decision someone could reasonably have made differently — if it could not be
-rejected, it is a note, not a decision.
+Why things are the way they are, and what was rejected. Each record states a decision someone could reasonably have made differently — if it could not be rejected, it is a note, not a decision.
 
 | Record | Decision |
 |---|---|
@@ -33,9 +29,18 @@ rejected, it is a note, not a decision.
 | Document | What it is |
 |---|---|
 | [development/developing.md](development/developing.md) | Build, test and lint commands. The source of truth for how to run this. |
-| [development/roadmap.md](development/roadmap.md) | What is left, plus known gaps and non-goals. |
-| [development/plans/git-aware-classification.md](development/plans/git-aware-classification.md) | Phase 2 in detail. Proposed; not approved, not started. |
+| [development/roadmap.md](development/roadmap.md) | What is next, plus the accepted limitations and non-goals. |
+| [../CONTRIBUTING.md](../CONTRIBUTING.md) | The rules a change has to follow, and how to add a provider. |
+
+## Engineering notes
+
+These describe **how the project is built**, not how to use it or contribute to it. They are kept because the reasoning in them is load-bearing — several controls shipped without the enforcement the notes claimed, and these are where the lessons are written down.
+
+| Document | What it is |
+|---|---|
+| [development/methodology/system-model.md](development/methodology/system-model.md) | What system this is, where its boundaries are, and the invariants that must always hold. |
 | [development/methodology/guardrails.md](development/methodology/guardrails.md) | What behaviour is never allowed, and the mechanism that enforces each one. |
+| [../AGENTS.md](../AGENTS.md) | The working agreement for automated and human contributors. |
 
 ## Operations
 

@@ -30,7 +30,8 @@ npm --prefix apps/desktop run test     # vitest
 npm --prefix apps/desktop run build
 ```
 
-All six must pass. CI runs the same commands on macOS and Ubuntu.
+All six must pass. CI runs the Rust half on macOS and Ubuntu, and the frontend
+half on Ubuntu.
 
 ## The rules that are not negotiable
 
@@ -77,10 +78,10 @@ These exist because each one has already been violated once.
 5. **Run it against a real project on a real machine.** A wrong marker file
    passes unit tests and fails in the wild.
 
-If the provider lives inside project trees, it should declare `walk_rules()`
-once phase 3 of the [roadmap](docs/development/roadmap.md) lands — otherwise it
-walks the scan root independently and every added ecosystem costs another full
-traversal.
+If the provider lives inside project trees, it should contribute a rule to the
+shared walk once Wave C of the [roadmap](docs/development/roadmap.md) lands —
+otherwise it walks the scan root independently and every added ecosystem costs
+another full traversal.
 
 ## Changing something a user sees
 

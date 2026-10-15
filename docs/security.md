@@ -62,9 +62,9 @@ while the ancestor check still refuses to delete `$HOME` and friends.
 
 ## Privileged operations
 
-`allow_privileged_operations` defaults to **OFF**, and since v0.5.0 the
-cleanup **engine** consults it — it is no longer a stored flag that nothing
-reads. `Settings.docker_prune_scope` separately caps what Docker cleanup may
+`allow_privileged_operations` defaults to **OFF**, and the cleanup **engine**
+consults it — it is not a stored flag that nothing reads.
+`Settings.docker_prune_scope` separately caps what Docker cleanup may
 touch, and the two combine:
 
 | `docker_prune_scope` | Needs privileged | What actually runs |
@@ -78,7 +78,7 @@ Selecting a wider scope without enabling the privileged flag does not widen
 anything: the engine falls back to build-cache and the Settings dialog says so
 in as many words.
 
-## Confirmation token (v0.5.0)
+## Confirmation token
 
 `preview_cleanup` measures the exact id set and returns a `preview_token`
 (digest of the sorted ids + issue time + nonce, 300s TTL). While
@@ -110,8 +110,8 @@ Two categories, handled differently:
   takes a fixed glob AND a `skip_names` list; the skip list wins over the glob
   at any depth, so `history.jsonl`, `settings.json` and credentials survive
   even under `pattern: "*"` (I10).
-- **The SQLite history** — `opencode.db` is the single largest item on a
-  long-lived machine (13 GB here). It is gated by:
+- **The SQLite history** — `opencode.db` is often the single largest item on a
+  long-lived machine. It is gated by:
   1. a cheap structural probe (open + read the schema catalog);
   2. an **exclusive-lock test** — `BEGIN EXCLUSIVE` with a 0s busy timeout.
      If another process holds the file the lock fails and the cleanup is
@@ -125,14 +125,14 @@ Two categories, handled differently:
      claimed by the WAL and the file never shrinks.
 
 `sqlite_backup` defaults to **off**: a backup is a full second copy, and
-requiring 13 GB of headroom would make the feature unusable on smaller disks.
-With it off, the confirmation dialog states the size that would be needed and
-the risk, rather than failing at the last moment.
+requiring as much free space as the database itself would make the feature
+unusable on smaller disks. With it off, the confirmation dialog states the size
+that would be needed and the risk, rather than failing at the last moment.
 
 ### Why `pgrep` is not the idleness gate
 
-The legacy `cleanup.sh` guards its database work with `pgrep -f opencode`.
-Measured on this machine, from a process launched inside a sandbox:
+A `pgrep -f opencode` guard looks reasonable and does not work. Measured from a
+process launched inside a sandbox:
 
 ```text
 $ pgrep -fl opencode            # exit 1, nothing — while opencode IS running
@@ -147,8 +147,8 @@ authoritative gate, which needs no process-table access at all, and keeps
 
 ### Why there is no `PRAGMA quick_check`
 
-Measured: `quick_check(1)` on the 14 GB `opencode.db` takes **2m11s**. A
-multi-minute freeze before a confirmation dialog is not acceptable, and the
+Measured: `quick_check(1)` on a multi-gigabyte `opencode.db` takes **minutes**.
+A multi-minute freeze before a confirmation dialog is not acceptable, and the
 check is not needed for safety — SQLite's `DELETE` and `VACUUM` are both
 transactional, so a damaged database fails the operation and leaves the
 original file untouched.

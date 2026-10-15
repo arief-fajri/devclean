@@ -70,7 +70,7 @@ Age is the **most recent** of artifact mtime, last commit and project directory 
 
 ### The gate
 
-`BlockReason::Protected` has existed since phase 1 with nothing producing it. This gives it a producer, placed **first** in `block_reason_for`, ahead of the AI and retention gates — deleting a tracked file is data loss regardless of what every other setting says.
+`BlockReason::Protected` has existed since the first release with nothing producing it. This gives it a producer, placed **first** in `block_reason_for`, ahead of the AI and retention gates — deleting a tracked file is data loss regardless of what every other setting says.
 
 | Artifact | Repository | Result |
 |---|---|---|

@@ -18,18 +18,8 @@ Stack: **Rust + Tauri 2 + Svelte 5 + Tailwind** (no React, no heavy UI kit).
 project names or sizes. See
 [docs/operations/screenshots.md](docs/operations/screenshots.md).</sub>
 
-On a real machine the numbers are much larger. The development machine this was
-built on reports **82.6 GB** reclaimable across `~/VOLANTIS` and `~/EXP`, which
-it auto-detects as scan roots:
-
-```text
-node_modules         14.8 GB
-Rust target          18.7 GB
-Docker images/vol    16.7 GB
-Go cache              8.4 GB
-System caches         5.8 GB
-opencode history     14.2 GB
-```
+The fixture keeps the numbers small so the screenshots stay readable. On a real
+machine the totals run into the tens of gigabytes; the shape is the same.
 
 ## Install
 
@@ -59,7 +49,7 @@ cargo install tauri-cli --version "^2" --locked
 
 npm --prefix apps/desktop ci
 cargo tauri build
-# → apps/desktop/src-tauri/target/release/bundle/dmg/*.dmg
+# → target/release/bundle/dmg/*.dmg
 ```
 
 ## Development
@@ -75,7 +65,7 @@ cargo tauri dev
 - The DevClean window opens (Vite at `http://localhost:1420`)
 - **Overview** shows a reclaimable total and the **Scan now** button lists 14
   providers without any setup (see below)
-- `cargo test --workspace` is green · `cargo clippy` has 0 warnings · `npm run check` has 0 errors
+- `cargo test --workspace` is green · `cargo clippy` has 0 warnings · `npm --prefix apps/desktop run check` has 0 errors
 
 Full details: [docs/development/developing.md](docs/development/developing.md),
 and [CONTRIBUTING.md](CONTRIBUTING.md) for the rules a change has to follow.
@@ -148,14 +138,6 @@ The design rationale is in [docs/security.md](docs/security.md); the reporting
 policy is in [SECURITY.md](SECURITY.md). A bug that deletes or moves data it
 should not is treated as P0.
 
-## Ground rules (summary)
-
-1. **Frontend = untrusted.** The UI only sends `{provider, resource_id}` — never a raw path.
-2. **Backend = authority.** Every deletion goes through `SafetyValidator`; paths are resolved server-side.
-3. **Stable contract.** Adding/changing a Tauri command or event requires a `docs/reference/tauri-contract.md` update + test.
-4. **Safety first.** Read [docs/security.md](docs/security.md) and the `G-SAFE-*` guardrails before touching cleanup code.
-5. **Numbers are measured.** `freed_bytes` is `before − after` for every branch, including subprocess-backed cleanup. When the after-state cannot be measured, the result says `0` and why — it never asserts the requested figure was freed.
-
 ## The window, and what is left when you close it
 
 The app is a sidebar with four pages — **Overview** (reclaimable total, free
@@ -179,33 +161,15 @@ diagnostics and navigation only, and two guardrails enforce it
 ## Scan roots are detected, not typed
 
 Default roots cover the usual folders (`~/Projects`, `~/Code`, `~/Workspace`,
-`~/VOLANTIS`, `~/EXP`, `~/src`, `~/repos`, `~/dev`, `~/work`), filtered to those
-that exist. **Settings → Scan → Detect folders** discovers the rest — it walks
-`$HOME` at most two levels deep, never descends into a cache, and reports an
-estimated size per candidate so you can pick without opening anything.
+`~/Dev`, `~/Repos`, `~/Src`, `~/Work`), filtered to those that exist.
+**Settings → Scan → Detect folders** discovers the rest — it walks `$HOME` at
+most two levels deep, never descends into a cache, and reports an estimated
+size per candidate so you can pick without opening anything.
 
-A pre-v0.5.0 `settings.json` with an empty `scan_roots` array is re-seeded from
-the defaults on load; otherwise the app would stay permanently blind to
-`node_modules` on a machine whose work lives outside `~/Projects`.
-
-## Relationship to the legacy `~/scripts/cleanup.sh`
-
-The two are **independent by design** and safe to run together — both are
-idempotent, and neither depends on the other:
-
-| Area | DevClean | `cleanup.sh` |
-|---|---|---|
-| Report | ✅ main UI | ✅ `check` |
-| Safe caches | ✅ | ✅ |
-| `node_modules` | ✅ | ✅ |
-| Docker images/volumes | ✅ via **Settings → Cleanup → Docker scope** | ✅ manual, asks first |
-| AI history (`opencode.db`, `claude`) | ✅ with a retention policy | ✅ `clean-ai --keep-days N` |
-| Scheduling | GUI only | cron/launchd |
-
-There is no bridge between them: DevClean never invokes the script, and the
-script never reads DevClean's state.
-
-New AI agents / developers start at [AGENTS.md](AGENTS.md).
+A `settings.json` written before this release with an empty `scan_roots` array
+is re-seeded from the defaults on load; otherwise the app would stay
+permanently blind to `node_modules` on a machine whose work lives outside the
+well-known folder names.
 
 ## Status
 
@@ -231,8 +195,12 @@ installed simply reports nothing.</sub>
 ## Documentation
 
 - [docs/README.md](docs/README.md) — index of everything under `docs/`
+- [docs/architecture/overview.md](docs/architecture/overview.md) — how the
+  crates fit together and which way dependencies point
 - [docs/development/roadmap.md](docs/development/roadmap.md) — what is next
 - [CHANGELOG.md](CHANGELOG.md) — what has shipped
 - [docs/reference/tauri-contract.md](docs/reference/tauri-contract.md) — the
   public behaviour contract
 - [CONTRIBUTING.md](CONTRIBUTING.md) — how to build, test and contribute
+- [AGENTS.md](AGENTS.md) — the working agreement for automated and human
+  contributors

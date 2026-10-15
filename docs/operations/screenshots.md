@@ -24,9 +24,9 @@ no way around that from a script, so the capture is a two-command manual step.
 
 The fixture is about **950 MB** and takes ~20 seconds to build. Docker is
 disabled in its settings: those providers query the daemon rather than a path,
-so a scan under the fixture would report the *real* machine's Docker figures —
-16.7 GB here, enough to dominate the dashboard and make every other provider
-look like a rounding error.
+so a scan under the fixture would report the *real* machine's Docker figures,
+enough to dominate the dashboard and make every other provider look like a
+rounding error.
 
 ## Procedure
 
@@ -55,8 +55,6 @@ demo/make-fixture.sh clean
 The three images are already referenced. `G-PUB-04` asserts two things and will
 fail the build if either is violated:
 
-`G-PUB-04` asserts two things and will fail the build if either is violated:
-
 1. every local image path starts with `demo/` — so a screenshot of a real
    machine, with real project names, cannot be committed
 2. every local image path exists on disk — so the README cannot reference a
@@ -77,10 +75,11 @@ fail the build if either is violated:
 ## Docker is the one exception
 
 Docker providers query the daemon over `docker system df`; they have no
-filesystem path, so the fixture cannot isolate them. A scan under the fixture
-reports the real machine's Docker figures. That is harmless — image sizes are
-not personal — but if you need a fully hermetic run, add
-`"disabled_providers": ["docker", "docker_pruned"]` to the fixture settings.
+filesystem path, so the fixture cannot isolate them — a scan under it would
+report the real machine's Docker figures. `make-fixture.sh` therefore ships
+with `"disabled_providers": ["docker", "docker_pruned"]` in the fixture
+settings. Remove them only if you want a screenshot that includes Docker, and
+remember that the sizes it shows are the machine's own.
 
 ## Why this is also a smoke test
 

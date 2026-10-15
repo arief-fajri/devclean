@@ -1,6 +1,7 @@
-# Guardrails (lean edition)
+# Guardrails
 
-> Constraints that keep DevClean out of unacceptable states.
+> An engineering note: the constraints that keep DevClean out of unacceptable
+> states. It describes how the project is built rather than how to use it.
 > - A **test** answers: *did we observe the expected behavior?*
 > - A **guardrail** answers: *what behavior is never allowed?*
 >
@@ -181,8 +182,8 @@ G-REL-06  Nothing on the boot path may spawn a process without a deadline.
 ```text
 G-CI-01  Merging requires: cargo test + clippy 0 warnings + clean fmt +
            svelte-check 0 errors + vitest.
-           Enforcement: CI — .github/workflows/ci.yml runs all of them on
-           macOS and Ubuntu ✅
+           Enforcement: CI — the `rust` job runs the Rust half on macOS and
+           Ubuntu; the `frontend` job runs svelte-check and vitest on Ubuntu ✅
 G-CI-02  Every guardrail enforced by a test must run in CI. A test nobody runs
            is a suggestion.
            Enforcement: CI — the `frontend` job runs `npm test`, so
@@ -200,9 +201,9 @@ G-CI-03  A test may not depend on the machine's state: the contents of $HOME,
            resolves to the nearest EXISTING ancestor instead of assuming the
            directory exists ✅ · test — policy_evidence.rs uses stub providers
            rather than scanning the real machine ✅
-G-AI-01  AI Level A is for internal & reversible changes only. Contract/security/
-           destructive/dependency changes = Level B, requiring explicit human
-           approval. See AGENTS.md.
+G-AI-01  An automated change is for internal & reversible work only. Contract,
+           security, destructive and dependency changes require explicit human
+           approval before implementation, not after. See AGENTS.md.
            Enforcement: process ✅
 ```
 
@@ -230,7 +231,7 @@ that has never been used.
 - When a path may not exist yet, resolve to the nearest existing ancestor
   rather than assuming.
 
-**Git fixtures (phase 2 of the roadmap):** every setting a fixture depends on
+**Git fixtures (Wave B of the roadmap):** every setting a fixture depends on
 must be passed explicitly, never read from the machine's configuration. A
 runner has no global git identity, and a user's `core.excludesFile` or
 `core.fileMode` changes what `check-ignore` and `status` report.
@@ -241,38 +242,28 @@ git -c user.name=test -c user.email=test@example.invalid commit -m "..."
 git -c core.excludesFile=/dev/null -c core.fileMode=false check-ignore <path>
 ```
 
-### What changed in v0.5.0, and why the claims above changed
+### Why these guardrails exist
 
-Every entry above names a mechanism that a test can fail against. Three of them
-previously named mechanisms that did not exist:
+Every entry above names a mechanism a test can fail against. That is the whole
+point of the file, and it was learned the hard way: several controls shipped
+with prose that named an enforcement they did not have.
 
-| Was | Now | Trigger |
+| Was | Now | What caught it |
 |---|---|---|
 | "G-UI-01 enforced by code" | enforced by `preview_token` in the engine | the old enforcement was a `tracing::debug!` |
-| v0.7.0 UI shell revamp (G-UI-02/03) | the menu-bar id allowlist + the page-level scan of `routes/*.svelte` | converting the dialogs into pages could have put a cleanup call one click from the list |
-| v0.7.1 tray icon showed a white square (G-UI-04) | the asset is now decoded and measured in CI, and generated from one geometry | the earlier PNG was written as greyscale *without* an alpha channel, so macOS painted the whole frame; nothing in Rust, the build or a screenshot diff had caught it |
-
-### What v0.8.0 changed, and why
-
-Four controls were found claiming enforcement they did not have. Each is now
-backed by a mechanism a test can fail against:
-
-| Was | Now | Evidence |
-|---|---|---|
-| `retention_eligible` was never set to `false` in production, so `Settings.retention_days` had no effect and `retention_blocked_bytes` was permanently 0 | `blocked_reason` stamped at scan time by `devclean_core::policy::block_reason_for`, refused by the engine from the same function | 10-year policy now blocks **106/106** resources, 69.6 GB held back (was 0) |
+| the UI shell revamp could put a cleanup call one click from the list (G-UI-02/03) | the menu-bar id allowlist + the page-level scan of `routes/*.svelte` | reading the diff |
+| the tray icon painted a white square (G-UI-04) | the asset is decoded and measured in CI, and generated from one geometry | the earlier PNG was written as greyscale *without* an alpha channel, so macOS painted the whole frame; nothing in Rust, the build or a screenshot diff caught it |
+| `retention_eligible` was never set to `false` in production, so `Settings.retention_days` had no effect and `retention_blocked_bytes` was permanently 0 | `blocked_reason` stamped at scan time by `devclean_core::policy::block_reason_for`, refused by the engine from the same function | a 10-year policy now blocks every resource it should; before, it blocked none |
 | `freed_bytes` for command-backed cleanup always equalled `requested` | `before − after`, both measured; unmeasurable reports 0 with a reason | `runcommand_freed_bytes_is_measured_not_assumed` |
 | the Trash mode did not exist, so every delete was permanent | `delete_mode` defaults to `trash`; `freed_bytes` is 0 for a trashed artifact | `trash_mode_moves_aside_and_reports_pending_not_freed` |
-| 102 frontend tests — including G-UI-02/03/05 — were never run by CI | the `frontend` job runs `npm test` | `platform-claim.test.ts` asserts it |
+| the frontend tests — including G-UI-02/03/05 — were never run by CI | the `frontend` job runs `npm test` | `platform-claim.test.ts` asserts it |
 
-### G-CI-01 and G-AI-01 were missing, not absent
-
-Both were dropped by the v0.7.0 UI-shell commit while the file was
-restructured, and nothing noticed — a guardrail document is not covered by a
-test that fails when an entry disappears. They are restored above.
-
-That is the same failure class as everything else in this file: a control that
-existed only as prose stopped existing, and the only reason it was found is
-that a CI job failed and sent someone looking.
+G-CI-01 and G-AI-01 were dropped once while this file was restructured, and
+nothing noticed — a guardrail document is not covered by a test that fails when
+an entry disappears. They are restored above. It is the same failure class as
+everything else here: a control that existed only as prose stopped existing,
+and the only reason it was found is that a CI job failed and sent someone
+looking.
 
 ## Open gaps
 
@@ -281,10 +272,13 @@ that a CI job failed and sent someone looking.
   preview and then call `cleanup`. What the token buys is real: an id set
   that was never shown to the user is refused, and numbers cannot go stale
   between preview and execute. What it cannot buy is protection from a
-  hostile UI, which would need an out-of-process frontend.
+  hostile UI, which would need an out-of-process frontend. Accepted as a
+  limitation rather than chased — see the [roadmap](../roadmap.md).
 
 - **G-REL-05 — scan-time CLI probes have no timeout.** `run_tool` (provider
   queries) and `go_env` spawn processes without a deadline, and
   `tokio::time::timeout` around a `spawn_blocking` task does not kill the
   blocking thread — it only stops awaiting. Bounded in practice by
   `PROVIDER_SCAN_TIMEOUT` returning, but a hung probe leaves a thread parked.
+  Planned to close in Wave B of the [roadmap](../roadmap.md), which adds git
+  subprocesses that need a deadline helper anyway.

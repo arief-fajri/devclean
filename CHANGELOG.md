@@ -24,7 +24,7 @@ First public release. macOS only; see
 [Platform support](README.md#platform-support).
 
 Everything below landed before this tag, so it is listed as one release rather
-than the internal milestones it was built in.
+than as the sequence of milestones it was built in.
 
 ### Added
 
@@ -36,8 +36,8 @@ than the internal milestones it was built in.
   DerivedData, opencode data, opencode history, Claude data.
 - **Scan roots are detected, not typed.** Defaults cover the usual dev folders
   and **Settings → Scan → Detect folders** discovers the rest by walking `$HOME`
-  at most two levels, never descending into a cache. A pre-0.8.0 `settings.json`
-  with an empty root list is re-seeded from the defaults.
+  at most two levels, never descending into a cache. A `settings.json` written
+  before this release with an empty root list is re-seeded from the defaults.
 - Concurrent scanning (max 4 providers at once) with per-provider timeouts,
   cooperative cancellation that settles in under a second, and a live progress
   bar that names the provider currently running.
@@ -104,9 +104,8 @@ than the internal milestones it was built in.
 
 #### Project
 
-- 190 Rust tests and 123 frontend tests.
-- CI on macOS **and** Ubuntu, a job that compiles the declared MSRV, and a
-  pinned toolchain.
+- 195 Rust tests and 139 frontend tests.
+- CI on macOS **and** Ubuntu, with a pinned toolchain.
 - Guardrails with enforcement mechanisms rather than prose — including ones
   enforced by tests that read the source: pages may not call the cleanup API,
   the tray menu is a fixed allowlist, every button has a pointer cursor, and a
@@ -120,9 +119,8 @@ fixed, each with a test that fails if the mechanism disappears.
 
 - **`Settings.retention_days` had no effect on any cleanup.** The backing field
   was never set to `false` anywhere in production code, so the setting
-  persisted, displayed, and did nothing. With a 10-year policy, 106 of 106
-  resources are blocked now (69.6 GB held back); the same policy previously
-  blocked zero.
+  persisted, displayed, and did nothing. A 10-year policy now blocks every
+  resource it should; before, the same policy blocked none.
 - **`freed_bytes` for subprocess-backed cleanup always equalled the requested
   figure.** The after-state was measured on a path that is never a directory, so
   it always read zero. A prune that reclaimed 3 GB reported 10 GB.

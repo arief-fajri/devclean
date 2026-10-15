@@ -110,7 +110,13 @@ jobs:
       - name: Stage artifacts
         run: |
           set -euo pipefail
-          BUNDLE=apps/desktop/src-tauri/target/release/bundle
+          # The bundle lands in the Cargo workspace's target dir, which is the
+          # repo root because `apps/desktop/src-tauri` is a workspace member.
+          # Fall back to the crate-local path in case that ever stops being
+          # true, and fail loudly rather than publish an empty release.
+          BUNDLE=target/release/bundle
+          test -d "$BUNDLE" || BUNDLE=apps/desktop/src-tauri/target/release/bundle
+          test -d "$BUNDLE" || { echo "no bundle directory found"; exit 1; }
           mkdir -p dist-artifacts
 
           cp "$BUNDLE"/dmg/*.dmg dist-artifacts/

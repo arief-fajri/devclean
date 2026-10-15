@@ -56,7 +56,7 @@ Open **History** and find the run. Each row shows one of:
 |---|---|---|
 | `success` | Done. | Nothing. |
 | `partial` | Some bytes were freed before an error. | Read the reason; usually a permission problem or a file that vanished mid-run. Rescan and retry. |
-| `failed` | Nothing was freed. | The reason is in the row. A `Failed` row with `freed_bytes: 0` and a "could not be measured" message means the tool ran but its effect could not be verified — check manually. |
+| `failed` | Nothing was freed. | The reason is in the row. A `failed` row with `freed_bytes: 0` and a "could not be measured" message means the tool ran but its effect could not be verified — check manually. |
 | `cancelled` | You cancelled; the in-flight item finished, the rest were skipped. | Rescan and select the rest. |
 
 A `failed` row never claims bytes it did not measure. If the reason says the
@@ -74,6 +74,9 @@ The resource is listed with a badge explaining why. Each reason has one fix:
 | `needs opt-in` | The action needs privileged operations. | **Settings → Cleanup → Privileged operations**. Read the consequence first — this is the one that removes images and volumes. |
 | `scope off` | Docker cleanup is off. | **Settings → Cleanup → Docker**: choose a scope. |
 | `protected` | A tracked file in a repository with uncommitted changes. | Commit or stash the changes, then rescan. |
+
+`protected` arrives with git-aware classification; see the
+[roadmap](../development/roadmap.md). Until then no resource carries it.
 
 None of these are bypassable from the UI. The backend refuses the resource even
 if its id is sent directly to the cleanup command, so a badge is an explanation

@@ -49,8 +49,6 @@ move itself — `os.Rename` into `~/.Trash`, with a recursive copy-then-remove
 fallback when the source is on another filesystem (`EXDEV`). The original is
 removed only after the copy fully succeeds.
 
-This is also what the reference implementation (`ohing504/devclean`) does.
-
 ## Consequences
 
 - A trashed artifact lands in `~/.Trash` under its own name and can be dragged
@@ -61,10 +59,11 @@ This is also what the reference implementation (`ohing504/devclean`) does.
 - Symlinks are recreated as links, never followed, in the cross-device copy.
 - `CleanupResult.moved_to_trash` and `HistoryEntry.moved_to_trash` are additive
   contract fields.
-- **Non-goal: Linux/XDG Trash.** The freedesktop format needs `.trashinfo`
-  files for the artifact to appear in a file manager's Trash. Implementing half
-  of it would be worse than not claiming it, and the shipped targets are macOS
-  only. Recorded here rather than silently approximated.
+- **Deferred: Linux/XDG Trash.** The freedesktop format needs `.trashinfo`
+  files for the artifact to appear in a file manager's Trash. At v0.8.0 the
+  shipped targets were macOS only, so implementing half of it would have been
+  worse than not claiming it. The [roadmap](../development/roadmap.md) plans to
+  implement it for 1.0 and mark it unverified until it runs on a real desktop.
 
 ## Rejected alternatives
 

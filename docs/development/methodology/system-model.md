@@ -1,8 +1,9 @@
-# System Model (lean edition)
+# System Model
 
-> The canonical DevClean model: what system we are building, where its
-> boundaries are, and which properties must always hold. Guardrails live in
-> [guardrails.md](./guardrails.md).
+> An engineering note: the canonical DevClean model — what system we are
+> building, where its boundaries are, and which properties must always hold.
+> It describes how the project is built rather than how to use it. Guardrails
+> live in [guardrails.md](./guardrails.md).
 
 ## 1. System boundary
 
@@ -12,7 +13,7 @@ Svelte UI (untrusted)
    ▼
 src-tauri: commands + state (thin wiring, no filesystem logic)
    │
-   ├─ ScanManager ──→ providers (node / rust / go / docker)
+   ├─ ScanManager ──→ providers (14: node_modules, rust target, Go, Docker, …)
    ├─ CleanupEngine ─→ providers.cleanup_action()
    └─ SafetyValidator (gatekeeper, from core)
           │
@@ -65,7 +66,7 @@ I12. freed_bytes is MEASURED (before − after), never asserted. When the after-
 
 An invariant violation is release-blocking.
 
-### Why I11 and I12 exist (v0.5.0)
+### Why I11 and I12 exist
 
 Both were written down after finding that the guardrails claimed enforcement the
 code did not have:
@@ -76,5 +77,6 @@ code did not have:
   that skipped the dialog deleted immediately.
 - **I12** — `freed_bytes` for every `RunCommand` resource equalled
   `requested_bytes`, because the engine measured the "after" state on the
-  resource's sentinel path (never a directory → always 0). The 10.82 GB recorded
-  in `history.jsonl` as "freed" was a *scan-time* figure replayed as a result.
+  resource's sentinel path (never a directory → always 0). The figure recorded
+  in `history.jsonl` as "freed" was a *scan-time* number replayed as a result,
+  which is why a prune that reclaimed a few gigabytes could report ten.
