@@ -335,7 +335,7 @@ mod tests {
     /// it asserted nothing at all (G-CI-03).
     #[test]
     fn detect_marks_already_configured_roots() {
-        let home = std::env::temp_dir().join(format!("devclean-detect-{}", std::process::id()));
+        let home = std::env::temp_dir().join(format!("devclean-configured-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&home);
         let project = home.join("Projects").join("web");
         std::fs::create_dir_all(&project).unwrap();
