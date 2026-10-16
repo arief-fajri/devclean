@@ -65,13 +65,13 @@
 </script>
 
 <section
-  class="rounded-xl border bg-white p-4 transition-opacity dark:bg-zinc-900 {scanning
+  class="rounded-xl border bg-white transition-opacity dark:bg-zinc-900 {scanning
     ? 'border-zinc-100 opacity-60 dark:border-zinc-800/60'
     : 'border-zinc-200 dark:border-zinc-800'}"
   data-testid="provider-card-{summary.provider}"
   data-scanning={scanning}
 >
-  <div class="flex items-start gap-3">
+  <div class="flex items-start gap-3 sticky z-10 bg-white dark:bg-zinc-900 p-4 rounded-xl" style="top: 0px;">
     <input
       type="checkbox"
       class="mt-2.5 h-4 w-4 shrink-0 accent-emerald-600 disabled:opacity-40"
@@ -179,7 +179,7 @@
   </div>
 
   {#if expanded}
-    <ul class="mt-1 divide-y divide-zinc-100 dark:divide-zinc-800">
+    <ul class="mt-1 divide-y divide-zinc-100 dark:divide-zinc-800 px-4 pb-4">
       {#each resources as r (r.id)}
         <ResourceRow
           resource={r}
