@@ -272,17 +272,31 @@ fn is_excluded(path: &std::path::Path, excluded: &[PathBuf]) -> bool {
     excluded.iter().any(|x| path == *x || path.starts_with(x))
 }
 
+/// Two-letter prefix per provider for the opaque id (`nm:0000`). Every
+/// registered provider needs its OWN prefix: counters are per-provider, so
+/// a shared prefix silently hands two providers the same id, and the
+/// id-keyed state map then resolves one of them to the other's path.
+/// `every_provider_prefix_is_unique` fails until a new provider is added
+/// here.
 fn short_prefix(provider_id: &str) -> &str {
     match provider_id {
         "node_modules" => "nm",
         "rust_target" => "rs",
         "go_cache" => "go",
         "docker" => "dk",
+        "docker_pruned" => "dp",
         "npm_cache" => "np",
         "python_cache" => "py",
         "cargo_registry" => "cg",
         "gradle_cache" => "gr",
         "xcode_data" => "xc",
+        "global_cache" => "gl",
+        "opencode_fs" => "of",
+        "claude" => "cl",
+        "opencode_db" => "od",
+        // Stubs and future providers share one prefix on purpose: the
+        // uniqueness test turns this into a failure instead of two
+        // providers quietly sharing `xx:0000`.
         _ => "xx",
     }
 }
@@ -769,6 +783,70 @@ mod tests {
             seen.iter().map(|(d, _)| *d).collect::<Vec<_>>(),
             vec![1, 2, 3]
         );
+    }
+
+    #[test]
+    fn every_provider_prefix_is_unique() {
+        // Counters are per-provider, so two providers sharing a prefix
+        // hand out the SAME id. The id-keyed state map then resolves one
+        // provider's row to the other provider's path — a cleanup started
+        // from what the user saw would delete something else. Every
+        // registered provider must therefore own its prefix, and no
+        // registered provider may sit on the stub fallback.
+        let providers = all_providers();
+        let mut seen: HashMap<&str, &str> = HashMap::new();
+        for p in &providers {
+            let prefix = short_prefix(p.id());
+            assert_ne!(
+                prefix,
+                "xx",
+                "provider {} has no prefix in short_prefix",
+                p.id()
+            );
+            if let Some(previous) = seen.insert(prefix, p.id()) {
+                panic!("prefix {prefix} is shared by {previous} and {}", p.id());
+            }
+        }
+        assert_eq!(seen.len(), providers.len());
+    }
+
+    #[tokio::test]
+    async fn providers_that_once_shared_a_prefix_never_share_an_id() {
+        // Five real provider ids all used to map to `xx`, so each of their
+        // first resources was `xx:0000`. Scanned together, the state map
+        // kept only the last one and the UI's selection resolved ids across
+        // providers. Every id must be unique within one scan.
+        let ids = [
+            "global_cache",
+            "docker_pruned",
+            "opencode_fs",
+            "claude",
+            "opencode_db",
+        ];
+        let providers: Vec<Arc<dyn Provider>> = ids
+            .iter()
+            .map(|id| Arc::new(SlowProvider { tag: id, slices: 2 }) as Arc<dyn Provider>)
+            .collect();
+        let mgr = ScanManager::with_config(providers, Duration::from_secs(60));
+        let summary = mgr
+            .scan_all(
+                vec![PathBuf::from("/tmp")],
+                &[],
+                &[],
+                permissive(),
+                None,
+                None,
+            )
+            .await;
+        let unique: std::collections::HashSet<&str> =
+            summary.resources.iter().map(|r| r.id.as_str()).collect();
+        assert_eq!(
+            unique.len(),
+            summary.resources.len(),
+            "duplicate ids in one scan: {:?}",
+            summary.resources.iter().map(|r| &r.id).collect::<Vec<_>>()
+        );
+        assert_eq!(summary.resources.len(), 10, "2 resources × 5 providers");
     }
 }
 
