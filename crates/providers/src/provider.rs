@@ -249,29 +249,54 @@ pub fn dir_size_checked(path: &Path, cancel: &AtomicBool) -> Option<u64> {
     dir_size_detail_checked(path, cancel).map(|d| d.allocated)
 }
 
+/// Running total for ONE artifact's subtree, fed one file at a time.
+///
+/// The single implementation behind both [`dir_size_detail_checked`] (which
+/// walks a directory itself) and the shared project-tree walk (which is
+/// already inside the directory), so the two can never disagree about hard
+/// links, sparse files or symlinks.
+#[derive(Default)]
+pub(crate) struct SizeScope {
+    allocated: u64,
+    apparent: u64,
+    seen: std::collections::HashSet<(u64, u64)>,
+}
+
+impl SizeScope {
+    /// Feed one entry's metadata in. Directories and symlinks contribute
+    /// nothing; every file adds its logical length to `apparent`, but a
+    /// hard-linked inode adds its blocks to `allocated` only once.
+    pub(crate) fn add(&mut self, m: &std::fs::Metadata) {
+        if !m.is_file() {
+            return;
+        }
+        self.apparent = self.apparent.saturating_add(m.len());
+        if self.seen.insert(inode_key(m)) {
+            self.allocated = self.allocated.saturating_add(allocated_bytes(m));
+        }
+    }
+
+    pub(crate) fn finish(&self) -> DirSize {
+        DirSize {
+            allocated: self.allocated,
+            apparent: self.apparent,
+        }
+    }
+}
+
 /// Both figures for a tree, for scan time where the resource is being
 /// built. Cancellable like [`dir_size_checked`].
 pub fn dir_size_detail_checked(path: &Path, cancel: &AtomicBool) -> Option<DirSize> {
-    let mut size = DirSize::default();
-    // Hard links share one set of blocks; counting a file once per link
-    // would over-report a pnpm store or any deduplicated tree.
-    let mut seen: std::collections::HashSet<(u64, u64)> = std::collections::HashSet::new();
+    let mut scope = SizeScope::default();
     for e in walkdir::WalkDir::new(path).follow_links(false).into_iter() {
         if cancel.load(Ordering::Relaxed) {
             return None;
         }
         let Ok(e) = e else { continue };
         let Ok(m) = e.metadata() else { continue };
-        if !m.is_file() {
-            continue;
-        }
-        size.apparent = size.apparent.saturating_add(m.len());
-        let key = inode_key(&m);
-        if seen.insert(key) {
-            size.allocated = size.allocated.saturating_add(allocated_bytes(&m));
-        }
+        scope.add(&m);
     }
-    Some(size)
+    Some(scope.finish())
 }
 
 /// Uncancellable [`dir_size_detail_checked`].

@@ -14,7 +14,8 @@
 
 use devclean_core::Resource;
 use devclean_providers::{
-    walk_tree_rules, NodeModulesProvider, PythonCacheProvider, RustTargetProvider, TreeRule,
+    dir_size_detail, walk_tree_rules, NodeModulesProvider, PythonCacheProvider, RustTargetProvider,
+    TreeRule,
 };
 use std::collections::BTreeSet;
 use std::fs;
@@ -408,5 +409,54 @@ fn the_shared_walk_reports_exactly_the_sum_of_the_solo_walks() {
     }
     assert_eq!(solo, combined, "solo walks and the shared walk disagree");
     assert_eq!(combined, expected_set());
+    fs::remove_dir_all(&root).unwrap();
+}
+
+#[test]
+fn folded_sizing_matches_measuring_each_artifact_directly() {
+    // Wave C's second half: sizing moved INTO the walk. Each row must carry
+    // the same bytes the standalone measurement would have produced —
+    // allocated (hard links deduped per artifact) and the sparse-file
+    // annotation alike.
+    let root = scratch("sizing");
+    build_fixture(&root);
+    let found = scan_tree_providers(&root);
+    assert!(!found.is_empty());
+    for r in &found {
+        let direct = dir_size_detail(&r.path);
+        assert_eq!(
+            r.size_bytes,
+            direct.allocated,
+            "allocated parity for {}",
+            r.path.display()
+        );
+        assert_eq!(
+            r.apparent_bytes,
+            direct.apparent_if_material(),
+            "apparent parity for {}",
+            r.path.display()
+        );
+    }
+    fs::remove_dir_all(&root).unwrap();
+}
+
+#[test]
+fn an_artifact_is_sized_past_the_match_depth_boundary() {
+    // The match depth gates WHERE a rule may match, never how far its
+    // artifact is sized: node_modules matched at depth 2 keeps the walk
+    // descending to depth 11, because those bytes are the resource.
+    let root = scratch("deep");
+    write_file(&root.join("proj/package.json"), b"{}");
+    let deep = root.join("proj/node_modules/a/b/c/d/e/f/g/h");
+    write_file(&deep.join("blob.bin"), &pseudo_random(4096, 11));
+
+    let found = scan_tree_providers(&root);
+    let hit = find(&found, "node_modules", "proj/node_modules", &root);
+    assert!(
+        hit.size_bytes >= 4096,
+        "contents below the match-depth boundary must still be sized, got {}",
+        hit.size_bytes
+    );
+    assert_eq!(hit.size_bytes, dir_size_detail(&hit.path).allocated);
     fs::remove_dir_all(&root).unwrap();
 }

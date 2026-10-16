@@ -1,18 +1,20 @@
 //! Rules for the shared project-tree walk (Wave C).
 //!
 //! `node_modules`, `rust_target` and `python_cache` used to walk the scan
-//! roots once apiece, each re-traversing the same dev tree. They now
-//! contribute a [`TreeRuleSpec`] — what directory names to match, what
-//! sibling file must exist, how deep the match may sit — and the scanner
-//! walks each root exactly once, offering every entry to every rule.
+//! roots once apiece, each re-traversing the same dev tree, and then each
+//! measured its matches by walking the artifact AGAIN. They now contribute a
+//! [`TreeRuleSpec`] — what directory names to match, what sibling file must
+//! exist, how deep the match may sit — and the scanner walks each root once,
+//! offering every entry to every rule and sizing each match inside the same
+//! traversal.
 //!
-//! Matching, skipping and depth gating live in [`walk_tree_rules`];
-//! measurement stays inside [`TreeRule::materialize`] until sizing folds
-//! into the same traversal in the next phase.
+//! Matching, skipping, depth gating and sizing all live in
+//! [`walk_tree_rules`]; a rule only turns a [`Match`] plus its measured
+//! [`DirSize`] into a [`Resource`].
 
-use crate::provider::Provider;
+use crate::provider::{DirSize, Provider, SizeScope};
 use devclean_core::Resource;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
@@ -29,6 +31,8 @@ pub struct TreeRuleSpec {
     pub sibling_file: Option<&'static str>,
     /// Maximum depth, counted from the scan root the way `walkdir` counts
     /// it (the root itself is depth 0): 6 for node and python, 5 for rust.
+    /// Depth gates the MATCH only — a matched artifact is always sized in
+    /// full, however deep its contents run.
     pub max_depth: usize,
     /// A match nested inside another match of the same rule is not
     /// reported — its bytes still belong to the enclosing artifact
@@ -54,21 +58,37 @@ pub struct Match {
 pub trait TreeRule: Provider {
     fn spec(&self) -> TreeRuleSpec;
 
-    /// Turn one match into a resource, or `None` to skip it (measurement
-    /// failed, empty artifact, …). Returned [`Resource`]s carry
-    /// `id == ""`, like every other scan path.
-    fn materialize(&self, m: &Match, cancel: &AtomicBool) -> Option<Resource>;
+    /// Turn one match and its measured size into a resource, or `None` to
+    /// skip it (an empty artifact, for the rules that skip those).
+    /// Returned [`Resource`]s carry `id == ""`, like every other scan path.
+    fn materialize(&self, m: &Match, size: &DirSize) -> Option<Resource>;
 }
 
-/// Walk every `root` exactly once, offering every entry to every rule.
+/// An artifact currently being sized by the walk: opened when a rule
+/// matches a directory, fed every file beneath it, closed when the walk
+/// leaves the directory again.
+struct Scope {
+    rule: usize,
+    dir: PathBuf,
+    depth: usize,
+    size: SizeScope,
+}
+
+/// Walk every `root` exactly once, offering every entry to every rule and
+/// sizing each match in the same pass.
 ///
-/// This replaces the three independent project-tree walks. The traversal
-/// mirrors them entry for entry so the reported resource set cannot drift:
-/// symlinks are never followed (`follow_links(false)`, G-SCAN-03), unreadable
-/// entries are skipped rather than fatal (G-SCAN-06), `cancel` is checked
-/// before every entry so a set flag settles in <1s (G-SCAN-02), and each
-/// rule enforces its own `max_depth` even though the shared traversal goes
-/// as deep as the deepest rule.
+/// This replaces three walks plus three measurements. The traversal mirrors
+/// the per-provider walks entry for entry so the reported rows and their
+/// sizes cannot drift: symlinks are never followed (`follow_links(false)`,
+/// G-SCAN-03), unreadable entries are skipped rather than fatal (G-SCAN-06),
+/// `cancel` is checked before every entry and a partially sized artifact is
+/// dropped rather than reported (G-SCAN-02), and each rule enforces its own
+/// `max_depth` on the match.
+///
+/// A matched artifact is sized in FULL: the walk keeps descending into it
+/// even past every rule's `max_depth`, because those bytes are the resource.
+/// Away from any match it prunes at `max(spec.max_depth)` — no rule could
+/// match deeper, so there is nothing left to look for.
 ///
 /// One group of resources is returned per rule, in input order — the
 /// registry assigns ids per provider, so rows must stay grouped.
@@ -88,60 +108,103 @@ pub fn walk_tree_rules(
         if cancel.load(Ordering::Relaxed) {
             break;
         }
-        let iter = walkdir::WalkDir::new(root)
-            .follow_links(false)
-            .max_depth(max_depth)
-            .into_iter();
-        for entry in iter {
+        let mut scopes: Vec<Scope> = Vec::new();
+        let mut iter = walkdir::WalkDir::new(root).follow_links(false).into_iter();
+        while let Some(entry) = iter.next() {
             if cancel.load(Ordering::Relaxed) {
                 break;
             }
             // An entry the walk cannot read is skipped, not fatal.
             let Ok(e) = entry else { continue };
-            // Every current rule matches on a directory name; files are
-            // only relevant as the sibling check below.
-            if !e.file_type().is_dir() {
-                continue;
-            }
-            for (i, spec) in specs.iter().enumerate() {
-                if e.depth() > spec.max_depth {
-                    continue;
+            let path = e.path();
+
+            // Close every scope this entry has left. Depth-first order means
+            // an open scope is closed exactly when the walk steps out of its
+            // directory; the innermost is always the first to go.
+            while let Some(scope) = scopes.last() {
+                if path.starts_with(&scope.dir) {
+                    break;
                 }
-                if !spec
-                    .dir_names
-                    .contains(&e.file_name().to_str().unwrap_or(""))
-                {
-                    continue;
-                }
-                if spec.skip_nested
-                    && e.path()
-                        .parent()
-                        .map(|p| {
-                            p.components().any(|c| {
-                                spec.dir_names
-                                    .contains(&c.as_os_str().to_str().unwrap_or(""))
-                            })
-                        })
-                        .unwrap_or(false)
-                {
-                    continue;
-                }
-                let sibling_ok = match spec.sibling_file {
-                    None => true,
-                    Some(file) => e.path().parent().unwrap_or(e.path()).join(file).is_file(),
-                };
-                if !sibling_ok {
-                    continue;
-                }
+                let scope = scopes.pop().expect("checked by last()");
                 let m = Match {
-                    dir: e.path().to_path_buf(),
-                    depth: e.depth(),
+                    dir: scope.dir,
+                    depth: scope.depth,
                 };
-                if let Some(resource) = rules[i].materialize(&m, cancel) {
-                    groups[i].push(resource);
+                if let Some(resource) = rules[scope.rule].materialize(&m, &scope.size.finish()) {
+                    groups[scope.rule].push(resource);
                 }
+            }
+
+            if e.file_type().is_dir() {
+                for (i, spec) in specs.iter().enumerate() {
+                    if e.depth() > spec.max_depth {
+                        continue;
+                    }
+                    if !spec.dir_names.contains(&name_of(&e)) {
+                        continue;
+                    }
+                    if spec.skip_nested && parent_has_dir_name(path, spec.dir_names) {
+                        continue;
+                    }
+                    let sibling_ok = match spec.sibling_file {
+                        None => true,
+                        Some(file) => path.parent().unwrap_or(path).join(file).is_file(),
+                    };
+                    if !sibling_ok {
+                        continue;
+                    }
+                    scopes.push(Scope {
+                        rule: i,
+                        dir: path.to_path_buf(),
+                        depth: e.depth(),
+                        size: SizeScope::default(),
+                    });
+                }
+                // Past every rule's match depth with nothing open: no entry
+                // below can match or belong to an artifact. Prune the subtree.
+                if e.depth() >= max_depth && scopes.is_empty() {
+                    iter.skip_current_dir();
+                }
+            } else if !scopes.is_empty() {
+                // A file inside one or more artifacts: feed every scope it
+                // belongs to (an artifact inside another counts in both).
+                if let Ok(m) = e.metadata() {
+                    for scope in &mut scopes {
+                        scope.size.add(&m);
+                    }
+                }
+            }
+        }
+
+        // A cancel mid-artifact drops it: a partial size is a wrong size,
+        // and the caller already treats a cancelled run as incomplete.
+        if cancel.load(Ordering::Relaxed) {
+            scopes.clear();
+        }
+        for scope in scopes.drain(..) {
+            let m = Match {
+                dir: scope.dir,
+                depth: scope.depth,
+            };
+            if let Some(resource) = rules[scope.rule].materialize(&m, &scope.size.finish()) {
+                groups[scope.rule].push(resource);
             }
         }
     }
     groups
+}
+
+fn name_of(e: &walkdir::DirEntry) -> &str {
+    e.file_name().to_str().unwrap_or("")
+}
+
+/// True when any directory above `path` carries one of `names` — the old
+/// providers' "don't report a nested match" test, kept component-exact.
+fn parent_has_dir_name(path: &Path, names: &[&str]) -> bool {
+    path.parent()
+        .map(|p| {
+            p.components()
+                .any(|c| names.contains(&c.as_os_str().to_str().unwrap_or("")))
+        })
+        .unwrap_or(false)
 }

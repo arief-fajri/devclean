@@ -7,12 +7,11 @@
 //! (G-SAFE-03).
 
 use super::provider::{
-    age_days, dir_size_detail_checked, impact, measure_dir, project_detail, CleanupAction, Provider,
+    age_days, impact, measure_dir, project_detail, CleanupAction, DirSize, Provider,
 };
 use crate::tree::{Match, TreeRule, TreeRuleSpec};
 use devclean_core::{Resource, SafetyLevel};
 use std::path::{Path, PathBuf};
-use std::sync::atomic::AtomicBool;
 
 pub struct PythonCacheProvider;
 
@@ -57,8 +56,7 @@ impl TreeRule for PythonCacheProvider {
         }
     }
 
-    fn materialize(&self, m: &Match, cancel: &AtomicBool) -> Option<Resource> {
-        let size = dir_size_detail_checked(&m.dir, cancel)?;
+    fn materialize(&self, m: &Match, size: &DirSize) -> Option<Resource> {
         if size.allocated == 0 {
             return None;
         }
@@ -97,6 +95,7 @@ impl TreeRule for PythonCacheProvider {
 mod tests {
     use super::*;
     use crate::tree::walk_tree_rules;
+    use std::sync::atomic::AtomicBool;
     use std::sync::Arc;
 
     fn fixture_root(tag: &str) -> PathBuf {

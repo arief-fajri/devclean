@@ -5,12 +5,11 @@
 //! Matching happens in the shared project-tree walk ([`crate::tree`]).
 
 use super::provider::{
-    age_days, dir_size_detail_checked, impact, measure_dir, project_detail, CleanupAction, Provider,
+    age_days, impact, measure_dir, project_detail, CleanupAction, DirSize, Provider,
 };
 use crate::tree::{Match, TreeRule, TreeRuleSpec};
 use devclean_core::{Resource, SafetyLevel};
 use std::path::{Path, PathBuf};
-use std::sync::atomic::AtomicBool;
 
 pub struct NodeModulesProvider;
 
@@ -52,10 +51,8 @@ impl TreeRule for NodeModulesProvider {
         }
     }
 
-    fn materialize(&self, m: &Match, cancel: &AtomicBool) -> Option<Resource> {
+    fn materialize(&self, m: &Match, size: &DirSize) -> Option<Resource> {
         let dir = &m.dir;
-        // Skip (don't abort) entries whose size can't be measured.
-        let size = dir_size_detail_checked(dir, cancel)?;
         let project = dir.parent().unwrap_or(dir);
         let project_name = project
             .file_name()
@@ -89,6 +86,7 @@ impl TreeRule for NodeModulesProvider {
 mod tests {
     use super::*;
     use crate::tree::walk_tree_rules;
+    use std::sync::atomic::AtomicBool;
     use std::sync::Arc;
 
     fn fixture_root(tag: &str) -> PathBuf {

@@ -19,8 +19,13 @@ use devclean_providers::{
     TreeRule, XcodeDataProvider,
 };
 use std::path::PathBuf;
-use std::sync::atomic::AtomicBool;
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::Arc;
+
+/// Fixture paths must be unique per call: these tests run in parallel
+/// threads of one process, and a shared path means one test deletes the
+/// tree while another walks it.
+static FIXTURE_SEQ: AtomicUsize = AtomicUsize::new(0);
 
 /// A scan that must never touch the filesystem: every provider checks the
 /// flag before its first probe or measurement.
@@ -33,8 +38,12 @@ fn cancelled_scan(p: &dyn OwnScanner) -> Vec<devclean_core::Resource> {
 /// One fixture holding a match for every tree rule, so the tree half of the
 /// contract runs against real work a scan WOULD report without the flag —
 /// an empty root would make the assertion vacuous.
-fn tree_fixture() -> PathBuf {
-    let root = std::env::temp_dir().join(format!("devclean-cancel-tree-{}", std::process::id()));
+fn tree_fixture(tag: &str) -> PathBuf {
+    let n = FIXTURE_SEQ.fetch_add(1, Ordering::SeqCst);
+    let root = std::env::temp_dir().join(format!(
+        "devclean-cancel-tree-{}-{tag}-{n}",
+        std::process::id()
+    ));
     let _ = std::fs::remove_dir_all(&root);
     std::fs::create_dir_all(root.join("proj/node_modules")).unwrap();
     std::fs::write(root.join("proj/package.json"), b"{}").unwrap();
@@ -50,7 +59,7 @@ fn tree_fixture() -> PathBuf {
 /// The tree rules ride the shared walk; the walk checks the flag before it
 /// offers the first entry, so a pre-set cancel reports nothing.
 fn tree_scan(rule: Arc<dyn TreeRule>, cancel: bool) -> Vec<devclean_core::Resource> {
-    let root = tree_fixture();
+    let root = tree_fixture(rule.id());
     let flag = AtomicBool::new(cancel);
     let groups = walk_tree_rules(std::slice::from_ref(&root), &[rule], &flag);
     let _ = std::fs::remove_dir_all(&root);
