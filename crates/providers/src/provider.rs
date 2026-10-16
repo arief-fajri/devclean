@@ -127,6 +127,19 @@ pub trait Provider: Send + Sync {
     fn extra_allowed_roots(&self) -> Vec<PathBuf> {
         Vec::new()
     }
+
+    /// The project directory whose age describes this artifact, for the
+    /// composite-age / activity classification (v0.10.0). `None` means the
+    /// provider's resources carry no meaningful project age (global caches)
+    /// and the scanner leaves them unclassified (I9).
+    ///
+    /// Project-tree providers return the artifact's parent — `node_modules`
+    /// and `target/` sit one level under the project that owns them. This
+    /// keeps the classification provider-driven rather than a table of
+    /// provider ids in the scanner (P1).
+    fn project_root(&self, _artifact: &Path) -> Option<PathBuf> {
+        None
+    }
 }
 
 /// What a resource actually occupies on disk.
@@ -258,7 +271,8 @@ pub fn home_dir() -> Option<PathBuf> {
 
 /// Run `<program> <args>` and parse stdout as a path (e.g. `pnpm store
 /// path`, `yarn cache dir`). Returns `None` when the tool is missing —
-/// absence is normal, not an error. Fixed args only (G-SAFE-02).
+/// absence is normal, not an error. Fixed args only (G-SAFE-02), under a
+/// deadline (G-REL-05).
 pub fn tool_output_dir(program: &str, args: &[&str]) -> Option<PathBuf> {
     let text = run_tool(program, args)?;
     let p = PathBuf::from(text.trim());
@@ -269,11 +283,7 @@ pub fn tool_output_dir(program: &str, args: &[&str]) -> Option<PathBuf> {
 }
 
 fn run_tool(program: &str, args: &[&str]) -> Option<String> {
-    std::process::Command::new(program)
-        .args(args)
-        .stdin(std::process::Stdio::null())
-        .output()
-        .ok()
+    super::exec::run_with_deadline(program, args, devclean_core::PROVIDER_COMMAND_TIMEOUT)
         .filter(|o| o.status.success())
         .and_then(|o| String::from_utf8(o.stdout).ok())
 }

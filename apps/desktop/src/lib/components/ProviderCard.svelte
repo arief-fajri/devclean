@@ -1,9 +1,10 @@
 <script lang="ts">
   import ResourceRow from "$lib/components/ResourceRow.svelte";
-  import { formatBytes, formatPct, isStaleSignal } from "$lib/format";
+  import { formatBytes, formatPct } from "$lib/format";
   import { providerMeta } from "$lib/providerMeta";
   import { blockLabel } from "$lib/tauri";
   import type { ProviderSummary, Resource } from "$lib/tauri";
+  import { isStaleActivity } from "$lib/view";
   import { ChevronDown, LoaderCircle, Lock, RotateCw } from "lucide-svelte";
 
   interface Props {
@@ -53,7 +54,7 @@
   const barPct = $derived(
     totalBytes > 0 ? Math.max(2, Math.min(100, (summary.reclaimable_bytes / totalBytes) * 100)) : 0,
   );
-  const staleCount = $derived(resources.filter((r) => isStaleSignal(r.detail)).length);
+  const staleCount = $derived(resources.filter((r) => isStaleActivity(r.activity)).length);
   const reviewCount = $derived(resources.filter((r) => r.safety !== "safe").length);
   const allChecked = $derived(
     resources.length > 0 && resources.every((r) => selected.includes(r.id)),

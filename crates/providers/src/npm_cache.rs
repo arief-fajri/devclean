@@ -110,6 +110,8 @@ impl Provider for NpmCacheProvider {
                 safety: SafetyLevel::Safe,
                 detail: None,
                 age_days: None,
+                activity: None,
+                last_commit_unix: None,
                 blocked_reason: None,
                 blocked_detail: None,
                 impact: impact(m.consequence, Some(m.cost), Some(&clean_command(m))),

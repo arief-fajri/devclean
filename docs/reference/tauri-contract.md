@@ -1,6 +1,6 @@
 # Tauri Contract (public behavior contract)
 
-> The single document defining what the frontend may see. Changing this file = changing the contract → requires a deliberate review and a regression test. Version: **v0.9.0 (cache-first startup)**.
+> The single document defining what the frontend may see. Changing this file = changing the contract → requires a deliberate review and a regression test. Version: **v0.10.0 (git-aware classification)**.
 
 ## Commands (15)
 
@@ -55,8 +55,16 @@ interface Resource {
   apparent_bytes?: number | null;
   safety: SafetyLevel;
   detail?: string; impact?: ResourceImpact;
-  /** Age in whole days; null for global caches, whose age is meaningless. */
+  /** Age in whole days; null for global caches, whose age is meaningless.
+   *  v0.10.0: the COMPOSITE age — the most recent of the artifact's mtime,
+   *  the repository's last commit and the project directory's mtime. */
   age_days?: number | null;
+  /** v0.10.0: how recently the artifact was touched, as a tier. Null when
+   *  the scanner could not classify it (a global cache, or a path outside
+   *  any repository). The toolbar filters on this, never on `detail`. */
+  activity?: Activity | null;
+  /** v0.10.0: unix seconds of the containing repository's last commit. */
+  last_commit_unix?: number | null;
   /** Why this resource cannot be selected, or null when it can. The backend
    *  refuses any resource carrying a reason, even if its id is sent directly. */
   blocked_reason?: BlockReason | null;
@@ -64,6 +72,9 @@ interface Resource {
    *  retention policy (this is 12d old)". */
   blocked_detail?: string | null;
 }
+
+type Activity = "active" | "recent" | "stale" | "dormant";
+// < 7d      7–30      30–90     90+
 
 type BlockReason = "retention" | "ai_read_only" | "privileged_required"
   | "docker_scope" | "protected";
@@ -141,7 +152,9 @@ Not:
 6. **Navigation is frontend-local.** The page id lives in `$lib/nav` and is never sent to the backend; a reload always starts on Overview. No command was added to support the sidebar.
 7. **The Dock icon opens the window (v0.7.3).** Closing the window hides it (note 5), which left the Dock icon on screen and inert: macOS sends `applicationShouldHandleReopen` on a Dock click, but `Builder::run` installs an *empty* event handler (`build()?.run(|_, _| {})`), so nothing acted on it. The shell now runs its own loop and handles `RunEvent::Reopen` by calling the same `show_main` the menu bar uses. The Dock, the tray icon and the menu all reveal the window through one function, so they cannot drift.
 8. **Free space is re-measured where it moves (v0.7.3).** The dashboard read `get_disk_free` once at launch, so after a cleanup the card quoted the pre-deletion figure. Both the UI store and the menu bar's cached copy now refresh when a cleanup finishes. `get_disk_free` also stops spawning `df` on the boot path (v0.7.3): it is measured with `statvfs`, and a regression test compares the two so the substitution cannot silently drift.
-9. **Startup paints from the cache and rests (v0.9.0).** The app used to run a full scan on every launch, unconditionally: `scan_automatically` (default OFF) was stored and rendered but never read, and the window opened onto a loader nobody asked for. Now the shell paints `get_cached_scan` and runs a scan **only when `scan_automatically` is on** (or when the user clicks Scan Now / Scan again, or a cleanup finished). With no cache the dashboard shows an explicit "You haven't scanned yet" warning instead of scanning on its own. Because the cache is now the resting state, `CachedScan.saved_at_unix` is surfaced so the summary can report the scan's real age and flag a stale cache rather than presenting old numbers as current.
+9. **Startup paints from the cache and rests (v0.9.0).** The app used to run a full scan on every launch, unconditionally: `scan_automatically` (default OFF) was stored and rendered but never read, and the window opened onto a loader nobody asked for. Now the shell paints `get_cached_scan` and runs a scan **only when `scan_automatically` is on** (or when the user clicks Scan Now / Scan again, or a cleanup finished, which re-scans only the providers it touched — see note 11). With no cache the dashboard shows an explicit "You haven't scanned yet" warning instead of scanning on its own. Because the cache is now the resting state, `CachedScan.saved_at_unix` is surfaced so the summary can report the scan's real age and flag a stale cache rather than presenting old numbers as current.
+10. **`age_days` is a composite, and a new gate can appear (v0.10.0).** `Resource.age_days` no longer means "project directory age": it is the most recent of the artifact's mtime, the repository's last commit and the project directory's mtime, so a project committed to yesterday stops looking dormant. `Resource.activity` is the tier derived from it. And `blocked_reason: "protected"` can now appear: an artifact that a repository tracks (or a new file it does not yet track) while that repository has uncommitted changes is refused — deleting it would lose work that is committed nowhere. A **gitignored** artifact (`node_modules`) stays cleanable even in a dirty repository. Paths outside any repository, and machines without git, are left exactly as before: `activity` is null and nothing is protected.
+11. **A finished cleanup re-scans only the providers it touched (v0.10.0).** It used to run a full scan of every provider, which dimmed the list, disabled selection and made the app feel frozen right after a delete. Now the shell removes the cleaned resources from the list immediately (the backend reported which ids succeeded), so the update does not wait on a scan, and then re-scans only the providers behind those resources, in the background: the list stays interactive, the other providers keep their last-known figures (flagged by the existing "partial re-scan" badge), and the touched providers' rows and the on-disk cache are refreshed. If nothing identifiable was touched, it falls back to a full scan. A full scan is still available from Scan Now / the menu bar.
 
 ## Menu bar surface (v0.7.0)
 
@@ -162,6 +175,15 @@ One click of either button opens the menu (`show_menu_on_left_click`); the info 
 
 Contract versions are their own sequence, independent of the product version in `Cargo.toml` — the frontend and backend always ship together, so the contract changes on its own schedule. The two are aligned at 1.0.
 
+- `v0.10.0` — git-aware classification. **No command added, removed or re-typed.**
+  - `+Resource.activity?: "active" | "recent" | "stale" | "dormant" | null` (additive, `#[serde(default)]`), derived from the composite age. The toolbar filters on it instead of parsing the display string; `lib/format.ts` loses `parseAgeDays`/`isStaleSignal`.
+  - `+Resource.last_commit_unix?: number | null` (additive, `#[serde(default)]`) — the containing repository's last commit.
+  - **Behaviour:** `age_days` becomes the composite of artifact mtime, last commit and project directory mtime. A project committed to daily no longer looks dormant, so `retention_days` stops offering an active project's cache.
+  - **Behaviour:** `blocked_reason: "protected"` can now appear. `BlockReason::Protected` (present since v0.8.0 with no producer) is stamped when an artifact is tracked — or untracked and not ignored — in a repository with uncommitted changes, and refused by the engine. It is checked **first**, ahead of the AI and retention gates. A gitignored artifact stays cleanable even in a dirty repository.
+  - **Behaviour:** the scan cache is versioned `2 → 3`; a v2 cache (mtime-only age) is rejected rather than shown.
+  - **Behaviour:** a finished cleanup re-scans only the providers it touched instead of every provider, in the background and without flipping the global scanning state. `scan_provider` also updates the on-disk cache for that provider (preserving the cache's timestamp), so a restart does not resurrect cleaned resources.
+  - Decision record: [docs/decisions/gitignore-aware-protection.md](../decisions/gitignore-aware-protection.md).
+  - Regression tests: `a_tracked_artifact_in_a_dirty_repo_is_protected`, `a_gitignored_artifact_stays_cleanable_in_a_dirty_repo`, `a_clean_repo_protects_nothing`, `an_untracked_file_in_a_dirty_repo_is_protected`, `last_commit_beats_a_stale_mtime`, `activity_thresholds_at_the_boundaries`, `a_path_outside_any_repo_is_not_classified`, `one_check_ignore_call_per_repo` (Rust); `isStaleActivity` (frontend).
 - `v0.9.0` — cache-first startup. **One command re-typed; no command added or removed.**
   - `get_cached_scan` now returns `CachedScan | null` (`{ summary, saved_at_unix }`) instead of `ScanSummary | null`, so the UI can report the scan's real age. `devclean_core::CachedScan` and `devclean_scanner::load_cached_scan` are new; `load_cached_summary` stays for the menu bar, which reads the file's mtime for age.
   - **Behaviour:** a scan runs on launch only when `Settings.scan_automatically` is on. The shell paints the cache and rests; with no cache it shows a "You haven't scanned yet" warning. Previously the launch scan was unconditional and `scan_automatically` was a control with no effect.

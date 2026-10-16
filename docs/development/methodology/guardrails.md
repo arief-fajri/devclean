@@ -93,6 +93,14 @@ G-REL-04  No gate lives only in the UI (I11). Confirmation, retention and the
            test — retention_blocked_resource_is_refused_by_the_engine,
            privileged_scope_is_refused_until_the_user_opts_in,
            ordinary_providers_are_never_touched_by_the_docker_gates ✅
+G-REL-05  Scan-time CLI probes carry a deadline (closed in Wave B).
+           `run_tool`, `go_env`, `pgrep` and the git calls all go through
+           `devclean_providers::exec::run_with_deadline`, which kills the child
+           when `PROVIDER_COMMAND_TIMEOUT` (30s) fires. Before this they spawned
+           with no timeout and a hung probe parked a thread.
+           Enforcement: code — one helper every provider subprocess uses ·
+           test — a_hung_child_is_killed_at_the_deadline,
+           a_missing_program_is_none_not_a_panic ✅
 ```
 
 ## 5. Publication (G-PUB)
@@ -167,7 +175,7 @@ G-REL-06  Nothing on the boot path may spawn a process without a deadline.
            settings: no timeout, no way to report progress, and a hang there
            would have held the whole startup. It is measured with `statvfs`
            instead. The general form of this — unbounded provider probes — is
-           still open as G-REL-05; what is closed is the app's own boot path.
+           now closed too as G-REL-05 (Wave B).
            Enforcement: code — `disk::report()` is the only free-space source
            and it makes no `Command`; test — `statvfs_agrees_with_df` keeps the
            substitute honest against the `df` it replaced ✅
@@ -247,5 +255,3 @@ G-CI-01 and G-AI-01 were dropped once while this file was restructured, and noth
 ## Open gaps
 
 - **G-SAFE-06 — the confirmation token is a workflow gate, not an authentication boundary.** A fully compromised frontend can mint its own preview and then call `cleanup`. What the token buys is real: an id set that was never shown to the user is refused, and numbers cannot go stale between preview and execute. What it cannot buy is protection from a hostile UI, which would need an out-of-process frontend. Accepted as a limitation rather than chased — see the [roadmap](../roadmap.md).
-
-- **G-REL-05 — scan-time CLI probes have no timeout.** `run_tool` (provider queries) and `go_env` spawn processes without a deadline, and `tokio::time::timeout` around a `spawn_blocking` task does not kill the blocking thread — it only stops awaiting. Bounded in practice by `PROVIDER_SCAN_TIMEOUT` returning, but a hung probe leaves a thread parked. Planned to close in Wave B of the [roadmap](../roadmap.md), which adds git subprocesses that need a deadline helper anyway.

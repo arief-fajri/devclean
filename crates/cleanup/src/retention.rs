@@ -371,6 +371,8 @@ mod tests {
             detail: None,
             impact: None,
             age_days: age,
+            activity: None,
+            last_commit_unix: None,
             blocked_reason: None,
             blocked_detail: None,
         };

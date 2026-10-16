@@ -39,6 +39,8 @@ fn resource(id: &str, provider: &str, age_days: Option<u64>) -> Resource {
         detail: None,
         impact: None,
         age_days,
+        activity: None,
+        last_commit_unix: None,
         blocked_reason: None,
         blocked_detail: None,
     }

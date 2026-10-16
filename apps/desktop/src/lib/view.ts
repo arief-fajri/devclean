@@ -6,8 +6,7 @@
  * *visibility*. Provider checkboxes then act on the visible rows only,
  * and the tooltip always names the affected count.
  */
-import { isStaleSignal } from "./format";
-import type { ProviderSummary, Resource, SafetyLevel, ScanSummary } from "./tauri";
+import type { Activity, ProviderSummary, Resource, SafetyLevel, ScanSummary } from "./tauri";
 
 export type SafetyFilter = "all" | "safe" | "review";
 export type SortKey = "largest" | "name" | "safety";
@@ -38,6 +37,17 @@ export interface ProviderGroup {
 
 export function needsReview(safety: SafetyLevel): boolean {
   return safety === "caution" || safety === "dangerous";
+}
+
+/**
+ * Stale = not touched in over 30 days, i.e. the `stale` and `dormant` tiers.
+ *
+ * This reads the structured `activity` tier the backend computed from the
+ * composite age (artifact mtime, last commit, project directory mtime), not
+ * the display string. A signal only, never a safety verdict.
+ */
+export function isStaleActivity(activity: Activity | null | undefined): boolean {
+  return activity === "stale" || activity === "dormant";
 }
 
 function safetyRank(safety: SafetyLevel): number {
@@ -84,7 +94,7 @@ export function applyView(
     list = list.filter((r) => {
       if (opts.safety === "safe" && r.safety !== "safe") return false;
       if (opts.safety === "review" && !needsReview(r.safety)) return false;
-      if (opts.staleOnly && !isStaleSignal(r.detail)) return false;
+      if (opts.staleOnly && !isStaleActivity(r.activity)) return false;
       if (opts.selectedOnly && !selected.has(r.id)) return false;
       if (!matchesQuery(r, providerName.get(r.provider) ?? "", opts.query)) return false;
       return true;

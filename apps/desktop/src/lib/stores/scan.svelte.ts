@@ -6,7 +6,6 @@ import {
   cancelScan,
   getCachedScan,
   getResourceDetails,
-  onCleanupCompleted,
   onScanCompleted,
   onScanProgress,
   onScanProviderStarted,
@@ -14,7 +13,8 @@ import {
   scanAll,
   scanProvider,
 } from "$lib/tauri";
-import type { Resource, ScanProgress, ScanSummary } from "$lib/tauri";
+import type { CleanupResult, Resource, ScanProgress, ScanSummary } from "$lib/tauri";
+import { mergeProviderSummary, pruneResources } from "$lib/scan-merge";
 
 class ScanStore {
   scanning = $state(false);
@@ -37,6 +37,14 @@ class ScanStore {
   /** Providers that have already finished this run — drives the per-card
    * check/spinner/dot state while a scan is in flight. */
   doneProviders = $state<string[]>([]);
+  /**
+   * Depth of targeted rescans in flight. While it is non-zero the scan events
+   * are ignored for global state: a per-provider rescan must not flip the
+   * whole list into `scanning` (which disables selection and dims the cards),
+   * and its `scan_completed` must not overwrite the merged summary with a
+   * single provider's — the caller's `mergeProviderSummary` is authoritative.
+   */
+  private targetedScans = 0;
 
   /** Instant paint from the last scan (if roots match). The caller runs a
    * scan only when the user asked for one (`scan_automatically` or a click),
@@ -107,54 +115,101 @@ class ScanStore {
   async rescanProvider(provider: string) {
     if (this.scanning || this.rescanning) return;
     this.rescanning = provider;
+    this.targetedScans += 1;
     this.error = null;
+    try {
+      await this.rescanOne(provider);
+    } catch (e) {
+      this.error = String(e);
+    } finally {
+      this.rescanning = null;
+      this.releaseTargeted();
+    }
+  }
+
+  /**
+   * Re-scan only `providers`, merging each result into the current summary so
+   * the other providers' rows are preserved. The scan events are suppressed
+   * for the duration (see `targetedScans`), so the list stays interactive and
+   * the `scan_completed` event cannot overwrite the merge.
+   */
+  async rescanProviders(providers: string[]) {
+    const list = [...new Set(providers)];
+    if (list.length === 0) {
+      await this.start();
+      return;
+    }
+    this.targetedScans += 1;
+    this.error = null;
+    try {
+      for (const p of list) {
+        // A full scan was started while we were walking: stand down.
+        if (this.scanning) break;
+        this.rescanning = p;
+        await this.rescanOne(p);
+      }
+      // Only these providers were refreshed; the rest keep their last known
+      // figures, which the UI must say out loud (see SummaryPanel badge).
+      this.partialScan = list;
+      this.lastScannedAt = new Date();
+      this.fromCache = false;
+    } catch (e) {
+      this.error = String(e);
+    } finally {
+      this.rescanning = null;
+      this.releaseTargeted();
+    }
+  }
+
+  /** One provider's scan, merged into the summary. No event handling. */
+  private async rescanOne(provider: string) {
     try {
       const f = await scanProvider(provider);
       if (!this.summary) {
         this.applySummary(f);
         return;
       }
-      const resources = [
-        ...this.summary.resources.filter((r) => r.provider !== provider),
-        ...f.resources,
-      ];
-      const providers = [...this.summary.providers.filter((p) => p.provider !== provider), ...f.providers].sort(
-        (a, b) => b.reclaimable_bytes - a.reclaimable_bytes,
-      );
-      this.summary = {
-        total_bytes: resources.reduce((acc, r) => acc + r.size_bytes, 0),
-        reclaimable_bytes: resources.reduce((acc, r) => acc + r.reclaimable_bytes, 0),
-        blocked_bytes: resources
-          .filter((r) => r.blocked_reason != null)
-          .reduce((acc, r) => acc + r.reclaimable_bytes, 0),
-        providers,
-        resources,
-      };
+      this.summary = mergeProviderSummary(this.summary, provider, f);
       this.lastScannedAt = new Date();
-      const alive = new Set(resources.map((r) => r.id));
+      const alive = new Set(this.summary.resources.map((r) => r.id));
       this.selected = this.selected.filter((id) => alive.has(id));
-    } catch (e) {
-      this.error = String(e);
     } finally {
-      this.rescanning = null;
+      // Never leave the per-card loader spinning if the progress event never
+      // arrived (e.g. the scan errored).
+      if (this.activeProvider === provider) this.activeProvider = null;
     }
   }
 
-  async rescanProviders(providers: string[]) {
-  const list = [...new Set(providers)];
-  if (list.length === 0) {
-    await this.start();
-    return;
+  /**
+   * Drop the targeted-scan guard only after the queued `scan_completed` for
+   * the last provider has settled — otherwise that event would overwrite the
+   * merge with the single provider's summary.
+   */
+  private releaseTargeted() {
+    setTimeout(() => {
+      this.targetedScans = Math.max(0, this.targetedScans - 1);
+    }, 0);
   }
-  for (const p of list) {
-    await this.rescanProvider(p);
+
+  /**
+   * Drop the resources a finished cleanup reported as `success` from the shown
+   * summary, immediately.
+   *
+   * Deterministic and independent of the rescan: the backend already told us
+   * which ids were removed, so the list must not keep showing them while a
+   * rescan runs — or if none lands. The targeted rescan that follows then
+   * reconciles anything still on disk.
+   */
+  pruneCleaned(results: CleanupResult[]) {
+    if (!this.summary) return;
+    const removed = results
+      .filter((r) => r.status === "success")
+      .map((r) => r.resource_id);
+    if (removed.length === 0) return;
+    this.summary = pruneResources(this.summary, removed);
+    const alive = new Set(this.summary.resources.map((r) => r.id));
+    this.selected = this.selected.filter((id) => alive.has(id));
   }
-  // Only these providers were refreshed; the rest keep their last known
-  // figures, which the UI must say out loud (see SummaryPanel badge).
-  this.partialScan = list;
-  this.lastScannedAt = new Date();
-  this.fromCache = false;
-}
 
 async start() {
     this.scanning = true;
@@ -206,6 +261,10 @@ async start() {
 
   listen() {
     onScanStarted(() => {
+      // A targeted rescan must not put the whole list into `scanning` — that
+      // disables selection and dims every card, which is what made a cleanup
+      // feel like the app had frozen.
+      if (this.targetedScans > 0) return;
       this.scanning = true;
       this.cancelling = false;
       this.progress = null;
@@ -213,21 +272,30 @@ async start() {
       this.doneProviders = [];
     });
     onScanProviderStarted((provider) => {
+      // Always reflected: this drives the per-card loader, and a targeted
+      // rescan must show one on the provider it is walking.
       this.activeProvider = provider;
     });
     onScanProgress((p) => {
-      this.progress = p;
-      if (!this.doneProviders.includes(p.provider)) {
-        this.doneProviders = [...this.doneProviders, p.provider];
+      // A targeted rescan drives only the per-card loader (set by
+      // `onScanProviderStarted`); it must not touch the global progress bar or
+      // leave a lingering "done" checkmark, so those are skipped while it runs.
+      if (this.targetedScans === 0) {
+        this.progress = p;
+        if (!this.doneProviders.includes(p.provider)) {
+          this.doneProviders = [...this.doneProviders, p.provider];
+        }
       }
       // The finished provider is no longer the running one.
       if (this.activeProvider === p.provider) this.activeProvider = null;
     });
-    onScanCompleted((s) => this.applySummary(s));
-    onCleanupCompleted(() => {
-      // State already pruned backend-side; UI re-renders from summary.
-      // A background rescan keeps numbers honest.
-      void this.start();
+    // `scan_completed` is only for scans the store did not initiate (the menu
+    // bar's background scan). A targeted rescan merges its own result, and a
+    // store-initiated full scan applies the awaited summary; letting the event
+    // through here would clobber a targeted merge with one provider's rows.
+    onScanCompleted((s) => {
+      if (this.targetedScans > 0) return;
+      this.applySummary(s);
     });
   }
 }

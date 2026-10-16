@@ -67,6 +67,8 @@ impl Provider for PythonCacheProvider {
                     safety: SafetyLevel::Safe,
                     detail: Some(project_detail(&project_name, project, size.allocated)),
                     age_days: age_days(project),
+                    activity: None,
+                    last_commit_unix: None,
                     blocked_reason: None,
                     blocked_detail: None,
                     impact: impact(
@@ -86,6 +88,11 @@ impl Provider for PythonCacheProvider {
 
     fn cleanup_action(&self, path: &Path) -> CleanupAction {
         CleanupAction::RemoveDir(path.to_path_buf())
+    }
+
+    /// A Python cache dir sits one level under the project that owns it.
+    fn project_root(&self, artifact: &Path) -> Option<PathBuf> {
+        artifact.parent().map(Path::to_path_buf)
     }
 }
 

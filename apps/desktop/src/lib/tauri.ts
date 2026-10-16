@@ -20,6 +20,11 @@ import type { BlockReason } from "./blocked";
 export type SafetyLevel = "safe" | "caution" | "dangerous";
 export type CleanupStatus = "success" | "partial" | "failed" | "cancelled";
 
+/** How recently a project-backed artifact was touched (contract v0.10.0).
+ * Derived from the composite age — artifact mtime, last commit, project
+ * directory mtime — not the filesystem mtime alone. */
+export type Activity = "active" | "recent" | "stale" | "dormant";
+
 export interface ResourceImpact {
   consequence: string;
   cost?: string;
@@ -41,8 +46,15 @@ export interface Resource {
   detail?: string;
   impact?: ResourceImpact;
   /** Age of the item in whole days. Null for global caches, whose age is
-   * meaningless — that is why retention never holds them back. */
+   * meaningless — that is why retention never holds them back. v0.10.0: the
+   * composite of artifact mtime, last commit and project directory mtime. */
   age_days?: number | null;
+  /** How recently the artifact was touched (v0.10.0). Null when the scanner
+   * could not classify it (a global cache, or a path outside any repository).
+   * The toolbar filters on this directly, never by parsing `detail`. */
+  activity?: Activity | null;
+  /** Unix seconds of the containing repository's last commit (v0.10.0). */
+  last_commit_unix?: number | null;
   /** Why this resource cannot be selected, or null when it can. The backend
    * refuses any resource carrying a reason, even if its id is sent directly. */
   blocked_reason?: BlockReason | null;

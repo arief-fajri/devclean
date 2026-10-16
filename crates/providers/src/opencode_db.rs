@@ -214,6 +214,8 @@ impl Provider for OpencodeDbProvider {
                 "{old_sessions} of {total} sessions are older than {SESSION_RETENTION_DAYS} days"
             )),
             age_days: None,
+            activity: None,
+            last_commit_unix: None,
             blocked_reason: None,
             blocked_detail: None,
             impact: impact(

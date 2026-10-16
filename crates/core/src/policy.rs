@@ -36,6 +36,12 @@ pub struct PolicyInputs {
     pub allow_privileged_operations: bool,
     /// `Settings.ai_cleanup_enabled`.
     pub ai_cleanup_enabled: bool,
+    /// Git-aware protection (v0.10.0): the artifact is tracked by a
+    /// repository that has uncommitted changes. Deleting it would lose work
+    /// that is not committed anywhere, so this outranks every other gate.
+    /// Set by the scanner after the git pass; `false` for anything that is
+    /// not classified.
+    pub protected: bool,
 }
 
 impl Default for PolicyInputs {
@@ -48,17 +54,30 @@ impl Default for PolicyInputs {
             docker_prune_scope: DockerPruneScope::BuildCache,
             allow_privileged_operations: true,
             ai_cleanup_enabled: true,
+            protected: false,
         }
     }
 }
 
 /// Why `r` may not be cleaned, with the sentence to show. `None` means it may.
 ///
-/// Order matters and is deliberate: an *authorisation* gate (AI report-only,
-/// Docker scope, privileged opt-in) outranks an *age* gate. Telling a user
-/// "kept by your 30-day policy" about history they have not enabled at all
-/// would hide the setting that actually matters.
+/// Order matters and is deliberate: git protection outranks everything — a
+/// tracked file in a dirty repository is data loss whatever the other
+/// settings say. After it, an *authorisation* gate (AI report-only, Docker
+/// scope, privileged opt-in) outranks an *age* gate. Telling a user "kept by
+/// your 30-day policy" about history they have not enabled at all would hide
+/// the setting that actually matters.
 pub fn block_reason_for(r: &Resource, p: PolicyInputs) -> Option<(BlockReason, String)> {
+    // 0. Git-aware protection: deleting a tracked artifact from a dirty
+    //    repository loses uncommitted work. This is data loss regardless of
+    //    every other setting, so it is checked first.
+    if p.protected {
+        return Some((
+            BlockReason::Protected,
+            "tracked by a repository with uncommitted changes — commit or stash first".to_string(),
+        ));
+    }
+
     // 1. AI conversation history: report-only until explicitly enabled.
     if p.is_user_data && !p.ai_cleanup_enabled {
         return Some((
@@ -138,6 +157,8 @@ mod tests {
             detail: None,
             impact: None,
             age_days,
+            activity: None,
+            last_commit_unix: None,
             blocked_reason: None,
             blocked_detail: None,
         }
@@ -198,6 +219,22 @@ mod tests {
         };
         let (reason, _) = block_reason_for(&res(Some(1)), p).expect("must block");
         assert_eq!(reason, BlockReason::AiReadOnly);
+    }
+
+    /// Git protection outranks everything: a tracked artifact in a dirty
+    /// repository is data loss regardless of the AI, Docker or age settings.
+    #[test]
+    fn git_protection_outranks_every_other_gate() {
+        let p = PolicyInputs {
+            protected: true,
+            is_user_data: true,
+            ai_cleanup_enabled: false,
+            retention_days: Some(30),
+            ..permissive()
+        };
+        let (reason, detail) = block_reason_for(&res(Some(1)), p).expect("must block");
+        assert_eq!(reason, BlockReason::Protected);
+        assert!(detail.contains("uncommitted"), "got: {detail}");
     }
 
     #[test]

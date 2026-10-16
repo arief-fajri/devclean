@@ -73,6 +73,7 @@ pub async fn run_scan(app: &AppHandle, state: &AppState) -> Result<ScanSummary, 
                 docker_prune_scope: s.docker_prune_scope,
                 allow_privileged_operations: s.allow_privileged_operations,
                 ai_cleanup_enabled: s.ai_cleanup_enabled,
+                protected: false,
             },
         )
     };
@@ -199,6 +200,7 @@ pub async fn scan_provider(
                 docker_prune_scope: s.docker_prune_scope,
                 allow_privileged_operations: s.allow_privileged_operations,
                 ai_cleanup_enabled: s.ai_cleanup_enabled,
+                protected: false,
             },
         )
     };
@@ -224,7 +226,7 @@ pub async fn scan_provider(
         .scan
         .scan_one(
             &provider,
-            roots,
+            roots.clone(),
             &excluded,
             policy,
             Some(progress),
@@ -241,6 +243,15 @@ pub async fn scan_provider(
         for r in &one.resources {
             map.insert(r.id.clone(), r.clone());
         }
+    }
+
+    // Keep the on-disk cache honest too, so a restart does not resurrect
+    // resources this provider no longer has. Best-effort: the scan itself
+    // succeeded regardless.
+    if let Err(e) =
+        devclean_scanner::merge_cached_provider(&state.scan_cache_path, &roots, &provider, &one)
+    {
+        tracing::warn!("could not update scan cache after targeted scan: {e}");
     }
 
     app.emit(SCAN_COMPLETED, &one).map_err(|e| e.to_string())?;
@@ -684,6 +695,8 @@ mod preview_deadline_tests {
                 detail: None,
                 impact: None,
                 age_days: None,
+                activity: None,
+                last_commit_unix: None,
                 blocked_reason: None,
                 blocked_detail: None,
             }],

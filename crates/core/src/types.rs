@@ -15,6 +15,63 @@ pub enum SafetyLevel {
     Dangerous,
 }
 
+/// How recently a project-backed artifact was touched (contract v0.10.0).
+///
+/// A single tier derived from the **composite age** — the most recent of the
+/// artifact's own mtime, the repository's last commit, and the project
+/// directory's mtime. Before Wave B "activity" was mtime alone, so a cache
+/// whose repository was committed to daily still looked dormant.
+///
+/// `None` on a [`Resource`] means "unclassified" — a global cache whose age is
+/// meaningless (I9), or a path outside any repository that the scanner chose
+/// not to age. The frontend must treat `None` as "no activity signal".
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Activity {
+    /// Younger than 7 days.
+    Active,
+    /// 7–30 days.
+    Recent,
+    /// 30–90 days.
+    Stale,
+    /// 90 days or older.
+    Dormant,
+}
+
+impl Activity {
+    /// Tier for a composite age in whole days. The boundaries are inclusive
+    /// at the top of each band: 7 is `Recent`, 30 is `Stale`, 90 is `Dormant`.
+    pub fn for_age_days(age_days: u64) -> Self {
+        match age_days {
+            0..=6 => Self::Active,
+            7..=29 => Self::Recent,
+            30..=89 => Self::Stale,
+            _ => Self::Dormant,
+        }
+    }
+}
+
+/// Composite age in whole days: the **most recent** of the artifact's mtime,
+/// the repository's last commit and the project directory's mtime.
+///
+/// The point of the composite is that a project committed to yesterday stops
+/// looking dormant even when its cache has not been touched in months. Inputs
+/// are unix seconds; a `None` input is simply ignored. When every input is
+/// `None` the result is `None` — an unknown age must stay unknown, never
+/// default to "old enough".
+pub fn composite_age_days(
+    now_unix: u64,
+    artifact_mtime: Option<u64>,
+    last_commit: Option<u64>,
+    project_mtime: Option<u64>,
+) -> Option<u64> {
+    let newest = [artifact_mtime, last_commit, project_mtime]
+        .into_iter()
+        .flatten()
+        .max()?;
+    Some(now_unix.saturating_sub(newest) / 86_400)
+}
+
 /// A single reclaimable resource found by a provider.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Resource {
@@ -48,8 +105,23 @@ pub struct Resource {
     /// `None` for global caches whose age is meaningless. This is the input
     /// to the retention policy (I9) and a display signal only — never a
     /// safety verdict.
+    ///
+    /// v0.10.0: this is now the **composite** age — the most recent of the
+    /// artifact's mtime, the repository's last commit and the project
+    /// directory's mtime — not the project directory's mtime alone.
     #[serde(default)]
     pub age_days: Option<u64>,
+    /// How recently the artifact was touched, as a tier (contract v0.10.0).
+    /// `None` when the scanner could not classify it (a global cache, or a
+    /// path outside any repository). The toolbar filters on this directly
+    /// instead of parsing the display string.
+    #[serde(default)]
+    pub activity: Option<Activity>,
+    /// Unix seconds of the containing repository's last commit, when the
+    /// artifact lives in a git repository (contract v0.10.0). `None`
+    /// otherwise. Shown as a detail line; never a safety verdict on its own.
+    #[serde(default)]
+    pub last_commit_unix: Option<u64>,
     /// Why this resource cannot be selected for cleanup, or `None` when it
     /// can. Reported resources with a reason are still listed — the user
     /// should see what exists and why it is held back — but the cleanup
@@ -252,6 +324,41 @@ mod tests {
     }
 
     #[test]
+    fn activity_thresholds_are_inclusive_at_the_top_of_each_band() {
+        use super::Activity::*;
+        for (days, want) in [
+            (0, Active),
+            (6, Active),
+            (7, Recent),
+            (29, Recent),
+            (30, Stale),
+            (89, Stale),
+            (90, Dormant),
+            (3650, Dormant),
+        ] {
+            assert_eq!(Activity::for_age_days(days), want, "{days}d");
+        }
+    }
+
+    #[test]
+    fn composite_age_is_the_most_recent_input() {
+        let now = 1_000 * 86_400;
+        // A cache untouched for 200 days, in a repo committed 1 day ago:
+        // the commit wins, so the project does not look dormant.
+        assert_eq!(
+            composite_age_days(now, Some(now - 200 * 86_400), Some(now - 86_400), None),
+            Some(1)
+        );
+        // Project dir touched 3 days ago beats a 400-day-old artifact.
+        assert_eq!(
+            composite_age_days(now, Some(now - 400 * 86_400), None, Some(now - 3 * 86_400)),
+            Some(3)
+        );
+        // No inputs → unknown, never "old".
+        assert_eq!(composite_age_days(now, None, None, None), None);
+    }
+
+    #[test]
     fn old_cached_scans_without_impact_still_deserialize() {
         // v0.2.x on-disk cache payload: no `impact` field at all.
         let json = r#"{"id":"nm:0000","provider":"node_modules","name":"x","path":"/tmp/x","size_bytes":10,"reclaimable_bytes":10,"safety":"safe","detail":null}"#;
@@ -273,6 +380,8 @@ mod tests {
             detail: None,
             impact: Some(impact()),
             age_days: None,
+            activity: None,
+            last_commit_unix: None,
             blocked_reason: None,
             blocked_detail: None,
         };

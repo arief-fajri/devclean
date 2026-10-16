@@ -7,7 +7,7 @@
    */
   import PageHeader from "$lib/components/PageHeader.svelte";
   import SummaryPanel from "$lib/components/SummaryPanel.svelte";
-  import { formatBytes, formatPct, isStaleSignal, volumeLabel } from "$lib/format";
+  import { formatBytes, formatPct, volumeLabel } from "$lib/format";
   import { runTotals, when } from "$lib/history";
   import { routeDef } from "$lib/nav";
   import { providerMeta } from "$lib/providerMeta";
@@ -16,7 +16,7 @@
   import { scanStore } from "$lib/stores/scan.svelte";
   import { settingsStore } from "$lib/stores/settings.svelte";
   import { viewStore } from "$lib/stores/view.svelte";
-  import { topProviders as topProvidersOf } from "$lib/view";
+  import { topProviders as topProvidersOf, isStaleActivity } from "$lib/view";
   import { Boxes, ChevronRight, Clock, HardDrive, RefreshCw, TriangleAlert } from "lucide-svelte";
 
   const route = routeDef("overview");
@@ -73,7 +73,7 @@
   );
   const topMax = $derived(topProviders[0]?.bytes ?? 0);
 
-  const stale = $derived(allResources.filter((r) => isStaleSignal(r.detail)));
+  const stale = $derived(allResources.filter((r) => isStaleActivity(r.activity)));
   const oldestStale = $derived(
     stale.reduce((acc, r) => Math.max(acc, r.age_days ?? 0), 0),
   );

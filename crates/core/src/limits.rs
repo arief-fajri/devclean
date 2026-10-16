@@ -14,6 +14,14 @@ pub const PROVIDER_SCAN_TIMEOUT: Duration = Duration::from_secs(60);
 /// reports `Failed` with a timeout message (G-REL-02).
 pub const CLEANUP_COMMAND_TIMEOUT: Duration = Duration::from_secs(120);
 
+/// Maximum wall time for a single provider **probe** subprocess — a
+/// `git log`, a `go env`, a `pgrep`, a tool that reports a cache path.
+///
+/// G-REL-05: before Wave B these had no deadline at all, so a hung probe
+/// parked a thread. A probe is expected to answer in milliseconds; a probe
+/// that has not answered in 30s is not going to.
+pub const PROVIDER_COMMAND_TIMEOUT: Duration = Duration::from_secs(30);
+
 /// Maximum wall time for the cleanup **preview** — re-measuring every selected
 /// path before the confirmation appears.
 ///

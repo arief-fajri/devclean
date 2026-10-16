@@ -229,6 +229,21 @@ impl ScanManager {
         }
         resources.retain(|r| !is_excluded(&r.path, excluded));
 
+        // Git-aware classification (Wave B). Subprocess work runs on the
+        // blocking pool so the async runtime stays responsive (G-SCAN-04);
+        // the resources are moved in and returned so the closure owns them.
+        let git_providers = self.providers.clone();
+        let git_cancel = Arc::clone(&self.cancelled);
+        let (mut resources, protected) = tokio::task::spawn_blocking(move || {
+            let by_id: HashMap<&str, &Arc<dyn Provider>> =
+                git_providers.iter().map(|p| (p.id(), p)).collect();
+            let protected =
+                crate::git_classify::classify_repositories(&mut resources, &by_id, &git_cancel);
+            (resources, protected)
+        })
+        .await
+        .unwrap_or_default();
+
         // Stamp WHY anything is held back, here at scan time, so the UI can
         // explain a resource before the user tries to select it. The engine
         // re-derives the same verdict from the same function, so the
@@ -242,6 +257,7 @@ impl ScanManager {
                 PolicyInputs {
                     is_user_data: provider.is_some_and(|p| p.is_user_data()),
                     required_docker_scope: provider.and_then(|p| p.required_docker_scope()),
+                    protected: protected.contains(&r.id),
                     ..policy
                 },
             );
@@ -352,6 +368,8 @@ mod tests {
                     detail: None,
                     impact: None,
                     age_days: None,
+                    activity: None,
+                    last_commit_unix: None,
                     blocked_reason: None,
                     blocked_detail: None,
                 });
@@ -375,6 +393,7 @@ mod tests {
             docker_prune_scope: devclean_core::DockerPruneScope::BuildCache,
             allow_privileged_operations: true,
             ai_cleanup_enabled: true,
+            protected: false,
         }
     }
 
@@ -591,6 +610,8 @@ mod tests {
                     detail: None,
                     impact: None,
                     age_days: None,
+                    activity: None,
+                    last_commit_unix: None,
                     blocked_reason: None,
                     blocked_detail: None,
                 })

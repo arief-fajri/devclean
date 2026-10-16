@@ -82,6 +82,8 @@ impl Provider for OpencodeFsProvider {
                         detail_for(&dir)
                     }),
                     age_days: super::provider::age_days(&dir),
+                    activity: None,
+                    last_commit_unix: None,
                     blocked_reason: None,
                     blocked_detail: None,
                     impact: impact(

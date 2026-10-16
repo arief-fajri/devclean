@@ -529,6 +529,8 @@ mod tests {
                     detail: Some("· 143 days stale · npm".into()),
                     impact: None,
                     age_days: Some(143),
+                    activity: None,
+                    last_commit_unix: None,
                     blocked_reason: None,
                     blocked_detail: None,
                 })

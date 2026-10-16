@@ -3,7 +3,10 @@
 //! must settle in <1s (G-SCAN-02).
 
 pub mod cache;
+mod git_classify;
 pub mod manager;
 
-pub use cache::{load_cached_scan, load_cached_summary, save_cached_summary};
+pub use cache::{
+    load_cached_scan, load_cached_summary, merge_cached_provider, save_cached_summary,
+};
 pub use manager::ScanManager;

@@ -1,12 +1,5 @@
 import { describe, expect, it } from "vitest";
-import {
-  formatBytes,
-  formatPct,
-  isStaleSignal,
-  parseAgeDays,
-  truncateMiddle,
-  volumeLabel,
-} from "./format";
+import { formatBytes, formatPct, truncateMiddle, volumeLabel } from "./format";
 
 describe("formatBytes", () => {
   it("handles zero and invalid input", () => {
@@ -50,22 +43,6 @@ describe("truncateMiddle", () => {
 
   it("degenerates safely for impossible maxLen", () => {
     expect(truncateMiddle("/a/b/c", 4)).toBe("/a/b/c");
-  });
-});
-
-describe("parseAgeDays / isStaleSignal", () => {
-  it("parses d/mo/y suffixes", () => {
-    expect(parseAgeDays("project: x · 143d old")).toBe(143);
-    expect(parseAgeDays("· 5mo old")).toBe(150);
-    expect(parseAgeDays("· 2y old")).toBe(730);
-    expect(parseAgeDays(undefined)).toBeNull();
-    expect(parseAgeDays("cleaned via `x`")).toBeNull();
-  });
-
-  it("flags stale past 90 days", () => {
-    expect(isStaleSignal("· 90d old")).toBe(false);
-    expect(isStaleSignal("· 91d old")).toBe(true);
-    expect(isStaleSignal(undefined)).toBe(false);
   });
 });
 

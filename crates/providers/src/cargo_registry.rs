@@ -49,6 +49,8 @@ impl Provider for CargoRegistryProvider {
             safety: SafetyLevel::Caution,
             detail: None,
             age_days: None,
+            activity: None,
+            last_commit_unix: None,
             blocked_reason: None,
             blocked_detail: None,
             impact: impact(

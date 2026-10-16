@@ -9,10 +9,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 pub struct GoProvider;
 
 fn go_env(key: &str) -> Option<PathBuf> {
-    std::process::Command::new("go")
-        .args(["env", key])
-        .output()
-        .ok()
+    super::exec::run_with_deadline("go", &["env", key], devclean_core::PROVIDER_COMMAND_TIMEOUT)
         .filter(|o| o.status.success())
         .and_then(|o| String::from_utf8(o.stdout).ok())
         .map(|s| PathBuf::from(s.trim()))
@@ -72,6 +69,8 @@ impl Provider for GoProvider {
                     safety: SafetyLevel::Safe,
                     detail: None,
                     age_days: None,
+                    activity: None,
+                    last_commit_unix: None,
                     blocked_reason: None,
                     blocked_detail: None,
                     impact: impact(consequence, Some(cost), Some(clean_args)),

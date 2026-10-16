@@ -4,7 +4,7 @@ What is left, not what happened. Shipped work is in [CHANGELOG.md](../../CHANGEL
 
 ## Where we are
 
-Product **0.1.0** is the first public release: macOS only, sizes that match `du`, deletions that move to the Trash, and every gate enforced by the backend rather than by a disabled checkbox. The contract sits at **v0.9.0** after the cache-first startup change.
+Product **0.2.0** is the first release after 0.1.0: macOS only, sizes that match `du`, deletions that move to the Trash, every gate enforced by the backend, and now git-aware classification. Activity is a composite of artifact mtime, last commit and project directory mtime, and a repository's uncommitted work is protected. The contract sits at **v0.10.0**.
 
 Two numbers move independently — the product version a user installs, and the contract version of the IPC surface between the bundled frontend and backend. A contract bump does not imply a product release, and the reverse is also true. At 1.0 they are aligned deliberately.
 
@@ -27,99 +27,6 @@ Rules that apply to every wave:
 - The fixture and README screenshots are refreshed when the dashboard's shape changes.
 - Full gate before a version bump: `cargo fmt`, `cargo clippy -D warnings`, `cargo test --workspace`, and the frontend's `check`, `test` and `build`.
 - Changing what may be cleaned needs a human decision before implementation, not after.
-
----
-
-## Wave B — Git-aware classification
-
-Today "activity" comes from filesystem mtime alone, and nothing knows whether an artifact is committed. Two consequences:
-
-- A project whose cache has not been touched in months looks stale even when its repository is committed to daily, so `retention_days` offers an active project's cache for deletion.
-- Nothing stops a cleanup from removing a directory a repository actually tracks. If a project ever commits `dist/` or `target/`, it is offered for deletion like any other cache.
-
-### What changes
-
-A new `crates/providers/src/git.rs`:
-
-```rust
-/// Last commit time of the repository containing `root`, or None.
-pub fn last_commit_unix(root: &Path) -> Option<u64>;
-
-/// Repository root containing `path`, or None. No subprocess.
-pub fn repo_root_for(path: &Path) -> Option<PathBuf>;
-
-/// True when the repository has uncommitted changes.
-pub fn is_dirty(root: &Path) -> bool;
-
-/// Which of `candidates` are ignored, in one call per repository.
-pub fn ignored_paths(root: &Path, candidates: &[PathBuf]) -> HashSet<PathBuf>;
-```
-
-Every call uses `Command::new("git").args(["-C", root, …])` with fixed arguments, never a shell, and carries a deadline.
-
-`repo_root_for` deliberately spawns nothing. `git rev-parse --show-toplevel` per artifact would mean eighty subprocesses for eighty `node_modules`; walking the path's ancestors looking for a `.git` entry — file or directory, because worktrees and submodules use a file — is zero subprocesses and correct for the normal case.
-
-### Activity becomes four tiers
-
-```rust
-pub enum Activity { Active, Recent, Stale, Dormant }
-//                    < 7d     7–30      30–90     90+
-```
-
-Age is the **most recent** of artifact mtime, last commit and project directory mtime. A committed-to-yesterday project stops looking dormant. `Resource.age_days` changes meaning from "project directory age" to this composite, which is the point: `retention_days` then protects projects that are actively worked on.
-
-### The gate
-
-`BlockReason::Protected` has existed since the first release with nothing producing it. This gives it a producer, placed **first** in `block_reason_for`, ahead of the AI and retention gates — deleting a tracked file is data loss regardless of what every other setting says.
-
-| Artifact | Repository | Result |
-|---|---|---|
-| gitignored | dirty | **deletable** — this is the `node_modules` case |
-| gitignored | clean | deletable |
-| tracked | clean | deletable — nothing uncommitted is lost |
-| tracked | dirty | `protected` |
-| untracked, not ignored | dirty | `protected` — a new file is still a file |
-| anything | not a repo | unclassified, behaves as today |
-
-The first row is what keeps this from being useless. Refusing every artifact in a dirty repository would make the tool unusable in exactly the repositories people work in.
-
-### Scanner
-
-```
-1. group resources by repository root        no subprocess
-2. per repository, pool of min(NumCPU, 8):
-     git log -1 --format=%ct     → activity
-     git status --porcelain      → dirty?
-3. only the dirty ones: one `check-ignore --stdin -z` for all their paths
-4. stamp activity, last_commit_unix, tracked_in_dirty_repo
-```
-
-Step 3 is why this is affordable: a clean repository cannot produce `Protected`, so it never needs `check-ignore`. Stamping is applied serially so results do not depend on worker completion order.
-
-The UI loses `parseAgeDays` and `isStaleSignal` in `lib/format.ts`, which recover the age by parsing the display string; the toolbar filters on `activity` directly.
-
-Closes **G-REL-05** (no timeout on `run_tool`/`go_env`), since the git calls need a deadline helper anyway.
-
-### Tests
-
-Every git setting the fixture depends on is set explicitly, never inherited — the runner has no global git identity, and a user's `core.excludesFile` would otherwise change what `check-ignore` answers. Production does **not** override `core.excludesFile`: whether a path is ignored must respect the user's own global ignore. The fixture is what is made explicit.
-
-| Test | What it proves |
-|---|---|
-| `a_tracked_artifact_in_a_dirty_repo_is_protected` | the gate fires |
-| `a_gitignored_artifact_stays_cleanable_in_a_dirty_repo` | one dirty file does not block `node_modules` |
-| `a_clean_repo_protects_nothing` | no false positives |
-| `an_untracked_file_in_a_dirty_repo_is_protected` | new files count |
-| `last_commit_beats_a_stale_mtime` | composite age, not mtime alone |
-| `activity_thresholds_at_the_boundaries` | 7 / 30 / 90 exactly |
-| `a_path_outside_any_repo_is_not_classified` | global caches untouched |
-| `one_check_ignore_call_per_repo` | batching actually batches |
-
-### Contract
-
-`v0.10.0`, additive: `Resource.activity?`, `Resource.last_commit_unix?`. Behavioural notes without a type change: `age_days` becomes composite, and `blocked_reason: "protected"` can now appear. ADR: `docs/decisions/gitignore-aware-protection.md`.
-
-**Level B** — this changes what may be cleaned.
 
 ---
 

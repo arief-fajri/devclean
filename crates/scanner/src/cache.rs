@@ -12,11 +12,17 @@ use std::path::{Path, PathBuf};
 
 /// Bumped when the meaning of a cached field changes, not just its shape.
 ///
+/// `3` — `Resource.age_days` moved from "project directory age" to the
+/// composite of artifact mtime, last commit and project mtime, and
+/// `activity`/`last_commit_unix` were added. A v2 cache holds the old,
+/// mtime-only age, so a project committed to daily would still look dormant
+/// until a rescan; rejecting it forces the honest numbers.
+///
 /// `2` — `Resource.size_bytes` moved from logical (sum of file lengths) to
 /// allocated blocks. A v1 cache holds numbers that are up to 19% low, so it
 /// must be rejected rather than shown: a stale dashboard that quietly
 /// disagrees with `du` is worse than a rescan.
-const CACHE_VERSION: u32 = 2;
+const CACHE_VERSION: u32 = 3;
 
 #[derive(Debug, Serialize, Deserialize)]
 struct CacheEnvelope {
@@ -80,6 +86,80 @@ pub fn load_cached_summary(path: &Path, current_roots: &[PathBuf]) -> Option<Sca
     load_cached_scan(path, current_roots).map(|c| c.summary)
 }
 
+/// Merge one provider's fresh scan into the cached summary, replacing that
+/// provider's resources and its per-provider totals.
+///
+/// A targeted re-scan (`scan_provider`) must not leave the cache holding
+/// resources the provider no longer has, or a restart would resurrect cleaned
+/// items. The cache's `saved_at_unix` is **preserved**: it still means "the
+/// last full scan", so a partially-refreshed cache is never presented as
+/// fresher than it is. A missing cache, a schema mismatch or different roots
+/// is a no-op — there is nothing valid to update.
+pub fn merge_cached_provider(
+    path: &Path,
+    current_roots: &[PathBuf],
+    provider_id: &str,
+    partial: &ScanSummary,
+) -> std::io::Result<()> {
+    let text = match std::fs::read_to_string(path) {
+        Ok(t) => t,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(e) => return Err(e),
+    };
+    let mut envelope: CacheEnvelope = match serde_json::from_str(&text) {
+        Ok(envelope) => envelope,
+        Err(_) => return Ok(()),
+    };
+    if envelope.version != CACHE_VERSION || !same_roots(&envelope.roots, current_roots) {
+        return Ok(());
+    }
+
+    envelope
+        .summary
+        .resources
+        .retain(|r| r.provider != provider_id);
+    envelope
+        .summary
+        .resources
+        .extend(partial.resources.iter().cloned());
+    envelope
+        .summary
+        .providers
+        .retain(|p| p.provider != provider_id);
+    envelope
+        .summary
+        .providers
+        .extend(partial.providers.iter().cloned());
+    envelope
+        .summary
+        .providers
+        .sort_by_key(|p| std::cmp::Reverse(p.reclaimable_bytes));
+    envelope.summary.total_bytes = envelope
+        .summary
+        .resources
+        .iter()
+        .map(|r| r.size_bytes)
+        .sum();
+    envelope.summary.reclaimable_bytes = envelope
+        .summary
+        .resources
+        .iter()
+        .map(|r| r.reclaimable_bytes)
+        .sum();
+    envelope.summary.blocked_bytes = envelope
+        .summary
+        .resources
+        .iter()
+        .filter(|r| r.blocked_reason.is_some())
+        .map(|r| r.reclaimable_bytes)
+        .sum();
+
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    std::fs::write(path, serde_json::to_string_pretty(&envelope).unwrap())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -103,6 +183,8 @@ mod tests {
                 detail: None,
                 impact: None,
                 age_days: None,
+                activity: None,
+                last_commit_unix: None,
                 blocked_reason: None,
                 blocked_detail: None,
             }],
@@ -181,6 +263,156 @@ mod tests {
         // …and the current version still round-trips.
         save_cached_summary(&path, &[], &summary()).unwrap();
         assert!(load_cached_summary(&path, &[]).is_some());
+        let _ = std::fs::remove_file(&path);
+    }
+
+    /// A v2 cache holds the old mtime-only `age_days`, so a project committed
+    /// to daily would still look dormant until a rescan. It is rejected rather
+    /// than shown.
+    #[test]
+    fn a_v2_cache_with_mtime_only_age_is_rejected() {
+        let path = cache_path("v2");
+        let _ = std::fs::remove_file(&path);
+        let v2 = r#"{"version":2,"roots":[],"saved_at_unix":0,"summary":{
+            "total_bytes":10,"reclaimable_bytes":10,"blocked_bytes":0,
+            "providers":[],"resources":[]}}"#;
+        std::fs::write(&path, v2).unwrap();
+        assert!(
+            load_cached_summary(&path, &[]).is_none(),
+            "a pre-composite-age cache must never be shown"
+        );
+        let _ = std::fs::remove_file(&path);
+    }
+
+    fn res(id: &str, provider: &str, bytes: u64) -> devclean_core::Resource {
+        devclean_core::Resource {
+            id: id.to_string(),
+            provider: provider.to_string(),
+            name: id.to_string(),
+            path: PathBuf::from(format!("/tmp/{id}")),
+            size_bytes: bytes,
+            reclaimable_bytes: bytes,
+            apparent_bytes: None,
+            safety: SafetyLevel::Safe,
+            detail: None,
+            impact: None,
+            age_days: None,
+            activity: None,
+            last_commit_unix: None,
+            blocked_reason: None,
+            blocked_detail: None,
+        }
+    }
+
+    fn two_provider_summary() -> ScanSummary {
+        ScanSummary {
+            total_bytes: 700,
+            reclaimable_bytes: 700,
+            blocked_bytes: 0,
+            providers: vec![
+                devclean_core::ProviderSummary {
+                    provider: "node_modules".into(),
+                    name: "node_modules".into(),
+                    total_bytes: 400,
+                    reclaimable_bytes: 400,
+                    resource_count: 1,
+                },
+                devclean_core::ProviderSummary {
+                    provider: "go_cache".into(),
+                    name: "Go cache".into(),
+                    total_bytes: 300,
+                    reclaimable_bytes: 300,
+                    resource_count: 1,
+                },
+            ],
+            resources: vec![
+                res("nm:0", "node_modules", 400),
+                res("go:0", "go_cache", 300),
+            ],
+        }
+    }
+
+    /// A targeted rescan updates only its provider in the cache, preserving the
+    /// other providers and the cache's timestamp (still "the last full scan").
+    #[test]
+    fn a_targeted_rescan_replaces_one_provider_and_keeps_the_rest() {
+        let path = cache_path("merge");
+        let _ = std::fs::remove_file(&path);
+        save_cached_summary(&path, &[], &two_provider_summary()).unwrap();
+        let before = load_cached_scan(&path, &[]).unwrap();
+
+        // node_modules shrank to one 50-byte cache; go_cache is untouched.
+        let partial = ScanSummary {
+            total_bytes: 50,
+            reclaimable_bytes: 50,
+            blocked_bytes: 0,
+            providers: vec![devclean_core::ProviderSummary {
+                provider: "node_modules".into(),
+                name: "node_modules".into(),
+                total_bytes: 50,
+                reclaimable_bytes: 50,
+                resource_count: 1,
+            }],
+            resources: vec![res("nm:new", "node_modules", 50)],
+        };
+        merge_cached_provider(&path, &[], "node_modules", &partial).unwrap();
+
+        let after = load_cached_scan(&path, &[]).unwrap();
+        assert_eq!(
+            after.saved_at_unix, before.saved_at_unix,
+            "a targeted rescan must not claim a fresh full scan"
+        );
+        assert_eq!(
+            after
+                .summary
+                .resources
+                .iter()
+                .map(|r| r.id.clone())
+                .collect::<std::collections::BTreeSet<_>>(),
+            ["go:0".to_string(), "nm:new".to_string()]
+                .into_iter()
+                .collect()
+        );
+        assert_eq!(after.summary.total_bytes, 350);
+        assert_eq!(after.summary.reclaimable_bytes, 350);
+        assert_eq!(
+            after
+                .summary
+                .providers
+                .iter()
+                .find(|p| p.provider == "go_cache")
+                .map(|p| p.reclaimable_bytes),
+            Some(300),
+            "the untouched provider must survive"
+        );
+        let _ = std::fs::remove_file(&path);
+    }
+
+    /// Different roots (or a missing file) mean there is nothing valid to
+    /// update; the merge is a silent no-op, never a corruption.
+    #[test]
+    fn a_targeted_rescan_is_ignored_when_roots_or_file_do_not_match() {
+        let path = cache_path("merge-mismatch");
+        let _ = std::fs::remove_file(&path);
+        let partial = ScanSummary {
+            total_bytes: 0,
+            reclaimable_bytes: 0,
+            blocked_bytes: 0,
+            providers: vec![],
+            resources: vec![],
+        };
+        // No file at all.
+        assert!(merge_cached_provider(&path, &[], "node_modules", &partial).is_ok());
+
+        // File saved for roots ["/a"], merged against ["/b"].
+        save_cached_summary(&path, &[PathBuf::from("/a")], &two_provider_summary()).unwrap();
+        merge_cached_provider(&path, &[PathBuf::from("/b")], "node_modules", &partial).unwrap();
+        let after = load_cached_summary(&path, &[PathBuf::from("/a")]).unwrap();
+        assert_eq!(
+            after.resources.len(),
+            2,
+            "a mismatched roots cache must be left untouched"
+        );
         let _ = std::fs::remove_file(&path);
     }
 }

@@ -5,6 +5,7 @@ import {
   applyView,
   countBySafety,
   DEFAULT_VIEW,
+  isStaleActivity,
   matchesQuery,
   needsReview,
   OVERVIEW_PROVIDER_LIMIT,
@@ -47,7 +48,7 @@ function summary(): ScanSummary {
         name: "Go module cache",
         reclaimable_bytes: 300,
         safety: "caution",
-        detail: "· 200d old",
+        activity: "dormant",
       }),
     ],
   };
@@ -142,6 +143,20 @@ describe("applyView", () => {
     // being bigger — and the caution row leads within its group.
     expect(groups[0].summary.provider).toBe("go_cache");
     expect(groups[0].resources[0].id).toBe("go:1");
+  });
+});
+
+describe("isStaleActivity", () => {
+  it("counts the stale and dormant tiers as stale", () => {
+    expect(isStaleActivity("stale")).toBe(true);
+    expect(isStaleActivity("dormant")).toBe(true);
+  });
+
+  it("does not treat active, recent or unclassified as stale", () => {
+    expect(isStaleActivity("active")).toBe(false);
+    expect(isStaleActivity("recent")).toBe(false);
+    expect(isStaleActivity(null)).toBe(false);
+    expect(isStaleActivity(undefined)).toBe(false);
   });
 });
 

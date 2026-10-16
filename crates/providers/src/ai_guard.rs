@@ -30,7 +30,6 @@
 
 use std::collections::HashSet;
 use std::path::Path;
-use std::process::{Command, Stdio};
 
 /// What a process-table probe could tell us.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -52,18 +51,17 @@ impl ProcState {
 }
 
 /// Best-effort process probe. See the module docs for why this is only
-/// ever a hint.
+/// ever a hint. Bounded by a deadline (G-REL-05): a `pgrep` that never
+/// returns is `Unknown`, never a parked thread.
 pub fn probe_process(pattern: &str) -> ProcState {
-    let Ok(out) = Command::new("pgrep")
-        .args(["-f", pattern])
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .status()
-    else {
+    let Some(out) = super::exec::run_with_deadline(
+        "pgrep",
+        &["-f", pattern],
+        devclean_core::PROVIDER_COMMAND_TIMEOUT,
+    ) else {
         return ProcState::Unknown;
     };
-    match out.code() {
+    match out.status.code() {
         Some(0) => ProcState::Running,
         Some(1) => ProcState::NotRunning,
         _ => ProcState::Unknown,

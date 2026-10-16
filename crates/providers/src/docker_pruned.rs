@@ -102,6 +102,8 @@ impl Provider for DockerPrunedProvider {
                         scope_label(scope)
                     )),
                     age_days: None,
+                    activity: None,
+                    last_commit_unix: None,
                     blocked_reason: None,
                     blocked_detail: None,
                     impact: impact(consequence, Some(cost), Some(cmd)),

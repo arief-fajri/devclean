@@ -16,6 +16,7 @@ import {
 } from "$lib/tauri";
 import type { CleanupPreview, CleanupProgress, CleanupResult } from "$lib/tauri";
 import { settingsStore } from "$lib/stores/settings.svelte";
+import { scanStore } from "$lib/stores/scan.svelte";
 
 class CleanupStore {
   cleaning = $state(false);
@@ -92,6 +93,16 @@ class CleanupStore {
       // The token travels with the call: the backend decides whether the
       // confirmation actually happened, not this frontend.
       this.results = await runCleanup(ids, this.previewToken ?? undefined);
+      // Post-cleanup reaction, driven from the awaited result rather than only
+      // the `cleanup_completed` event, so it runs exactly once and cannot be
+      // missed. Drop what the backend removed *now* (deterministic — the list
+      // must not wait on a rescan), then re-scan only the providers that were
+      // touched. An empty list falls back to a full scan.
+      if (this.results) {
+        void settingsStore.refreshDiskFree();
+        scanStore.pruneCleaned(this.results);
+        void scanStore.rescanProviders(this.touchedProviders);
+      }
     } catch (e) {
       this.error = String(e);
     } finally {
@@ -130,9 +141,9 @@ class CleanupStore {
       this.cancelling = false;
       // confirmOpen stays true so the flow dialog shows the `done` phase.
       this.progress = null;
-      // Cleanup freed space on the disk; re-measure so the dashboard card
-      // does not keep quoting the number from before the deletion.
-      void settingsStore.refreshDiskFree();
+      // The post-cleanup prune + targeted rescan is driven from `execute`'s
+      // awaited result (see there), so it runs exactly once and does not
+      // depend on this event being delivered.
     });
   }
 

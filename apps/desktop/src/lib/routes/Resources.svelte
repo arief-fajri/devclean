@@ -9,14 +9,13 @@
   import ListToolbar from "$lib/components/ListToolbar.svelte";
   import PageHeader from "$lib/components/PageHeader.svelte";
   import ProviderCard from "$lib/components/ProviderCard.svelte";
-  import { isStaleSignal } from "$lib/format";
+  import { applyView, countBySafety, isStaleActivity } from "$lib/view";
   import { routeDef } from "$lib/nav";
   import { providerMeta } from "$lib/providerMeta";
   import { cleanupStore } from "$lib/stores/cleanup.svelte";
   import { scanStore } from "$lib/stores/scan.svelte";
   import { settingsStore } from "$lib/stores/settings.svelte";
   import { viewStore } from "$lib/stores/view.svelte";
-  import { applyView, countBySafety } from "$lib/view";
   import { CircleCheck, RefreshCw, TriangleAlert } from "lucide-svelte";
 
   const route = routeDef("resources");
@@ -27,7 +26,7 @@
     scanStore.summary ? applyView(scanStore.summary, scanStore.selected, viewStore.options) : [],
   );
   const listCounts = $derived(countBySafety(allResources));
-  const staleTotal = $derived(allResources.filter((r) => isStaleSignal(r.detail)).length);
+  const staleTotal = $derived(allResources.filter((r) => isStaleActivity(r.activity)).length);
   const resultCount = $derived(groups.reduce((acc, g) => acc + g.resources.length, 0));
 
   /** Safe, not-yet-selected ids for "Select safe items". */

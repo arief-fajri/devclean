@@ -310,6 +310,8 @@ mod tests {
                     detail: None,
                     impact: None,
                     age_days: Some(3),
+                    activity: None,
+                    last_commit_unix: None,
                     blocked_reason: blocked,
                     blocked_detail: None,
                 },

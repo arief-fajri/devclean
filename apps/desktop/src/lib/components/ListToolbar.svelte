@@ -131,7 +131,7 @@
       <button class={chip(viewStore.safety === "review")} onclick={() => { viewStore.safety = viewStore.safety === "review" ? "all" : "review"; }} aria-pressed={viewStore.safety === "review"}>
         Review · {reviewCount}
       </button>
-      <button class={chip(viewStore.staleOnly)} onclick={() => { viewStore.staleOnly = !viewStore.staleOnly; }} aria-pressed={viewStore.staleOnly} title="Untouched for >90 days — a signal only, never a safety verdict">
+      <button class={chip(viewStore.staleOnly)} onclick={() => { viewStore.staleOnly = !viewStore.staleOnly; }} aria-pressed={viewStore.staleOnly} title="Not touched in over 30 days — a signal only, never a safety verdict">
         Stale · {staleCount}
       </button>
       <button class={chip(viewStore.selectedOnly)} onclick={() => { viewStore.selectedOnly = !viewStore.selectedOnly; }} aria-pressed={viewStore.selectedOnly}>
