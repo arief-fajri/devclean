@@ -7,7 +7,9 @@
 //! Lives outside scan roots → declares
 //! [`Provider::extra_allowed_roots`]; protected-path rules still apply.
 
-use super::provider::{dir_size_detail, home_dir, impact, measure_dir, CleanupAction, Provider};
+use super::provider::{
+    dir_size_detail_checked, home_dir, impact, measure_dir, CleanupAction, Provider,
+};
 use devclean_core::{Resource, SafetyLevel};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::AtomicBool;
@@ -30,11 +32,15 @@ impl Provider for GradleCacheProvider {
         SafetyLevel::Caution
     }
 
-    fn scan(&self, _roots: &[PathBuf], _cancel: &AtomicBool) -> Vec<Resource> {
+    fn scan(&self, _roots: &[PathBuf], cancel: &AtomicBool) -> Vec<Resource> {
         let Some(dir) = gradle_caches_dir() else {
             return Vec::new();
         };
-        let size = dir_size_detail(&dir);
+        // Cancellable (G-SCAN-02): a cancel during the measurement drops
+        // this resource rather than settling only when the walk finishes.
+        let Some(size) = dir_size_detail_checked(&dir, cancel) else {
+            return Vec::new();
+        };
         if size.allocated == 0 {
             return Vec::new();
         }

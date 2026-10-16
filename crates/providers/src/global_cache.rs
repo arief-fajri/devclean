@@ -19,10 +19,12 @@
 //! validator keeps applying the protected-path rules (I2, I7) — nothing
 //! under `~/Documents` or `~/.ssh` can be reached from here.
 
-use super::provider::{dir_size_detail, home_dir, impact, measure_dir, CleanupAction, Provider};
+use super::provider::{
+    dir_size_detail_checked, home_dir, impact, measure_dir, CleanupAction, Provider,
+};
 use devclean_core::{Resource, SafetyLevel};
 use std::path::{Path, PathBuf};
-use std::sync::atomic::AtomicBool;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 /// One cache we own.
 struct Target {
@@ -111,12 +113,18 @@ impl Provider for GlobalCacheProvider {
         SafetyLevel::Caution
     }
 
-    fn scan(&self, _roots: &[PathBuf], _cancel: &AtomicBool) -> Vec<Resource> {
+    fn scan(&self, _roots: &[PathBuf], cancel: &AtomicBool) -> Vec<Resource> {
         TARGETS
             .iter()
             .filter_map(|t| {
+                // Cancellable (G-SCAN-02): stop between targets, and drop
+                // the one being measured, the moment cancel is set — the
+                // old uncancellable walk kept going through every target.
+                if cancel.load(Ordering::Relaxed) {
+                    return None;
+                }
                 let dir = path_for(t)?;
-                let size = dir_size_detail(&dir);
+                let size = dir_size_detail_checked(&dir, cancel)?;
                 if size.allocated == 0 {
                     return None;
                 }

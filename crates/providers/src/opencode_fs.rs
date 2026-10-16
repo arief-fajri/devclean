@@ -11,10 +11,12 @@
 //! - Config and credentials are never prune targets (I10).
 
 use super::ai_guard;
-use super::provider::{dir_size_detail, home_dir, impact, project_detail, CleanupAction, Provider};
+use super::provider::{
+    dir_size_detail_checked, home_dir, impact, project_detail, CleanupAction, Provider,
+};
 use devclean_core::{Resource, SafetyLevel};
 use std::path::{Path, PathBuf};
-use std::sync::atomic::AtomicBool;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 /// (id, label, subdir, pattern, prune empty dirs?) — fixed strings only.
 const TARGETS: &[(&str, &str, &str, &str, bool)] = &[
@@ -49,7 +51,7 @@ impl Provider for OpencodeFsProvider {
         SafetyLevel::Caution
     }
 
-    fn scan(&self, _roots: &[PathBuf], _cancel: &AtomicBool) -> Vec<Resource> {
+    fn scan(&self, _roots: &[PathBuf], cancel: &AtomicBool) -> Vec<Resource> {
         let Some(base) = opencode_dir() else {
             return Vec::new();
         };
@@ -59,11 +61,16 @@ impl Provider for OpencodeFsProvider {
         TARGETS
             .iter()
             .filter_map(|(_id, label, sub, _pat, _empty)| {
+                // Cancellable (G-SCAN-02): stop between targets, and drop
+                // the one being measured, the moment cancel is set.
+                if cancel.load(Ordering::Relaxed) {
+                    return None;
+                }
                 let dir = base.join(sub);
                 if !dir.is_dir() {
                     return None;
                 }
-                let size = dir_size_detail(&dir);
+                let size = dir_size_detail_checked(&dir, cancel)?;
                 if size.allocated == 0 {
                     return None;
                 }

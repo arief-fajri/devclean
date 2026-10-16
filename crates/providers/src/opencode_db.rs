@@ -186,7 +186,13 @@ impl Provider for OpencodeDbProvider {
         SafetyLevel::Dangerous
     }
 
-    fn scan(&self, _roots: &[PathBuf], _cancel: &AtomicBool) -> Vec<Resource> {
+    fn scan(&self, _roots: &[PathBuf], cancel: &AtomicBool) -> Vec<Resource> {
+        // The survey itself is one indexed COUNT — milliseconds, not a walk
+        // — but the entry check keeps the cancel contract uniform: a
+        // pre-cancelled scan returns empty from every provider (G-SCAN-02).
+        if cancel.load(std::sync::atomic::Ordering::Relaxed) {
+            return Vec::new();
+        }
         let Some(db) = db_path() else {
             return Vec::new();
         };
