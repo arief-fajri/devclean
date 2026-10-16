@@ -2,14 +2,15 @@
 //!
 //! Finds `node_modules/` directories whose parent holds a `package.json`.
 //! Cleans by deleting the directory only — lockfiles are never touched.
+//! Matching happens in the shared project-tree walk ([`crate::tree`]).
 
 use super::provider::{
-    age_days, dir_size_detail_checked, impact, measure_dir, project_detail, walk_cancelled,
-    CleanupAction, OwnScanner, Provider,
+    age_days, dir_size_detail_checked, impact, measure_dir, project_detail, CleanupAction, Provider,
 };
+use crate::tree::{Match, TreeRule, TreeRuleSpec};
 use devclean_core::{Resource, SafetyLevel};
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::AtomicBool;
 
 pub struct NodeModulesProvider;
 
@@ -38,69 +39,57 @@ impl Provider for NodeModulesProvider {
         artifact.parent().map(Path::to_path_buf)
     }
 }
-impl OwnScanner for NodeModulesProvider {
-    fn scan(&self, roots: &[PathBuf], cancel: &AtomicBool) -> Vec<Resource> {
-        let mut out = Vec::new();
-        for root in roots {
-            if cancel.load(Ordering::Relaxed) {
-                break;
-            }
-            // walk_cancelled aborts promptly when `cancel` is set (G-SCAN-02).
-            walk_cancelled(root, 6, cancel, |entry| {
-                if !(entry.file_type().is_dir() && entry.file_name() == "node_modules") {
-                    return;
-                }
-                let dir = entry.path();
-                // Don't descend into nested node_modules twice.
-                if dir
-                    .parent()
-                    .map(|p| p.components().any(|c| c.as_os_str() == "node_modules"))
-                    .unwrap_or(false)
-                {
-                    return;
-                }
-                let project = dir.parent().unwrap_or(dir);
-                if !project.join("package.json").is_file() {
-                    return;
-                }
-                // Skip (don't abort) entries whose size can't be measured.
-                let Some(size) = dir_size_detail_checked(dir, cancel) else {
-                    return;
-                };
-                let project_name = project
-                    .file_name()
-                    .map(|s| s.to_string_lossy().into_owned())
-                    .unwrap_or_else(|| "?".to_string());
-                out.push(Resource {
-                    id: String::new(),
-                    provider: self.id().to_string(),
-                    name: format!("{project_name}/node_modules"),
-                    path: dir.to_path_buf(),
-                    size_bytes: size.allocated,
-                    reclaimable_bytes: size.allocated,
-                    apparent_bytes: size.apparent_if_material(),
-                    safety: SafetyLevel::Safe,
-                    detail: Some(project_detail(&project_name, project, size.allocated)),
-                    age_days: age_days(project),
-                    activity: None,
-                    last_commit_unix: None,
-                    blocked_reason: None,
-                    blocked_detail: None,
-                    impact: impact(
-                        "Dependencies are reinstalled from the lockfile; source code is untouched.",
-                        Some("Next install re-downloads packages"),
-                        None,
-                    ),
-                });
-            });
+impl TreeRule for NodeModulesProvider {
+    fn spec(&self) -> TreeRuleSpec {
+        TreeRuleSpec {
+            dir_names: &["node_modules"],
+            sibling_file: Some("package.json"),
+            max_depth: 6,
+            // A node_modules inside a node_modules: not a second artifact —
+            // its bytes already belong to the enclosing one.
+            skip_nested: true,
+            extra_prune_dirs: &[],
         }
-        out
+    }
+
+    fn materialize(&self, m: &Match, cancel: &AtomicBool) -> Option<Resource> {
+        let dir = &m.dir;
+        // Skip (don't abort) entries whose size can't be measured.
+        let size = dir_size_detail_checked(dir, cancel)?;
+        let project = dir.parent().unwrap_or(dir);
+        let project_name = project
+            .file_name()
+            .map(|s| s.to_string_lossy().into_owned())
+            .unwrap_or_else(|| "?".to_string());
+        Some(Resource {
+            id: String::new(),
+            provider: self.id().to_string(),
+            name: format!("{project_name}/node_modules"),
+            path: dir.to_path_buf(),
+            size_bytes: size.allocated,
+            reclaimable_bytes: size.allocated,
+            apparent_bytes: size.apparent_if_material(),
+            safety: SafetyLevel::Safe,
+            detail: Some(project_detail(&project_name, project, size.allocated)),
+            age_days: age_days(project),
+            activity: None,
+            last_commit_unix: None,
+            blocked_reason: None,
+            blocked_detail: None,
+            impact: impact(
+                "Dependencies are reinstalled from the lockfile; source code is untouched.",
+                Some("Next install re-downloads packages"),
+                None,
+            ),
+        })
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::tree::walk_tree_rules;
+    use std::sync::Arc;
 
     fn fixture_root(tag: &str) -> PathBuf {
         let root =
@@ -124,7 +113,13 @@ mod tests {
     fn finds_node_modules_with_package_json() {
         let root = fixture_root("node");
         let cancel = AtomicBool::new(false);
-        let found = NodeModulesProvider.scan(std::slice::from_ref(&root), &cancel);
+        let found = walk_tree_rules(
+            std::slice::from_ref(&root),
+            &[Arc::new(NodeModulesProvider)],
+            &cancel,
+        );
+        assert_eq!(found.len(), 1, "one group per rule");
+        let found: Vec<Resource> = found.into_iter().flatten().collect();
         assert_eq!(found.len(), 1, "expected exactly one hit: {found:?}");
         assert_eq!(found[0].provider, "node_modules");
         assert!(found[0].size_bytes >= 1000);

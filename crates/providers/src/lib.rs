@@ -44,21 +44,21 @@ pub use provider::{
 pub use python_cache::PythonCacheProvider;
 pub use registry::ProviderRegistry;
 pub use rust_target::RustTargetProvider;
-pub use tree::{Match, TreeRule, TreeRuleSpec};
+pub use tree::{walk_tree_rules, Match, TreeRule, TreeRuleSpec};
 pub use xcode_data::XcodeDataProvider;
 
 /// All providers in scan order.
 pub fn all_providers() -> Vec<Scannable> {
     use std::sync::Arc;
     vec![
-        Scannable::Own(Arc::new(NodeModulesProvider)),
-        Scannable::Own(Arc::new(RustTargetProvider)),
+        Scannable::Tree(Arc::new(NodeModulesProvider)),
+        Scannable::Tree(Arc::new(RustTargetProvider)),
         Scannable::Own(Arc::new(GoProvider)),
         Scannable::Own(Arc::new(DockerProvider)),
         Scannable::Own(Arc::new(DockerPrunedProvider)),
         Scannable::Own(Arc::new(GlobalCacheProvider)),
         Scannable::Own(Arc::new(NpmCacheProvider)),
-        Scannable::Own(Arc::new(PythonCacheProvider)),
+        Scannable::Tree(Arc::new(PythonCacheProvider)),
         Scannable::Own(Arc::new(CargoRegistryProvider)),
         Scannable::Own(Arc::new(GradleCacheProvider)),
         Scannable::Own(Arc::new(XcodeDataProvider)),

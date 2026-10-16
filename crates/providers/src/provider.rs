@@ -161,10 +161,11 @@ pub trait OwnScanner: Provider {
 /// cleanup and policy.
 #[derive(Clone)]
 pub enum Scannable {
+    /// Walks its own targets, one `spawn_blocking` task apiece.
     Own(Arc<dyn OwnScanner>),
-    // The `Tree` variant arrives with the shared walk (Wave C, phase 2);
-    // keeping the enum single-variant here lets the trait split land as a
-    // pure mechanical change.
+    /// Contributes a rule to the shared project-tree walk: three tree
+    /// rules ride one traversal instead of three.
+    Tree(Arc<dyn crate::tree::TreeRule>),
 }
 
 impl Scannable {
@@ -173,6 +174,7 @@ impl Scannable {
     pub fn provider(&self) -> &dyn Provider {
         match self {
             Scannable::Own(p) => p.as_ref(),
+            Scannable::Tree(p) => p.as_ref(),
         }
     }
 
@@ -181,6 +183,7 @@ impl Scannable {
     pub fn provider_arc(&self) -> Arc<dyn Provider> {
         match self {
             Scannable::Own(p) => p.clone() as Arc<dyn Provider>,
+            Scannable::Tree(p) => p.clone() as Arc<dyn Provider>,
         }
     }
 }

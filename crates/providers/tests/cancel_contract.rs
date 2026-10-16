@@ -13,13 +13,14 @@
 //! a cancelled scan reports nothing.
 
 use devclean_providers::{
-    CargoRegistryProvider, ClaudeProvider, DockerProvider, DockerPrunedProvider,
+    walk_tree_rules, CargoRegistryProvider, ClaudeProvider, DockerProvider, DockerPrunedProvider,
     GlobalCacheProvider, GoProvider, GradleCacheProvider, NodeModulesProvider, NpmCacheProvider,
     OpencodeDbProvider, OpencodeFsProvider, OwnScanner, PythonCacheProvider, RustTargetProvider,
-    XcodeDataProvider,
+    TreeRule, XcodeDataProvider,
 };
 use std::path::PathBuf;
 use std::sync::atomic::AtomicBool;
+use std::sync::Arc;
 
 /// A scan that must never touch the filesystem: every provider checks the
 /// flag before its first probe or measurement.
@@ -29,14 +30,54 @@ fn cancelled_scan(p: &dyn OwnScanner) -> Vec<devclean_core::Resource> {
     p.scan(&roots, &cancel)
 }
 
+/// One fixture holding a match for every tree rule, so the tree half of the
+/// contract runs against real work a scan WOULD report without the flag —
+/// an empty root would make the assertion vacuous.
+fn tree_fixture() -> PathBuf {
+    let root = std::env::temp_dir().join(format!("devclean-cancel-tree-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&root);
+    std::fs::create_dir_all(root.join("proj/node_modules")).unwrap();
+    std::fs::write(root.join("proj/package.json"), b"{}").unwrap();
+    std::fs::write(root.join("proj/node_modules/x.js"), b"x").unwrap();
+    std::fs::create_dir_all(root.join("rs/target")).unwrap();
+    std::fs::write(root.join("rs/Cargo.toml"), b"[package]").unwrap();
+    std::fs::write(root.join("rs/target/app"), b"x").unwrap();
+    std::fs::create_dir_all(root.join("py/__pycache__")).unwrap();
+    std::fs::write(root.join("py/__pycache__/m.pyc"), b"x").unwrap();
+    root
+}
+
+/// The tree rules ride the shared walk; the walk checks the flag before it
+/// offers the first entry, so a pre-set cancel reports nothing.
+fn tree_scan(rule: Arc<dyn TreeRule>, cancel: bool) -> Vec<devclean_core::Resource> {
+    let root = tree_fixture();
+    let flag = AtomicBool::new(cancel);
+    let groups = walk_tree_rules(std::slice::from_ref(&root), &[rule], &flag);
+    let _ = std::fs::remove_dir_all(&root);
+    groups.into_iter().flatten().collect()
+}
+
+/// Without the flag the fixture DOES match — proof the cancelled rows below
+/// are not passing because the fixture is empty.
+#[test]
+fn the_tree_cancel_fixture_actually_matches() {
+    for rule in [
+        Arc::new(NodeModulesProvider) as Arc<dyn TreeRule>,
+        Arc::new(RustTargetProvider),
+        Arc::new(PythonCacheProvider),
+    ] {
+        assert_eq!(tree_scan(rule, false).len(), 1, "fixture must match once");
+    }
+}
+
 #[test]
 fn node_modules_stops_when_cancelled() {
-    assert!(cancelled_scan(&NodeModulesProvider).is_empty());
+    assert!(tree_scan(Arc::new(NodeModulesProvider), true).is_empty());
 }
 
 #[test]
 fn rust_target_stops_when_cancelled() {
-    assert!(cancelled_scan(&RustTargetProvider).is_empty());
+    assert!(tree_scan(Arc::new(RustTargetProvider), true).is_empty());
 }
 
 #[test]
@@ -66,7 +107,7 @@ fn npm_cache_stops_when_cancelled() {
 
 #[test]
 fn python_cache_stops_when_cancelled() {
-    assert!(cancelled_scan(&PythonCacheProvider).is_empty());
+    assert!(tree_scan(Arc::new(PythonCacheProvider), true).is_empty());
 }
 
 #[test]

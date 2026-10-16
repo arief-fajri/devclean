@@ -14,12 +14,13 @@
 
 use devclean_core::Resource;
 use devclean_providers::{
-    NodeModulesProvider, OwnScanner, PythonCacheProvider, RustTargetProvider,
+    walk_tree_rules, NodeModulesProvider, PythonCacheProvider, RustTargetProvider, TreeRule,
 };
 use std::collections::BTreeSet;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::AtomicBool;
+use std::sync::Arc;
 
 // ---------------------------------------------------------------- fixtures
 
@@ -173,17 +174,27 @@ fn build_fixture(root: &Path) {
 
 // ------------------------------------------------------------------ driver
 
-/// The part that changes across Wave C. Today: three independent walks.
-/// After the refactor it drives the shared walk instead — the fixture and
-/// the assertions below must not need a single edit.
+/// The part that changed across Wave C: three independent walks became
+/// ONE shared walk over the same roots. The fixture and every assertion
+/// below stayed byte-identical — the equivalence is reviewable as the diff
+/// of this function.
 fn scan_tree_providers(root: &Path) -> Vec<Resource> {
     let cancel = AtomicBool::new(false);
     let roots = [root.to_path_buf()];
-    let mut out = Vec::new();
-    out.extend(NodeModulesProvider.scan(&roots, &cancel));
-    out.extend(RustTargetProvider.scan(&roots, &cancel));
-    out.extend(PythonCacheProvider.scan(&roots, &cancel));
-    out
+    walk_tree_rules(&roots, &tree_rules(), &cancel)
+        .into_iter()
+        .flatten()
+        .collect()
+}
+
+/// The three tree rules, in registry order — the same objects
+/// `all_providers()` hands the ScanManager.
+fn tree_rules() -> Vec<Arc<dyn TreeRule>> {
+    vec![
+        Arc::new(NodeModulesProvider),
+        Arc::new(RustTargetProvider),
+        Arc::new(PythonCacheProvider),
+    ]
 }
 
 // -------------------------------------------------------------- assertions
@@ -372,5 +383,30 @@ fn g_scan_03_a_symlink_loop_terminates_and_the_walk_continues() {
         "node_modules".to_string(),
         "loop/proj/node_modules".to_string()
     )));
+    fs::remove_dir_all(&root).unwrap();
+}
+
+#[test]
+fn the_shared_walk_reports_exactly_the_sum_of_the_solo_walks() {
+    // One traversal must not make the rules see each other: driving each
+    // rule alone over the same fixture yields the same rows as driving all
+    // three together (per-rule isolation inside the shared walk).
+    let root = scratch("solo");
+    build_fixture(&root);
+    let combined = structural_set(&root, &scan_tree_providers(&root));
+    let mut solo = std::collections::BTreeSet::new();
+    for rule in tree_rules() {
+        let cancel = AtomicBool::new(false);
+        let rows = walk_tree_rules(
+            std::slice::from_ref(&root),
+            std::slice::from_ref(&rule),
+            &cancel,
+        );
+        for r in rows.into_iter().flatten() {
+            solo.insert((r.provider.clone(), rel(&root, &r.path)));
+        }
+    }
+    assert_eq!(solo, combined, "solo walks and the shared walk disagree");
+    assert_eq!(combined, expected_set());
     fs::remove_dir_all(&root).unwrap();
 }

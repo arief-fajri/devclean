@@ -7,12 +7,12 @@
 //! (G-SAFE-03).
 
 use super::provider::{
-    age_days, dir_size_detail_checked, impact, measure_dir, project_detail, walk_cancelled,
-    CleanupAction, OwnScanner, Provider,
+    age_days, dir_size_detail_checked, impact, measure_dir, project_detail, CleanupAction, Provider,
 };
+use crate::tree::{Match, TreeRule, TreeRuleSpec};
 use devclean_core::{Resource, SafetyLevel};
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::AtomicBool;
 
 pub struct PythonCacheProvider;
 
@@ -43,63 +43,61 @@ impl Provider for PythonCacheProvider {
         artifact.parent().map(Path::to_path_buf)
     }
 }
-impl OwnScanner for PythonCacheProvider {
-    fn scan(&self, roots: &[PathBuf], cancel: &AtomicBool) -> Vec<Resource> {
-        let mut out = Vec::new();
-        for root in roots {
-            if cancel.load(Ordering::Relaxed) {
-                break;
-            }
-            walk_cancelled(root, 6, cancel, |entry| {
-                if !entry.file_type().is_dir() {
-                    return;
-                }
-                let name = entry.file_name().to_string_lossy().into_owned();
-                if !CACHE_DIRS.contains(&name.as_str()) {
-                    return;
-                }
-                let dir = entry.path();
-                let Some(size) = dir_size_detail_checked(dir, cancel) else {
-                    return;
-                };
-                if size.allocated == 0 {
-                    return;
-                }
-                let project = dir.parent().unwrap_or(dir);
-                let project_name = project
-                    .file_name()
-                    .map(|s| s.to_string_lossy().into_owned())
-                    .unwrap_or_else(|| "?".to_string());
-                out.push(Resource {
-                    id: String::new(),
-                    provider: self.id().to_string(),
-                    name: format!("{project_name}/{name}"),
-                    path: dir.to_path_buf(),
-                    size_bytes: size.allocated,
-                    reclaimable_bytes: size.allocated,
-                    apparent_bytes: size.apparent_if_material(),
-                    safety: SafetyLevel::Safe,
-                    detail: Some(project_detail(&project_name, project, size.allocated)),
-                    age_days: age_days(project),
-                    activity: None,
-                    last_commit_unix: None,
-                    blocked_reason: None,
-                    blocked_detail: None,
-                    impact: impact(
-                        "Bytecode and test caches only; regenerated automatically.",
-                        Some("First run recompiles"),
-                        None,
-                    ),
-                });
-            });
+impl TreeRule for PythonCacheProvider {
+    fn spec(&self) -> TreeRuleSpec {
+        TreeRuleSpec {
+            dir_names: CACHE_DIRS,
+            sibling_file: None,
+            max_depth: 6,
+            // The old walk reported __pycache__ wherever it sat, including
+            // one inside another — characterized by the equivalence suite,
+            // so the shared walk keeps it.
+            skip_nested: false,
+            extra_prune_dirs: &[],
         }
-        out
+    }
+
+    fn materialize(&self, m: &Match, cancel: &AtomicBool) -> Option<Resource> {
+        let size = dir_size_detail_checked(&m.dir, cancel)?;
+        if size.allocated == 0 {
+            return None;
+        }
+        let dir = &m.dir;
+        let name = dir.file_name()?.to_string_lossy().into_owned();
+        let project = dir.parent().unwrap_or(dir);
+        let project_name = project
+            .file_name()
+            .map(|s| s.to_string_lossy().into_owned())
+            .unwrap_or_else(|| "?".to_string());
+        Some(Resource {
+            id: String::new(),
+            provider: self.id().to_string(),
+            name: format!("{project_name}/{name}"),
+            path: dir.to_path_buf(),
+            size_bytes: size.allocated,
+            reclaimable_bytes: size.allocated,
+            apparent_bytes: size.apparent_if_material(),
+            safety: SafetyLevel::Safe,
+            detail: Some(project_detail(&project_name, project, size.allocated)),
+            age_days: age_days(project),
+            activity: None,
+            last_commit_unix: None,
+            blocked_reason: None,
+            blocked_detail: None,
+            impact: impact(
+                "Bytecode and test caches only; regenerated automatically.",
+                Some("First run recompiles"),
+                None,
+            ),
+        })
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::tree::walk_tree_rules;
+    use std::sync::Arc;
 
     fn fixture_root(tag: &str) -> PathBuf {
         let root =
@@ -118,7 +116,13 @@ mod tests {
     fn finds_pycache_but_never_venvs() {
         let root = fixture_root("py");
         let cancel = AtomicBool::new(false);
-        let found = PythonCacheProvider.scan(std::slice::from_ref(&root), &cancel);
+        let found = walk_tree_rules(
+            std::slice::from_ref(&root),
+            &[Arc::new(PythonCacheProvider)],
+            &cancel,
+        );
+        assert_eq!(found.len(), 1, "one group per rule");
+        let found: Vec<Resource> = found.into_iter().flatten().collect();
         assert_eq!(found.len(), 1, "expected only __pycache__: {found:?}");
         assert!(found[0].name.ends_with("__pycache__"));
         assert!(found[0].size_bytes >= 1000);

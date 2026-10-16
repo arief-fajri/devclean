@@ -4,7 +4,9 @@ use devclean_core::{
     stamp_blocked_reason, PolicyInputs, ProviderSummary, Resource, ScanSummary,
     PROVIDER_SCAN_TIMEOUT,
 };
-use devclean_providers::{all_providers, Provider, ProviderRegistry, Scannable};
+use devclean_providers::{
+    all_providers, walk_tree_rules, Provider, ProviderRegistry, Scannable, TreeRule,
+};
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::{
@@ -158,7 +160,7 @@ impl ScanManager {
         self.cancelled.store(false, Ordering::SeqCst);
         let on_progress: Option<Arc<ProgressFn>> = on_progress.map(Arc::new);
         let on_started: Option<Arc<StartedFn>> = on_started.map(Arc::new);
-        let mut handles = Vec::new();
+        let mut handles: Vec<tokio::task::JoinHandle<ScanTaskOutput>> = Vec::new();
 
         let active: Vec<&Scannable> = self
             .providers
@@ -167,6 +169,18 @@ impl ScanManager {
             .filter(|p| only.is_none_or(|id| p.provider().id() == id))
             .collect();
         let total = active.len();
+        // Bucket once: self-walking providers fan out one task apiece, the
+        // tree rules ride ONE shared traversal (they used to re-walk the
+        // same dev tree apiece — Wave C). The buckets are disjoint, so
+        // `total` still counts every active provider exactly once.
+        let mut own_scanners: Vec<std::sync::Arc<dyn devclean_providers::OwnScanner>> = Vec::new();
+        let mut tree_rules: Vec<Arc<dyn TreeRule>> = Vec::new();
+        for p in active {
+            match p {
+                Scannable::Own(o) => own_scanners.push(Arc::clone(o)),
+                Scannable::Tree(t) => tree_rules.push(Arc::clone(t)),
+            }
+        }
         // Monotonic completion counter for THIS run. `scan_progress.done`
         // must count providers that FINISHED, never their static position
         // in the list — otherwise a fast provider at index 5 reports
@@ -174,8 +188,7 @@ impl ScanManager {
         // backwards and can read 9/9 with 4 still pending. Local (not a
         // struct field) so two concurrent runs never share it.
         let completed = Arc::new(AtomicUsize::new(0));
-        for provider in &active {
-            let p = (*provider).clone();
+        for p in own_scanners {
             let roots = roots.clone();
             let sem = Arc::clone(&self.semaphore);
             let cancelled = Arc::clone(&self.cancelled);
@@ -185,7 +198,7 @@ impl ScanManager {
             let completed = Arc::clone(&completed);
             handles.push(tokio::spawn(async move {
                 let _permit = sem.acquire_owned().await.unwrap();
-                let pid = p.provider().id().to_string();
+                let pid = p.id().to_string();
                 if let Some(started) = &started {
                     started(&pid);
                 }
@@ -200,12 +213,10 @@ impl ScanManager {
                 };
                 if cancelled.load(Ordering::SeqCst) {
                     report(&cb, &pid);
-                    return (pid, Vec::new());
+                    return vec![(pid, Vec::new())];
                 }
                 let roots = roots.clone();
-                let scan = tokio::task::spawn_blocking(move || match &p {
-                    Scannable::Own(o) => o.scan(&roots, &cancelled),
-                });
+                let scan = tokio::task::spawn_blocking(move || p.scan(&roots, &cancelled));
                 let found = match tokio::time::timeout(timeout, scan).await {
                     Ok(Ok(found)) => found,
                     Ok(Err(e)) => {
@@ -218,16 +229,77 @@ impl ScanManager {
                     }
                 };
                 report(&cb, &pid);
-                (pid, found)
+                vec![(pid, found)]
+            }));
+        }
+
+        if !tree_rules.is_empty() {
+            let rules = tree_rules;
+            let roots = roots.clone();
+            let sem = Arc::clone(&self.semaphore);
+            let cancelled = Arc::clone(&self.cancelled);
+            let cb = on_progress.clone();
+            let started = on_started.clone();
+            let timeout = self.timeout;
+            let completed = Arc::clone(&completed);
+            handles.push(tokio::spawn(async move {
+                let _permit = sem.acquire_owned().await.unwrap();
+                let n = rules.len();
+                let ids: Vec<String> = rules.iter().map(|r| r.id().to_string()).collect();
+                // The whole group enters the walk together: one
+                // `scan_provider_started` per rule, then one progress tick
+                // per rule when the group settles — on every exit path, so
+                // the bar can never stall below its total (G-SCAN-05).
+                if let Some(started) = &started {
+                    for id in &ids {
+                        started(id);
+                    }
+                }
+                let report_all = |cb: &Option<Arc<ProgressFn>>| {
+                    for id in &ids {
+                        let done = completed.fetch_add(1, Ordering::SeqCst) + 1;
+                        if let Some(cb) = cb {
+                            cb(id, done, total);
+                        }
+                    }
+                };
+                if cancelled.load(Ordering::SeqCst) {
+                    report_all(&cb);
+                    return ids.iter().map(|id| (id.clone(), Vec::new())).collect();
+                }
+                let rules_for_walk = rules.clone();
+                let roots_for_walk = roots.clone();
+                let walk = tokio::task::spawn_blocking(move || {
+                    walk_tree_rules(&roots_for_walk, &rules_for_walk, &cancelled)
+                });
+                // One group per rule, in input order — the registry
+                // assigns ids per provider, so rows must stay grouped.
+                let groups = match tokio::time::timeout(timeout, walk).await {
+                    Ok(Ok(groups)) => groups,
+                    Ok(Err(e)) => {
+                        tracing::warn!(group = "tree", "shared walk panicked: {e}; skipping");
+                        vec![Vec::new(); n]
+                    }
+                    Err(_) => {
+                        tracing::warn!(
+                            group = "tree",
+                            "shared walk timed out after {timeout:?}; skipping"
+                        );
+                        vec![Vec::new(); n]
+                    }
+                };
+                report_all(&cb);
+                ids.into_iter().zip(groups).collect()
             }));
         }
 
         let mut registry = ProviderRegistry::default();
         let mut resources: Vec<Resource> = Vec::new();
         for h in handles {
-            let (provider_id, found) = h.await.unwrap_or_default();
-            let prefix = short_prefix(&provider_id);
-            resources.extend(registry.register(&provider_id, prefix, found));
+            for (provider_id, found) in h.await.unwrap_or_default() {
+                let prefix = short_prefix(&provider_id);
+                resources.extend(registry.register(&provider_id, prefix, found));
+            }
         }
         resources.retain(|r| !is_excluded(&r.path, excluded));
 
@@ -273,6 +345,11 @@ impl ScanManager {
         aggregate(resources)
     }
 }
+
+/// One scan task's output: provider id plus the rows it produced. Own
+/// tasks return exactly one entry; the shared-walk task returns one per
+/// tree rule, all registered under their own id.
+type ScanTaskOutput = Vec<(String, Vec<Resource>)>;
 
 /// True when `path` is the excluded dir itself or lives under it.
 fn is_excluded(path: &std::path::Path, excluded: &[PathBuf]) -> bool {
@@ -350,7 +427,9 @@ fn aggregate(resources: Vec<Resource>) -> ScanSummary {
 mod tests {
     use super::*;
     use devclean_core::SafetyLevel;
-    use devclean_providers::OwnScanner;
+    use devclean_providers::{
+        NodeModulesProvider, OwnScanner, PythonCacheProvider, RustTargetProvider,
+    };
     use std::path::Path;
 
     /// Stub provider that works in small cooperative slices so cancellation
@@ -866,6 +945,168 @@ mod tests {
             summary.resources.iter().map(|r| &r.id).collect::<Vec<_>>()
         );
         assert_eq!(summary.resources.len(), 10, "2 resources × 5 providers");
+    }
+
+    /// G-SCAN-05 for the SHARED walk: the three tree rules ride one
+    /// traversal, but the UI must still see one `scan_provider_started`
+    /// and one `scan_progress` per provider, with `total` counting each of
+    /// them exactly once.
+    #[tokio::test]
+    async fn the_shared_walk_reports_once_per_tree_provider() {
+        let providers: Vec<Scannable> = vec![
+            Scannable::Tree(Arc::new(NodeModulesProvider)),
+            Scannable::Tree(Arc::new(RustTargetProvider)),
+            Scannable::Tree(Arc::new(PythonCacheProvider)),
+        ];
+        let mgr = ScanManager::with_config(providers, Duration::from_secs(60));
+
+        let started_sink = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let progress_sink = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let s2 = std::sync::Arc::clone(&started_sink);
+        let p2 = std::sync::Arc::clone(&progress_sink);
+        let on_started: StartedFn = Box::new(move |id| s2.lock().unwrap().push(id.to_string()));
+        let on_progress: ProgressFn = Box::new(move |id, done, total| {
+            p2.lock().unwrap().push((id.to_string(), done, total));
+        });
+        let root = std::env::temp_dir().join(format!("devclean-tree-prog-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        mgr.scan_all(
+            vec![root.clone()],
+            &[],
+            &[],
+            permissive(),
+            Some(on_progress),
+            Some(on_started),
+        )
+        .await;
+        let _ = std::fs::remove_dir_all(&root);
+
+        let mut started = started_sink.lock().unwrap().clone();
+        started.sort();
+        assert_eq!(
+            started,
+            vec![
+                "node_modules".to_string(),
+                "python_cache".to_string(),
+                "rust_target".to_string()
+            ],
+            "one started per tree provider, got {started:?}"
+        );
+
+        let progress = progress_sink.lock().unwrap().clone();
+        assert_eq!(
+            progress.len(),
+            3,
+            "one progress tick per rule: {progress:?}"
+        );
+        let mut ids: Vec<&str> = progress.iter().map(|(id, ..)| id.as_str()).collect();
+        ids.sort();
+        assert_eq!(
+            ids,
+            vec!["node_modules", "python_cache", "rust_target"],
+            "ticks must be attributed to their own provider"
+        );
+        assert!(
+            progress.iter().all(|(_, _, total)| *total == 3),
+            "total must count every active provider once: {progress:?}"
+        );
+        let mut dones: Vec<usize> = progress.iter().map(|(_, done, _)| *done).collect();
+        dones.sort();
+        assert_eq!(
+            dones,
+            vec![1, 2, 3],
+            "done counts completions: {progress:?}"
+        );
+    }
+
+    /// The shared walk must tick the bar even when the run is cancelled
+    /// before it starts — the UI would otherwise stall below 3/3 forever.
+    #[tokio::test]
+    async fn a_cancelled_shared_walk_still_ticks_every_tree_provider() {
+        let providers: Vec<Scannable> = vec![
+            Scannable::Tree(Arc::new(NodeModulesProvider)),
+            Scannable::Tree(Arc::new(RustTargetProvider)),
+            Scannable::Tree(Arc::new(PythonCacheProvider)),
+        ];
+        let mgr = ScanManager::with_config(providers, Duration::from_secs(60));
+        mgr.cancel();
+
+        let started_sink = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let progress_sink = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let s2 = std::sync::Arc::clone(&started_sink);
+        let p2 = std::sync::Arc::clone(&progress_sink);
+        let on_started: StartedFn = Box::new(move |id| s2.lock().unwrap().push(id.to_string()));
+        let on_progress: ProgressFn = Box::new(move |id, done, total| {
+            p2.lock().unwrap().push((id.to_string(), done, total));
+        });
+        let summary = mgr
+            .scan_all(
+                vec![PathBuf::from("/definitely/not/a/real/root")],
+                &[],
+                &[],
+                permissive(),
+                Some(on_progress),
+                Some(on_started),
+            )
+            .await;
+        assert!(
+            summary.resources.is_empty(),
+            "a cancelled walk reports nothing"
+        );
+        assert_eq!(
+            started_sink.lock().unwrap().len(),
+            3,
+            "started fires for every tree provider even when cancelled"
+        );
+        let progress = progress_sink.lock().unwrap().clone();
+        assert_eq!(progress.len(), 3, "bar must not stall: {progress:?}");
+        assert!(progress.iter().all(|(_, _, t)| *t == 3));
+        let mut dones: Vec<usize> = progress.iter().map(|(_, d, _)| *d).collect();
+        dones.sort();
+        assert_eq!(dones, vec![1, 2, 3]);
+    }
+
+    /// Own and tree providers share ONE progress bar: a run with both kinds
+    /// counts every provider exactly once across the two task shapes.
+    #[tokio::test]
+    async fn own_and_tree_providers_share_one_progress_total() {
+        let providers: Vec<Scannable> = vec![
+            Scannable::Own(Arc::new(SlowProvider {
+                tag: "own0",
+                slices: 1,
+            })),
+            Scannable::Tree(Arc::new(NodeModulesProvider)),
+            Scannable::Tree(Arc::new(PythonCacheProvider)),
+        ];
+        let mgr = ScanManager::with_config(providers, Duration::from_secs(60));
+
+        let progress_sink = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let p2 = std::sync::Arc::clone(&progress_sink);
+        let on_progress: ProgressFn = Box::new(move |id, done, total| {
+            p2.lock().unwrap().push((id.to_string(), done, total));
+        });
+        let root = std::env::temp_dir().join(format!("devclean-mixed-prog-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        mgr.scan_all(
+            vec![root.clone()],
+            &[],
+            &[],
+            permissive(),
+            Some(on_progress),
+            None,
+        )
+        .await;
+        let _ = std::fs::remove_dir_all(&root);
+
+        let progress = progress_sink.lock().unwrap().clone();
+        assert_eq!(progress.len(), 3, "1 own + 2 tree ticks: {progress:?}");
+        assert!(
+            progress.iter().all(|(_, _, total)| *total == 3),
+            "both task shapes count into the same total: {progress:?}"
+        );
+        let mut dones: Vec<usize> = progress.iter().map(|(_, done, _)| *done).collect();
+        dones.sort();
+        assert_eq!(dones, vec![1, 2, 3]);
     }
 }
 
