@@ -756,7 +756,7 @@ dependencies = [
 
 [[package]]
 name = "devclean"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "devclean-cleanup",
  "devclean-core",
@@ -777,7 +777,7 @@ dependencies = [
 
 [[package]]
 name = "devclean-cleanup"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "devclean-core",
  "devclean-providers",
@@ -792,7 +792,7 @@ dependencies = [
 
 [[package]]
 name = "devclean-core"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "serde",
  "serde_json",
@@ -802,7 +802,7 @@ dependencies = [
 
 [[package]]
 name = "devclean-providers"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "devclean-core",
  "rusqlite",
@@ -816,7 +816,7 @@ dependencies = [
 
 [[package]]
 name = "devclean-scanner"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "devclean-core",
  "devclean-providers",

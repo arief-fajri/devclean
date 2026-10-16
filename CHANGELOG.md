@@ -13,6 +13,8 @@ A contract bump therefore does not imply a product release, and vice versa.
 
 ## [Unreleased]
 
+## [0.3.0] — 2026-10-16
+
 ### Changed
 
 - **Project trees are scanned once (Wave C).** `node_modules`, Rust `target/` and the Python caches used to walk every scan root apiece and then re-walk each artifact for its size. They now contribute rules to one shared traversal that matches and sizes in the same pass, so a scan of a large dev tree does a single walk instead of three plus per-match re-walks (isolated benchmark: **2.1×** the old three walks, **1.6×** the old three walks plus re-measurement). The reported resources and their sizes are unchanged — the pre-refactor output is pinned by an equivalence suite. The only visible difference is event timing: those three providers now emit `scan_provider_started` together and `scan_progress` together, instead of each firing as its own walk finished. Contract v0.11.0; decision record: [docs/decisions/single-pass-walk.md](docs/decisions/single-pass-walk.md).
