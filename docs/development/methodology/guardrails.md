@@ -36,6 +36,8 @@ G-SAFE-04  Protected paths are untouchable from any direction (==, inside, ances
 
 ```text
 G-SCAN-01  Scan concurrency is bounded (max 4 providers in parallel).
+           The shared project-tree walk counts as ONE task, however many
+           rules ride it.
            Enforcement: code — tokio Semaphore in ScanManager ✅
 G-SCAN-02  Scan & cleanup are cancellable, settling in <1s.
              Enforcement: code — cooperative AtomicBool checks per walk entry ✅ ·
@@ -47,7 +49,19 @@ G-SCAN-05  Progress counters count COMPLETIONS, never list positions, and fire o
             Enforcement: code — `AtomicUsize` completion counter in `ScanManager` +
             a `report` closure that always fires ✅ ·
             test — progress_done_counts_completions_and_is_monotonic,
-            cancelled_providers_still_emit_progress ✅
+            cancelled_providers_still_emit_progress,
+            the_shared_walk_reports_once_per_tree_provider,
+            a_cancelled_shared_walk_still_ticks_every_tree_provider ✅
+G-SCAN-07  The project-tree providers share ONE traversal. A rule matches only
+            within its own max_depth, but a matched artifact is always sized in
+            full — depth gates the match, never the size — and away from any
+            match the walk prunes at the deepest rule's max_depth.
+            Enforcement: code — depth gate + `Scope` override + prune in
+            `walk_tree_rules` ✅ ·
+            test — the_tree_rules_report_the_expected_resource_set,
+            an_artifact_is_sized_past_the_match_depth_boundary,
+            folded_sizing_matches_measuring_each_artifact_directly,
+            the_shared_walk_reports_exactly_the_sum_of_the_solo_walks ✅
 G-SCAN-06  A scan that silently reports less than the truth is a bug, not a
             cosmetic one. Every parser used for a reported size returns an
             explicit "unmeasurable" rather than defaulting to zero.

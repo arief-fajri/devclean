@@ -32,7 +32,7 @@ Every non-trivial change must trace to at least one outcome:
 
 ## 3. Architecture principles
 
-- **P1 — Providers, not `if/else`.** A new resource kind = one `Provider` trait impl + one entry in `all_providers()`. The backend must not branch per ecosystem outside the trait.
+- **P1 — Providers, not `if/else`.** A new resource kind = one `Provider` impl plus its scan shape (an `OwnScanner` for a provider that walks its own targets, or a `TreeRule` for one that contributes a rule to the shared project-tree walk), and one entry in `all_providers()`. The backend must not branch per ecosystem outside the trait.
 - **P2 — Filesystem-blind frontend.** The UI never holds paths as capabilities; it holds opaque `resource_id`s and renders them as text.
 - **P3 — One door for deletion.** All destruction flows through `CleanupEngine`: `RemoveDir` must pass the validator, `RunCommand` must be a fixed pair.
 - **P4 — Measure twice.** `preview` re-measures at confirmation time (scan numbers can go stale); `execute` reports freed = before − after.

@@ -1,6 +1,6 @@
 # Tauri Contract (public behavior contract)
 
-> The single document defining what the frontend may see. Changing this file = changing the contract → requires a deliberate review and a regression test. Version: **v0.10.0 (git-aware classification)**.
+> The single document defining what the frontend may see. Changing this file = changing the contract → requires a deliberate review and a regression test. Version: **v0.11.0 (single-pass walk)**.
 
 ## Commands (15)
 
@@ -27,8 +27,8 @@
 | Event | Payload | When |
 |---|---|---|
 | `scan_started` | `null` | Scan begins |
-| `scan_provider_started` | `string` (provider id) | A provider **begins** — lets the UI show which one is running, not just which are done (v0.5.0) |
-| `scan_progress` | `{provider, done, total}` | Each provider finishes; `done` counts completions and is monotonic |
+| `scan_provider_started` | `string` (provider id) | A provider **begins** — lets the UI show which one is running, not just which are done (v0.5.0). The three project-tree providers (`node_modules`, `rust_target`, `python_cache`) share one traversal, so they emit together when it begins (v0.11.0) |
+| `scan_progress` | `{provider, done, total}` | Each provider finishes; `done` counts completions and is monotonic. The three project-tree providers tick together when the shared traversal settles (v0.11.0) |
 | `scan_completed` | `ScanSummary` | All providers finished |
 | `cleanup_started` | `string[]` (ids) | Cleanup begins |
 | `cleanup_progress` | `{done, total}` | One per finished item |
@@ -155,6 +155,7 @@ Not:
 9. **Startup paints from the cache and rests (v0.9.0).** The app used to run a full scan on every launch, unconditionally: `scan_automatically` (default OFF) was stored and rendered but never read, and the window opened onto a loader nobody asked for. Now the shell paints `get_cached_scan` and runs a scan **only when `scan_automatically` is on** (or when the user clicks Scan Now / Scan again, or a cleanup finished, which re-scans only the providers it touched — see note 11). With no cache the dashboard shows an explicit "You haven't scanned yet" warning instead of scanning on its own. Because the cache is now the resting state, `CachedScan.saved_at_unix` is surfaced so the summary can report the scan's real age and flag a stale cache rather than presenting old numbers as current.
 10. **`age_days` is a composite, and a new gate can appear (v0.10.0).** `Resource.age_days` no longer means "project directory age": it is the most recent of the artifact's mtime, the repository's last commit and the project directory's mtime, so a project committed to yesterday stops looking dormant. `Resource.activity` is the tier derived from it. And `blocked_reason: "protected"` can now appear: an artifact that a repository tracks (or a new file it does not yet track) while that repository has uncommitted changes is refused — deleting it would lose work that is committed nowhere. A **gitignored** artifact (`node_modules`) stays cleanable even in a dirty repository. Paths outside any repository, and machines without git, are left exactly as before: `activity` is null and nothing is protected.
 11. **A finished cleanup re-scans only the providers it touched (v0.10.0).** It used to run a full scan of every provider, which dimmed the list, disabled selection and made the app feel frozen right after a delete. Now the shell removes the cleaned resources from the list immediately (the backend reported which ids succeeded), so the update does not wait on a scan, and then re-scans only the providers behind those resources, in the background: the list stays interactive, the other providers keep their last-known figures (flagged by the existing "partial re-scan" badge), and the touched providers' rows and the on-disk cache are refreshed. If nothing identifiable was touched, it falls back to a full scan. A full scan is still available from Scan Now / the menu bar.
+12. **The project-tree providers share one traversal (v0.11.0).** `node_modules`, `rust_target` and `python_cache` used to walk every scan root apiece and re-walk each artifact for its size. They now contribute rules to one shared walk that matches and sizes in the same pass. **No command, event or type changed** — the rows and their sizes are identical (equivalence-tested) — but the *timing* of their events did: all three emit `scan_provider_started` together when the shared walk begins, and all three emit `scan_progress` together when it settles, rather than each firing as its own walk finished. `done` stays monotonic and `total` still counts every active provider once, so the bar cannot stall (G-SCAN-05). One edge case changes: a `target/` that is itself a symlink is no longer reported (G-SCAN-03 — symlinks are never followed). Decision record: [docs/decisions/single-pass-walk.md](../decisions/single-pass-walk.md).
 
 ## Menu bar surface (v0.7.0)
 
@@ -175,6 +176,13 @@ One click of either button opens the menu (`show_menu_on_left_click`); the info 
 
 Contract versions are their own sequence, independent of the product version in `Cargo.toml` — the frontend and backend always ship together, so the contract changes on its own schedule. The two are aligned at 1.0.
 
+- `v0.11.0` — single-pass walk. **No command, event or type changed.**
+  - **Behaviour:** the three project-tree providers (`node_modules`, `rust_target`, `python_cache`) share one traversal that matches and sizes in the same pass, instead of three walks plus a per-artifact re-walk. The rows and their sizes are identical (equivalence-tested against the pre-refactor output).
+  - **Behaviour:** those three now emit `scan_provider_started` together when the shared walk begins and `scan_progress` together when it settles. `done` stays monotonic and `total` still counts every active provider once (behavioural note 12).
+  - **Behaviour:** a `target/` that is itself a symlink is no longer reported — matching is `lstat`-only (G-SCAN-03).
+  - The scan cache format is unchanged (the rows are the same); no cache version bump.
+  - Decision record: [docs/decisions/single-pass-walk.md](../decisions/single-pass-walk.md).
+  - Regression tests: the `equivalence` suite (`the_tree_rules_report_the_expected_resource_set`, `measurement_semantics_are_preserved`, `folded_sizing_matches_measuring_each_artifact_directly`, `an_artifact_is_sized_past_the_match_depth_boundary`, `the_shared_walk_reports_exactly_the_sum_of_the_solo_walks`, the two G-SCAN-03 tests), `the_shared_walk_reports_once_per_tree_provider`, `a_cancelled_shared_walk_still_ticks_every_tree_provider`, `own_and_tree_providers_share_one_progress_total`, and the per-provider `cancel_contract` rows.
 - `v0.10.0` — git-aware classification. **No command added, removed or re-typed.**
   - `+Resource.activity?: "active" | "recent" | "stale" | "dormant" | null` (additive, `#[serde(default)]`), derived from the composite age. The toolbar filters on it instead of parsing the display string; `lib/format.ts` loses `parseAgeDays`/`isStaleSignal`.
   - `+Resource.last_commit_unix?: number | null` (additive, `#[serde(default)]`) — the containing repository's last commit.
