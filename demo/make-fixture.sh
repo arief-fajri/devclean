@@ -42,9 +42,11 @@ FILE_SIZE_KB="${DEVCLEAN_FIXTURE_FILE_KB:-512}"
 log()  { printf '[fixture] %s\n' "$*"; }
 
 write_file() {
-  # `mkfile` is macOS-only and much faster than dd for this.
+  # `mkfile` is macOS-only and much faster than dd for this. No `-n`: the
+  # fixture must occupy real blocks, or the scanner's allocated-size figure
+  # (and every screenshot) reads a few MB instead of the intended hundreds.
   mkdir -p "$(dirname "$1")"
-  mkfile -n "${FILE_SIZE_KB}k" "$1" 2>/dev/null || dd if=/dev/zero of="$1" bs=1024 count="$FILE_SIZE_KB" status=none
+  mkfile "${FILE_SIZE_KB}k" "$1" 2>/dev/null || dd if=/dev/zero of="$1" bs=1024 count="$FILE_SIZE_KB" status=none
 }
 
 fill() {

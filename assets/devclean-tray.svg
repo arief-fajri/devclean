@@ -4,9 +4,9 @@
        tools/make_tray_icon.py from the same geometry as
        apps/desktop/src-tauri/icons/tray.png — edit the script,
        not this file. -->
-  <g fill="#000">
-    <path d="M19.35 13.92C24.55 12.97 31.97 7.23 34.20 2.44C29.00 3.39 21.58 9.12 19.35 13.92Z"/>
-    <path d="M16.65 19.99C14.53 14.95 7.10 8.53 1.80 7.17C3.92 12.21 11.35 18.62 16.65 19.99Z"/>
-    <line x1="18.00" y1="11.22" x2="18.00" y2="31.47" stroke="#000" stroke-width="4.18" stroke-linecap="round"/>
+  <g fill="none" stroke="#000" stroke-width="1.82" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M17.65 29.91C14.42 28.70 10.38 26.07 7.45 22.24C4.02 17.80 2.71 12.25 2.71 6.09C8.16 7.70 12.70 10.83 15.43 15.38C17.04 18.00 17.65 21.43 17.65 24.76"/>
+    <path d="M17.65 29.91C20.88 28.40 25.12 25.57 28.14 21.53C31.37 17.19 32.89 11.74 33.29 8.11C28.14 9.52 23.70 12.45 20.57 16.59C18.56 19.31 17.65 22.54 17.65 25.87"/>
+    <path d="M17.65 16.99L17.65 29.91"/>
   </g>
 </svg>

@@ -37,7 +37,7 @@
   class="flex w-sidebar shrink-0 flex-col border-r border-zinc-200 bg-zinc-100/60 dark:border-zinc-800 dark:bg-zinc-900/40"
 >
   <div class="flex items-center gap-2.5 px-4 pt-5 pb-4">
-    <AppLogo size={32} />
+    <AppLogo size={24} />
     <div class="min-w-0">
       <p class="truncate text-base leading-5 font-bold text-zinc-900 dark:text-zinc-50">DevClean</p>
       <p class="truncate text-[11px] text-zinc-500">Developer Storage Manager</p>

@@ -1,15 +1,21 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
-  <!-- DevClean mark: a leaf inside a rounded square, matching the emerald
-       tile used in the app header. Generated so the tray icon, the window
-       icon and the in-app header are the SAME artwork. -->
-  <defs>
-    <linearGradient id="tile" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0" stop-color="#10b981"/>
-      <stop offset="1" stop-color="#047857"/>
-    </linearGradient>
-  </defs>
-  <rect x="24" y="24" width="464" height="464" rx="112" fill="url(#tile)"/>
-  <path d="M256 404c0-96 52-176 152-204-8 108-64 176-152 204z" fill="#ecfdf5" opacity="0.95"/>
-  <path d="M256 404C256 296 212 208 120 180c8 120 60 196 136 224z" fill="#a7f3d0" opacity="0.9"/>
-  <rect x="246" y="264" width="20" height="176" rx="10" fill="#ecfdf5"/>
+  <!-- DevClean app icon: the leaf outline on a neutral rounded tile.
+       Same artwork as the in-app header (AppLogo.svelte), the favicon and
+       the menu bar icon. The leaf geometry is the canonical mark in
+       assets/devclean-leaf.svg; it is placed here by a translate+scale so the
+       stroked mark is centred on the tile. -->
+  <rect x="24" y="24" width="464" height="464" rx="112" fill="#ffffff" stroke="#e4e4e7" stroke-width="6"/>
+  <g transform="translate(-50.21 -88.56) scale(1.18)" fill="none" stroke="#0B936B" stroke-width="18" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M256 410
+             C224 398 184 372 155 334
+             C121 290 108 235 108 174
+             C162 190 207 221 234 266
+             C250 292 256 326 256 359" />
+    <path d="M256 410
+             C288 395 330 367 360 327
+             C392 284 407 230 411 194
+             C360 208 316 237 285 278
+             C265 305 256 337 256 370" />
+    <path d="M256 282 L256 410" />
+  </g>
 </svg>

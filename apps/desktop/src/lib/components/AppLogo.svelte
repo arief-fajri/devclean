@@ -2,10 +2,14 @@
   /**
    * The DevClean mark, inlined rather than loaded from `icons/`.
    *
-   * The same artwork backs the tray icon (`src-tauri/icons/tray.png`) and
-   * the window icon, so the header tile and the menu bar are visibly the
-   * same product. Inlining avoids a runtime fetch and keeps the SVG crisp
-   * in dark mode.
+   * The leaf outline is the same artwork as the app icon, the favicon and the
+   * tray icon (`src-tauri/icons/tray.png`), so the header and the dock are
+   * visibly the same product. Inlining avoids a runtime fetch and keeps the
+   * SVG crisp at any size.
+   *
+   * The mark is drawn without the icon tile: in the sidebar it stands alone
+   * next to the wordmark, sized to the wordmark + tagline block. `size` is the
+   * leaf's height; the width follows the leaf's natural aspect ratio.
    */
   interface Props {
     size?: number;
@@ -14,29 +18,26 @@
 
   let { size = 36, class: klass = "" }: Props = $props();
 
-  let gradientId = `devclean-tile-${Math.random().toString(36).slice(2, 9)}`;
+  // Stroke-bbox of the leaf outline (assets/devclean-leaf.svg), padded by 2px
+  // so the rounded caps are never clipped.
+  const VIEW = { x: 97, y: 163, w: 325, h: 258 };
+  let width = $derived(Math.round((size * VIEW.w) / VIEW.h));
 </script>
 
 <span
   aria-hidden="true"
-  class="flex shrink-0 items-center justify-center overflow-hidden rounded-xl {klass}"
-  style="width: {size}px; height: {size}px"
+  class="flex shrink-0 items-center justify-center {klass}"
+  style="width: {width}px; height: {size}px"
 >
-  <svg viewBox="0 0 512 512" width={size} height={size} role="presentation">
-    <defs>
-      <linearGradient id={gradientId} x1="0" y1="0" x2="1" y2="1">
-        <stop offset="0" stop-color="#10b981"></stop>
-        <stop offset="1" stop-color="#047857"></stop>
-      </linearGradient>
-    </defs>
-    <rect x="24" y="24" width="464" height="464" rx="112" fill="url(#{gradientId})"></rect>
-    <path d="M256 404c0-96 52-176 152-204-8 108-64 176-152 204z" fill="#ecfdf5" opacity="0.95"
-    ></path>
-    <path
-      d="M256 404C256 296 212 208 120 180c8 120 60 196 136 224z"
-      fill="#a7f3d0"
-      opacity="0.9"
-    ></path>
-    <rect x="246" y="264" width="20" height="176" rx="10" fill="#ecfdf5"></rect>
+  <svg viewBox="{VIEW.x} {VIEW.y} {VIEW.w} {VIEW.h}" width={width} height={size} role="presentation">
+    <g fill="none" stroke="#0B936B" stroke-width="18" stroke-linecap="round" stroke-linejoin="round">
+      <path
+        d="M256 410 C224 398 184 372 155 334 C121 290 108 235 108 174 C162 190 207 221 234 266 C250 292 256 326 256 359"
+      ></path>
+      <path
+        d="M256 410 C288 395 330 367 360 327 C392 284 407 230 411 194 C360 208 316 237 285 278 C265 305 256 337 256 370"
+      ></path>
+      <path d="M256 282 L256 410"></path>
+    </g>
   </svg>
 </span>

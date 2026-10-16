@@ -10,10 +10,17 @@ So the mark is described **once**, here, as geometry. This script rasterises it
 to a greyscale+alpha template PNG *and* emits the matching SVG from the same
 control points. They cannot disagree.
 
+The mark is the DevClean leaf outline (see `assets/devclean-leaf.svg`): three
+open strokes — a left leaf edge, a right leaf edge and the stem. Because the
+mark is an outline rather than a filled silhouette, the rasteriser tests the
+distance from each supersample to the stroke centreline instead of testing
+point-in-polygon.
+
     python3 tools/make_tray_icon.py
 
 Outputs:
     apps/desktop/src-tauri/icons/tray.png   36×36, colour type 4, black + alpha
+    assets/devclean-tray.png                the same bitmap, kept beside the source
     assets/devclean-tray.svg                the same mark, as vectors
 """
 
@@ -27,39 +34,35 @@ import zlib
 SIZE = 36        # 18pt @2x — what the macOS menu bar samples
 FILL = 0.90      # glyph size relative to the frame
 SS = 4           # supersampling factor for smooth edges
+STROKE = 18.0    # outline width in canvas units (the 512-viewBox leaf)
 
 
 # --- the mark ----------------------------------------------------------------
-# A sprout, simplified and thickened for 18pt: a central stem and two leaves.
-# Written in canvas proportions; `fit` re-centres and scales the result, so
-# these numbers describe the shape rather than the final pixels.
+# The DevClean leaf outline, in 512-viewBox canvas proportions. `fit`
+# re-centres and scales the result, so these numbers describe the shape rather
+# than the final pixels. Straight line segments are given as `line`; curved
+# strokes as chained cubics (`segs`). The stroke is centred on the path.
 
-
-def leaf(base, tip, half_width, t1=0.25, t2=0.75):
-    """A leaf as two chained cubic Béziers: base → tip along one edge, then
-    tip → base along the other. `half_width` is the half-thickness at the
-    middle of the spine."""
-    (bx, by), (tx, ty) = base, tip
-    dx, dy = tx - bx, ty - by
-    length = math.hypot(dx, dy)
-    px, py = -dy / length, dx / length  # unit perpendicular to the spine
-
-    def ctrl(t, side):
-        return (bx + dx * t + px * half_width * side, by + dy * t + py * half_width * side)
-
-    return {
-        "kind": "leaf",
-        "points": [base, ctrl(t1, 1), ctrl(t2, 1), tip, ctrl(t2, -1), ctrl(t1, -1), base],
-    }
-
-
-# Thin leaves, not fat ones: at 18pt the menu bar has room for a silhouette,
-# not for detail. Fat leaves merge with the stem into one unreadable mass — this
-# set was picked by rendering candidates as ASCII and looking at them.
 MARK = [
-    leaf((19.0, 18.0), (30.0, 9.5), 1.8),
-    leaf((17.0, 22.5), (6.0, 13.0), 1.8),
-    {"kind": "stem", "a": (18.0, 16.0), "b": (18.0, 31.0), "r": 1.55},
+    {
+        "kind": "curve",
+        "segs": [
+            ((256.0, 410.0), (224.0, 398.0), (184.0, 372.0), (155.0, 334.0)),
+            ((155.0, 334.0), (121.0, 290.0), (108.0, 235.0), (108.0, 174.0)),
+            ((108.0, 174.0), (162.0, 190.0), (207.0, 221.0), (234.0, 266.0)),
+            ((234.0, 266.0), (250.0, 292.0), (256.0, 326.0), (256.0, 359.0)),
+        ],
+    },
+    {
+        "kind": "curve",
+        "segs": [
+            ((256.0, 410.0), (288.0, 395.0), (330.0, 367.0), (360.0, 327.0)),
+            ((360.0, 327.0), (392.0, 284.0), (407.0, 230.0), (411.0, 194.0)),
+            ((411.0, 194.0), (360.0, 208.0), (316.0, 237.0), (285.0, 278.0)),
+            ((285.0, 278.0), (265.0, 305.0), (256.0, 337.0), (256.0, 370.0)),
+        ],
+    },
+    {"kind": "line", "a": (256.0, 282.0), "b": (256.0, 410.0)},
 ]
 
 
@@ -74,27 +77,15 @@ def cubic(p0, p1, p2, p3, t):
     )
 
 
-def flatten(shape, steps=40):
-    """Outline of a shape as a polygon, for hit testing and bounds."""
-    if shape["kind"] == "stem":
-        return None
-    pts = shape["points"]
-    poly = [pts[0]]
-    poly += [cubic(*pts[0:4], i / steps) for i in range(1, steps + 1)]
-    poly += [cubic(*pts[3:7], i / steps) for i in range(1, steps + 1)]
-    return poly
-
-
-def point_in_poly(x, y, poly):
-    inside = False
-    j = len(poly) - 1
-    for i in range(len(poly)):
-        xi, yi = poly[i]
-        xj, yj = poly[j]
-        if (yi > y) != (yj > y) and x < (xj - xi) * (y - yi) / (yj - yi) + xi:
-            inside = not inside
-        j = i
-    return inside
+def polyline(shape, steps=32):
+    """The stroke centreline as a polyline, for bounds and hit testing."""
+    if shape["kind"] == "line":
+        return [shape["a"], shape["b"]]
+    pts = []
+    for p0, p1, p2, p3 in shape["segs"]:
+        pts += [cubic(p0, p1, p2, p3, i / steps) for i in range(steps)]
+    pts.append(shape["segs"][-1][3])
+    return pts
 
 
 def dist_to_segment(px, py, a, b):
@@ -105,28 +96,27 @@ def dist_to_segment(px, py, a, b):
     return math.hypot(px - (a[0] + t * dx), py - (a[1] + t * dy))
 
 
-def inside(shape, x, y):
-    if shape["kind"] == "stem":
-        return dist_to_segment(x, y, shape["a"], shape["b"]) <= shape["r"]
-    return point_in_poly(x, y, shape["poly"])
+def dist_to_polyline(px, py, poly):
+    return min(dist_to_segment(px, py, poly[i], poly[i + 1]) for i in range(len(poly) - 1))
+
+
+def inside(shape, x, y, r):
+    return dist_to_polyline(x, y, shape["poly"]) <= r
 
 
 def bounds(shapes):
+    """Stroke-expanded bounds: centreline extremes grown by half the stroke."""
+    half = STROKE / 2
     minx, miny, maxx, maxy = 1e9, 1e9, -1e9, -1e9
     for s in shapes:
-        if s["kind"] == "stem":
-            for p in (s["a"], s["b"]):
-                minx, maxx = min(minx, p[0] - s["r"]), max(maxx, p[0] + s["r"])
-                miny, maxy = min(miny, p[1] - s["r"]), max(maxy, p[1] + s["r"])
-        else:
-            for x, y in s["poly"]:
-                minx, maxx = min(minx, x), max(maxx, x)
-                miny, maxy = min(miny, y), max(maxy, y)
-    return minx, miny, maxx, maxy
+        for x, y in s["poly"]:
+            minx, maxx = min(minx, x), max(maxx, x)
+            miny, maxy = min(miny, y), max(maxy, y)
+    return minx - half, miny - half, maxx + half, maxy + half
 
 
 def fit(shapes):
-    """Uniform scale + translation so the mark is centred and fills FILL."""
+    """Uniform scale + translation so the stroked mark is centred and fills FILL."""
     minx, miny, maxx, maxy = bounds(shapes)
     w, h = maxx - minx, maxy - miny
     scale = (SIZE * FILL) / max(w, h)
@@ -137,16 +127,16 @@ def fit(shapes):
     out = []
     for s in shapes:
         f = dict(s)
-        if f["kind"] == "stem":
-            f["a"], f["b"], f["r"] = tx(f["a"]), tx(f["b"]), f["r"] * scale
+        if f["kind"] == "line":
+            f["a"], f["b"] = tx(f["a"]), tx(f["b"])
         else:
-            f["points"] = [tx(p) for p in f["points"]]
-            f["poly"] = [tx(p) for p in s["poly"]]
+            f["segs"] = [tuple(tx(p) for p in seg) for seg in s["segs"]]
+        f["poly"] = [tx(p) for p in s["poly"]]
         out.append(f)
-    return out
+    return out, STROKE * scale / 2
 
 
-def rasterise(shapes):
+def rasterise(shapes, r):
     """Supersample SS×SS per pixel, then box-filter in both axes."""
     hi = []
     for py in range(SIZE * SS):
@@ -154,7 +144,7 @@ def rasterise(shapes):
         row = bytearray(SIZE * SS)
         for px in range(SIZE * SS):
             x = (px + 0.5) / SS
-            row[px] = 255 if any(inside(s, x, y) for s in shapes) else 0
+            row[px] = 255 if any(inside(s, x, y, r) for s in shapes) else 0
         hi.append(row)
 
     rows = []
@@ -195,22 +185,22 @@ def write_png(path, rows):
         f.write(png)
 
 
-def write_svg(path, shapes):
+def write_svg(path, shapes, r):
+    width = 2 * r
     parts = []
     for s in shapes:
-        if s["kind"] == "stem":
-            a, b, r = s["a"], s["b"], s["r"]
-            parts.append(
-                f'    <line x1="{a[0]:.2f}" y1="{a[1]:.2f}" x2="{b[0]:.2f}" y2="{b[1]:.2f}"'
-                f' stroke="#000" stroke-width="{2 * r:.2f}" stroke-linecap="round"/>'
-            )
+        if s["kind"] == "line":
+            a, b = s["a"], s["b"]
+            d = f"M{a[0]:.2f} {a[1]:.2f}L{b[0]:.2f} {b[1]:.2f}"
         else:
-            p = s["points"]
-            parts.append(
-                f'    <path d="M{p[0][0]:.2f} {p[0][1]:.2f}'
-                f"C{p[1][0]:.2f} {p[1][1]:.2f} {p[2][0]:.2f} {p[2][1]:.2f} {p[3][0]:.2f} {p[3][1]:.2f}"
-                f"C{p[4][0]:.2f} {p[4][1]:.2f} {p[5][0]:.2f} {p[5][1]:.2f} {p[0][0]:.2f} {p[0][1]:.2f}Z\"/>"
-            )
+            p = s["segs"]
+            d = f"M{p[0][0][0]:.2f} {p[0][0][1]:.2f}"
+            for _, c1, c2, end in p:
+                d += (
+                    f"C{c1[0]:.2f} {c1[1]:.2f} {c2[0]:.2f} {c2[1]:.2f}"
+                    f" {end[0]:.2f} {end[1]:.2f}"
+                )
+        parts.append(f'    <path d="{d}"/>')
     with open(path, "w") as f:
         f.write(
             '<svg xmlns="http://www.w3.org/2000/svg" '
@@ -220,7 +210,10 @@ def write_svg(path, shapes):
             "       tools/make_tray_icon.py from the same geometry as\n"
             "       apps/desktop/src-tauri/icons/tray.png — edit the script,\n"
             "       not this file. -->\n"
-            '  <g fill="#000">\n' + "\n".join(parts) + "\n  </g>\n</svg>\n"
+            f'  <g fill="none" stroke="#000" stroke-width="{width:.2f}"'
+            ' stroke-linecap="round" stroke-linejoin="round">\n'
+            + "\n".join(parts)
+            + "\n  </g>\n</svg>\n"
         )
 
 
@@ -246,13 +239,14 @@ def main():
     shapes = []
     for s in MARK:
         s = dict(s)
-        s["poly"] = flatten(s)
+        s["poly"] = polyline(s)
         shapes.append(s)
-    fitted = fit(shapes)
-    rows = rasterise(fitted)
+    fitted, r = fit(shapes)
+    rows = rasterise(fitted, r)
     root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     write_png(os.path.join(root, "apps/desktop/src-tauri/icons/tray.png"), rows)
-    write_svg(os.path.join(root, "assets/devclean-tray.svg"), fitted)
+    write_png(os.path.join(root, "assets/devclean-tray.png"), rows)
+    write_svg(os.path.join(root, "assets/devclean-tray.svg"), fitted, r)
     report(rows)
 
 

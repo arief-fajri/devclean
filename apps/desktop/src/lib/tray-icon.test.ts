@@ -149,8 +149,8 @@ describe("G-UI-04 — the tray icon is a usable macOS template image", () => {
   it("draws a mark, not a slab", () => {
     const opaque = png.alpha.filter((a) => a > 16).length;
     const ratio = opaque / (png.width * png.height);
-    // The sprout is deliberately thin (≈17% of the frame). The point of this
-    // assertion is the upper bound: a template image without transparency
+    // The leaf outline is deliberately thin (≈21% of the frame). The point of
+    // this assertion is the upper bound: a template image without transparency
     // covers the whole frame, and that is what drew a white square.
     expect(ratio).toBeGreaterThan(0.08);
     expect(ratio).toBeLessThan(0.9);

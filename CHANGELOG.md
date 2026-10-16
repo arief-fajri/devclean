@@ -13,12 +13,16 @@ A contract bump therefore does not imply a product release, and vice versa.
 
 ## [Unreleased]
 
+## [0.2.0] — 2026-10-16
+
 ### Added
 
 - **Git-aware classification (Wave B).** Activity is now the composite of an artifact's mtime, its repository's last commit and its project directory's mtime, surfaced as an `activity` tier (`active`/`recent`/`stale`/`dormant`). A project committed to daily stops looking dormant, so age-based retention no longer offers an active project's cache.
 - **A repository's uncommitted work is protected.** An artifact that a repository tracks — or a new file it does not yet track — is refused while that repository is dirty (`blocked_reason: "protected"`). A gitignored artifact such as `node_modules` stays cleanable even then, so the tool is still usable in the repositories people work in. Paths outside any repository, and machines without git, behave exactly as before.
 
 ### Changed
+
+- **A new brand mark.** The app icon, favicon, in-app header and menu bar icon now use the DevClean leaf outline (`assets/devclean-leaf.svg`) instead of the old emerald sprout tile. Purely visual: no command, event or response changed.
 
 - **Cleanup no longer freezes the app.** Finishing a cleanup used to trigger a full scan of every provider, which dimmed the list and disabled selection. The cleaned items now leave the list immediately, and only the providers that were touched are re-scanned, in the background; the other providers keep their last-known figures and are flagged as a partial re-scan.
 
@@ -96,4 +100,5 @@ Four controls were found claiming enforcement they did not have. All four are fi
 - No known vulnerabilities at release.
 - Report suspected ones privately: see [SECURITY.md](SECURITY.md).
 
+[0.2.0]: https://github.com/arief-fajri/devclean/releases/tag/v0.2.0
 [0.1.0]: https://github.com/arief-fajri/devclean/releases/tag/v0.1.0

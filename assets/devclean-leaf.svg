@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512">
+  <!-- DevClean mark: a leaf outline. Canonical geometry for every surface
+       (app icon, in-app header, favicon, menu bar tray). The tray icon
+       (tools/make_tray_icon.py) and the icon tile (assets/devclean-icon.svg)
+       derive from these same control points. -->
+  <title>DevClean leaf outline</title>
+  <g fill="none" stroke="#0B936B" stroke-width="18" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M256 410
+             C224 398 184 372 155 334
+             C121 290 108 235 108 174
+             C162 190 207 221 234 266
+             C250 292 256 326 256 359" />
+    <path d="M256 410
+             C288 395 330 367 360 327
+             C392 284 407 230 411 194
+             C360 208 316 237 285 278
+             C265 305 256 337 256 370" />
+    <path d="M256 282 L256 410" />
+  </g>
+</svg>

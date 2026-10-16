@@ -96,8 +96,6 @@ A tool that deletes files earns trust by what it refuses to do. DevClean:
 - **Never reports a number it did not measure.** `freed_bytes` is `before − after`; when the after-state cannot be measured, the result says `0` and why.
 - **Never runs a shell.** Cleanup subprocesses use fixed `(program, args)` pairs declared by a provider, never anything derived from input.
 
-![The confirmation dialog](demo/confirm.png)
-
 <sub>Nothing is deleted until you acknowledge the list. Sizes are re-measured at this moment, because the numbers from the scan can go stale.</sub>
 
 The design rationale is in [docs/security.md](docs/security.md); the reporting policy is in [SECURITY.md](SECURITY.md). A bug that deletes or moves data it should not is treated as P0.
