@@ -4,7 +4,7 @@ What is left, not what happened. Shipped work is in [CHANGELOG.md](../../CHANGEL
 
 ## Where we are
 
-Product **0.2.0** is the first release after 0.1.0: macOS only, sizes that match `du`, deletions that move to the Trash, every gate enforced by the backend, and now git-aware classification. Activity is a composite of artifact mtime, last commit and project directory mtime, and a repository's uncommitted work is protected. The contract sits at **v0.10.0**.
+Product **0.3.0** adds the single-pass project-tree walk (project caches are found and sized in one traversal) and **in-app updates**: Settings checks the release channel, and a signed, verified update can be downloaded and installed without leaving the app. The contract sits at **v0.12.0**.
 
 Two numbers move independently — the product version a user installs, and the contract version of the IPC surface between the bundled frontend and backend. A contract bump does not imply a product release, and the reverse is also true. At 1.0 they are aligned deliberately.
 
@@ -16,7 +16,8 @@ Two numbers move independently — the product version a user installs, and the 
 | — | Cache-first startup (shipped as a fix) | `0.1.0` | `v0.9.0` |
 | **B** | Git-aware classification | `0.2.0` | `v0.10.0` |
 | **C** | Single-pass walk | `0.3.0` | `v0.11.0` |
-| **D** | Coverage | `0.4.0` | `v0.12.0` |
+| — | In-app updates | `0.3.0` | `v0.12.0` |
+| **D** | Coverage | `0.4.0` | `v0.13.0` |
 | **E** | Stabilisation and documentation | `1.0.0` | `v1.0.0` |
 
 Rules that apply to every wave:
@@ -152,6 +153,9 @@ Recorded rather than hidden. Each names why it is not fixed.
 
 - **G-SAFE-06 — the confirmation token is a workflow gate, not authentication.** The frontend runs in the same process tree and can read any token it is handed, so a fully compromised frontend can mint its own preview. What it does buy is real: an id set that was never shown to the user is refused. What it cannot buy needs an out-of-process UI. Accepted and documented rather than chased, because full authentication against a frontend in the same process tree is a false promise without OS-level isolation.
 - **No bundle is shipped for Linux.** The workspace builds and the full suite runs on Ubuntu in CI, which exercises the Unix-specific code on a second OS, but no `.deb`, `.rpm` or AppImage is produced and the platform is not supported.
+- **In-app updates are arm64-only.** CI builds on Apple Silicon, so `latest.json` carries only a `darwin-aarch64` entry; an Intel Mac would not receive an update. Adding a universal build (and a `darwin-x86_64` entry) is deferred.
+- **The updater is built with `default-features = false`.** The published `tauri-plugin-updater` depends on a `zip` version that is fully yanked on crates.io; the `zip` feature is Windows-only and macOS uses its own `tar`+`flate2`, so it is disabled. Revisit when upstream pins `zip 9`.
+- **The first updater-enabled release must be installed by hand.** An older build has no updater to receive it; automatic updates work from the next release onward.
 
 ## Non-goals
 

@@ -11,6 +11,7 @@
   import { navStore } from "$lib/stores/nav.svelte";
   import { scanStore } from "$lib/stores/scan.svelte";
   import { settingsStore } from "$lib/stores/settings.svelte";
+  import { updateStore } from "$lib/stores/update.svelte";
   import { addableCandidates, alreadyAddedCount } from "$lib/view";
   import {
     DOCKER_SCOPE_CONSEQUENCE,
@@ -41,6 +42,8 @@
   const providers = $derived(settingsStore.providers);
   const saving = $derived(settingsStore.saving);
   const error = $derived(settingsStore.error);
+  /** Live updater state, mirrored from the backend (contract v0.12.0). */
+  const update = $derived(updateStore.status);
 
   /** Last scan results per provider id, for a live size hint. */
   const providerStats = $derived.by(() => {
@@ -74,6 +77,7 @@
   let deleteMode = $state<DeleteMode>("trash");
   let aiCleanup = $state(false);
   let scanAutomatically = $state(false);
+  let checkUpdatesAutomatically = $state(false);
   let seeded = $state(false);
 
   function seed() {
@@ -91,6 +95,7 @@
     deleteMode = settings.delete_mode ?? "trash";
     aiCleanup = settings.ai_cleanup_enabled ?? false;
     scanAutomatically = settings.scan_automatically ?? false;
+    checkUpdatesAutomatically = settings.check_updates_automatically ?? false;
     void settingsStore.refreshCandidates();
   }
 
@@ -129,7 +134,8 @@
       sqliteBackup !== (settings.sqlite_backup ?? false) ||
       deleteMode !== (settings.delete_mode ?? "trash") ||
       aiCleanup !== (settings.ai_cleanup_enabled ?? false) ||
-      scanAutomatically !== (settings.scan_automatically ?? false)
+      scanAutomatically !== (settings.scan_automatically ?? false) ||
+      checkUpdatesAutomatically !== (settings.check_updates_automatically ?? false)
     );
   });
 
@@ -174,6 +180,7 @@
     deleteMode = "trash";
     aiCleanup = false;
     scanAutomatically = false;
+    checkUpdatesAutomatically = false;
     newRoot = "";
     newExcluded = "";
     void settingsStore.refreshCandidates();
@@ -202,6 +209,15 @@
     seed();
   }
 
+  /** " (just now)" / " (12m ago)" for a completed check, or "". */
+  function checkedSuffix(unix: number | null | undefined): string {
+    if (!unix) return "";
+    const mins = Math.floor((Date.now() / 1000 - unix) / 60);
+    if (mins < 1) return " (just now)";
+    if (mins < 60) return ` (${mins}m ago)`;
+    return "";
+  }
+
   function save() {
     if (!settings) return;
     onSave({
@@ -213,6 +229,7 @@
       show_preview: showPreview,
       allow_privileged_operations: allowPrivileged,
       scan_automatically: scanAutomatically,
+      check_updates_automatically: checkUpdatesAutomatically,
       theme,
       retention_days: retentionDays,
       docker_prune_scope: dockerScope,
@@ -686,6 +703,131 @@
           filesystem path under each item on or off. It is remembered for this session, so there
           is nothing to save here.
         </p>
+      </div>
+      {:else if navStore.settingsTab === "updates"}
+      <div id="settings-panel-updates" role="tabpanel" aria-labelledby="settings-tab-updates">
+        <h3 class="text-sm font-semibold text-zinc-900 dark:text-zinc-100">Version</h3>
+        <p class="mt-1 text-xs text-zinc-500">
+          DevClean checks GitHub Releases for a newer version. Nothing is downloaded until you ask
+          for it, and the download is signature-verified before it is installed.
+        </p>
+        <div
+          class="mt-3 flex items-center justify-between gap-3 rounded-lg bg-zinc-100 px-3 py-2 dark:bg-zinc-800"
+        >
+          <span class="text-sm text-zinc-700 dark:text-zinc-300">
+            DevClean <strong class="font-medium">{update?.current_version ?? "…"}</strong>
+          </span>
+          <button
+            class="rounded-lg border border-zinc-200 px-3 py-1.5 text-sm hover:bg-zinc-100 disabled:opacity-50 dark:border-zinc-700 dark:hover:bg-zinc-700"
+            onclick={() => updateStore.check()}
+            disabled={updateStore.busy ||
+              update?.phase === "checking" ||
+              update?.phase === "downloading" ||
+              update?.phase === "installing"}
+            data-testid="check-updates"
+          >
+            {update?.phase === "checking" ? "Checking…" : "Check for updates"}
+          </button>
+        </div>
+
+        {#if update?.phase === "up_to_date"}
+          <p class="mt-2 text-xs text-zinc-500" data-testid="update-up-to-date">
+            You are on the latest version{checkedSuffix(update.checked_at_unix)}.
+          </p>
+        {:else if update?.phase === "available"}
+          <div
+            class="mt-3 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 dark:border-emerald-900 dark:bg-emerald-950/40"
+            data-testid="update-available"
+          >
+            <p class="text-sm font-medium text-emerald-800 dark:text-emerald-200">
+              Version {update.available_version} is available
+            </p>
+            {#if update.notes}
+              <p
+                class="mt-1 max-h-40 overflow-auto text-xs whitespace-pre-wrap text-emerald-900/80 dark:text-emerald-200/80"
+              >
+                {update.notes}
+              </p>
+            {/if}
+            <button
+              class="mt-2 rounded-lg bg-emerald-600 px-3 py-1.5 text-sm font-semibold text-white hover:bg-emerald-700 disabled:opacity-50"
+              onclick={() => updateStore.install()}
+              disabled={updateStore.busy}
+              data-testid="install-update"
+            >
+              Download &amp; install
+            </button>
+          </div>
+        {:else if update?.phase === "downloading"}
+          <div class="mt-3" data-testid="update-downloading">
+            <p class="text-xs text-zinc-500">
+              Downloading {update.available_version}…
+              {#if update.progress_percent != null}{update.progress_percent}%{/if}
+            </p>
+            <div class="mt-1.5 h-1.5 w-full overflow-hidden rounded-full bg-zinc-200 dark:bg-zinc-700">
+              <div
+                class="h-full bg-emerald-600 transition-[width]"
+                style="width: {update.progress_percent ?? 15}%"
+              ></div>
+            </div>
+          </div>
+        {:else if update?.phase === "installing"}
+          <p class="mt-2 text-xs text-zinc-500" data-testid="update-installing">Installing…</p>
+        {:else if update?.phase === "ready_to_restart"}
+          <div
+            class="mt-3 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 dark:border-emerald-900 dark:bg-emerald-950/40"
+            data-testid="update-ready"
+          >
+            <p class="text-sm text-emerald-800 dark:text-emerald-200">
+              Version {update.available_version} is installed.
+            </p>
+            <button
+              class="mt-2 rounded-lg bg-emerald-600 px-3 py-1.5 text-sm font-semibold text-white hover:bg-emerald-700"
+              onclick={() => updateStore.restart()}
+              data-testid="restart-app"
+            >
+              Restart to apply
+            </button>
+          </div>
+        {:else if update?.phase === "error"}
+          <p
+            class="mt-2 rounded-lg bg-red-50 px-2.5 py-2 text-xs text-red-700 dark:bg-red-950 dark:text-red-300"
+            role="alert"
+            data-testid="update-error"
+          >
+            {update.error ?? "The update check failed."}
+          </p>
+        {:else if update?.phase === "idle"}
+          <p class="mt-2 text-xs text-zinc-500">Not checked yet this session.</p>
+        {/if}
+
+        {#if updateStore.error}
+          <p
+            class="mt-2 rounded-lg bg-red-50 px-2.5 py-2 text-xs text-red-700 dark:bg-red-950 dark:text-red-300"
+            role="alert"
+          >
+            {updateStore.error}
+          </p>
+        {/if}
+
+        <h3 class="mt-6 text-sm font-semibold text-zinc-900 dark:text-zinc-100">
+          Automatic checks
+        </h3>
+        <label class="mt-2 flex items-start gap-2 text-sm">
+          <input
+            type="checkbox"
+            class="mt-0.5 h-4 w-4 accent-emerald-600"
+            bind:checked={checkUpdatesAutomatically}
+            data-testid="check-updates-automatically"
+          />
+          <span>
+            Check for updates at startup
+            <span class="block text-xs text-zinc-500">
+              Off by default. When it is off, DevClean makes no outbound request until you press
+              Check for updates.
+            </span>
+          </span>
+        </label>
       </div>
       {:else}
       <div id="settings-panel-advanced" role="tabpanel" aria-labelledby="settings-tab-advanced">

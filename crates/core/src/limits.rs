@@ -32,3 +32,13 @@ pub const PROVIDER_COMMAND_TIMEOUT: Duration = Duration::from_secs(30);
 /// to it exactly as it applies to a scan or a subprocess. Exceeded → the
 /// command fails with an explanation and nothing has been deleted.
 pub const PREVIEW_TIMEOUT: Duration = Duration::from_secs(120);
+
+/// Maximum wall time for the in-app **update check** — one HTTPS request to
+/// the release channel (G-UPD-02). A check that has not answered in 15s is
+/// not going to, and the Settings button must not spin forever (G-REL-01).
+pub const UPDATE_CHECK_TIMEOUT: Duration = Duration::from_secs(15);
+
+/// Maximum wall time for an update **download**. Generous: a release bundle
+/// is tens of megabytes and the user is waiting on their own connection, but
+/// it still may not run forever (G-REL-01).
+pub const UPDATE_DOWNLOAD_TIMEOUT: Duration = Duration::from_secs(300);

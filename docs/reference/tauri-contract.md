@@ -1,8 +1,8 @@
 # Tauri Contract (public behavior contract)
 
-> The single document defining what the frontend may see. Changing this file = changing the contract → requires a deliberate review and a regression test. Version: **v0.11.0 (single-pass walk)**.
+> The single document defining what the frontend may see. Changing this file = changing the contract → requires a deliberate review and a regression test. Version: **v0.12.0 (in-app updates)**.
 
-## Commands (15)
+## Commands (19)
 
 | Command | Args | Returns | Notes |
 |---|---|---|---|
@@ -21,8 +21,12 @@
 | `detect_scan_roots` | — | `ScanRootCandidate[]` | Candidate folders under `$HOME`, largest cache first (v0.5.0) |
 | `get_disk_free` | — | `DiskFree` | Free/total bytes of the volume holding `$HOME`, plus that volume's `mount` name when the platform can supply one; `known: false` when unavailable. Measured with `statvfs`, **no subprocess** (v0.7.3) |
 | `get_history_runs` | `{limit?: number}` | `CleanupRun[]` | Newest cleanup **runs** (default 20, cap 200) with their entries attached; tail-read (v0.6.0) |
+| `get_update_status` | — | `UpdateStatus` | Last updater state, **no network call** — lets Settings render on mount (v0.12.0) |
+| `check_for_update` | — | `UpdateStatus` | Asks the release channel for a newer version; **fails after `UPDATE_CHECK_TIMEOUT` (15s)** instead of spinning. A failure is reported as `phase: "error"` (v0.12.0) |
+| `install_update` | — | `UpdateStatus` | Downloads + installs the pending update (signature-verified by the backend); emits `update_status` as it progresses. **Refused while a scan or cleanup is running.** Does **not** restart (v0.12.0) |
+| `restart_app` | — | `()` | Relaunches into the freshly installed version. The process is replaced, so it normally never returns (v0.12.0) |
 
-## Events (8)
+## Events (9)
 
 | Event | Payload | When |
 |---|---|---|
@@ -34,6 +38,7 @@
 | `cleanup_progress` | `{done, total}` | One per finished item |
 | `cleanup_completed` | `CleanupResult[]` | All ids processed |
 | `tray_action` | `{route: string, filter?: string}` | The menu bar asked the window to show a page (v0.7.0). Emitted **after** the window is brought forward. The UI validates `route` against its own page table and ignores anything else |
+| `update_status` | `UpdateStatus` | The whole updater state changed — check result, download progress, install, error (v0.12.0). One event, one payload, so the UI never stitches phases together |
 
 ## Types (summary; canonical in `crates/core/src/types.rs`)
 
@@ -42,6 +47,22 @@ type SafetyLevel = "safe" | "caution" | "dangerous";
 type CleanupStatus = "success" | "partial" | "failed" | "cancelled";
 type DockerPruneScope = "off" | "build-cache" | "build-cache+images" | "all";
 type ThemeMode = "system" | "dark" | "light";
+
+/** v0.12.0: phase of the in-app updater. */
+type UpdatePhase =
+  | "idle" | "checking" | "up_to_date" | "available"
+  | "downloading" | "installing" | "ready_to_restart" | "error";
+
+/** v0.12.0: the whole updater state, emitted on every change. */
+interface UpdateStatus {
+  current_version: string;
+  phase: UpdatePhase;
+  available_version?: string | null;
+  notes?: string | null;
+  checked_at_unix?: number | null;
+  progress_percent?: number | null;   // whole percent while downloading
+  error?: string | null;              // never a silent no-op
+}
 
 interface ResourceImpact { consequence: string; cost?: string; command?: string }
 
@@ -156,6 +177,7 @@ Not:
 10. **`age_days` is a composite, and a new gate can appear (v0.10.0).** `Resource.age_days` no longer means "project directory age": it is the most recent of the artifact's mtime, the repository's last commit and the project directory's mtime, so a project committed to yesterday stops looking dormant. `Resource.activity` is the tier derived from it. And `blocked_reason: "protected"` can now appear: an artifact that a repository tracks (or a new file it does not yet track) while that repository has uncommitted changes is refused — deleting it would lose work that is committed nowhere. A **gitignored** artifact (`node_modules`) stays cleanable even in a dirty repository. Paths outside any repository, and machines without git, are left exactly as before: `activity` is null and nothing is protected.
 11. **A finished cleanup re-scans only the providers it touched (v0.10.0).** It used to run a full scan of every provider, which dimmed the list, disabled selection and made the app feel frozen right after a delete. Now the shell removes the cleaned resources from the list immediately (the backend reported which ids succeeded), so the update does not wait on a scan, and then re-scans only the providers behind those resources, in the background: the list stays interactive, the other providers keep their last-known figures (flagged by the existing "partial re-scan" badge), and the touched providers' rows and the on-disk cache are refreshed. If nothing identifiable was touched, it falls back to a full scan. A full scan is still available from Scan Now / the menu bar.
 12. **The project-tree providers share one traversal (v0.11.0).** `node_modules`, `rust_target` and `python_cache` used to walk every scan root apiece and re-walk each artifact for its size. They now contribute rules to one shared walk that matches and sizes in the same pass. **No command, event or type changed** — the rows and their sizes are identical (equivalence-tested) — but the *timing* of their events did: all three emit `scan_provider_started` together when the shared walk begins, and all three emit `scan_progress` together when it settles, rather than each firing as its own walk finished. `done` stays monotonic and `total` still counts every active provider once, so the bar cannot stall (G-SCAN-05). One edge case changes: a `target/` that is itself a symlink is no longer reported (G-SCAN-03 — symlinks are never followed). Decision record: [docs/decisions/single-pass-walk.md](../decisions/single-pass-walk.md).
+13. **Updates are in-app, signed, and opt-in (v0.12.0).** Settings gains an **Updates** tab: the running version, a Check for updates button, release notes, a download progress bar, Download & install, and Restart to apply. The payload is verified against a minisign public key committed in `tauri.conf.json` **before** it is installed; the download is signature-checked and the endpoint is HTTPS. Nothing is downloaded until the user asks. `install_update` **refuses while a scan or cleanup is running** — restarting mid-deletion is the one dangerous interaction — and it never restarts on its own; that is a separate button. `Settings.check_updates_automatically` (default **false**) adds a startup check, spawned and bounded, never on the window's critical path. A failed check is reported as `phase: "error"` with the reason. Decision record: [docs/decisions/in-app-updates.md](../decisions/in-app-updates.md).
 
 ## Menu bar surface (v0.7.0)
 
@@ -176,6 +198,13 @@ One click of either button opens the menu (`show_menu_on_left_click`); the info 
 
 Contract versions are their own sequence, independent of the product version in `Cargo.toml` — the frontend and backend always ship together, so the contract changes on its own schedule. The two are aligned at 1.0.
 
+- `v0.12.0` — in-app updates. **Commands:** `+get_update_status`, `+check_for_update`, `+install_update`, `+restart_app`. **Events:** `+update_status`. **Types (additive):** `UpdateStatus` + `UpdatePhase`; `Settings.check_updates_automatically` (`#[serde(default)]` → `false`).
+  - **Behaviour:** the payload is verified against the minisign public key in `tauri.conf.json` before install; the endpoint is HTTPS and the insecure-transport flag is never set (G-UPD-01).
+  - **Behaviour:** the check is bounded at 15s and the download at 300s; the opt-in startup check is spawned, never awaited, so it never holds the window (G-UPD-02).
+  - **Behaviour:** `install_update` is refused while a scan or cleanup is running, and does not restart the app — `restart_app` is a separate, explicit command (G-UPD-03).
+  - **Behaviour:** a failed check or install surfaces `phase: "error"` with the reason, never a silent no-op (G-UPD-04).
+  - Regression tests: `update_phase_serializes_to_the_contract_strings`, `idle_update_status_is_empty_but_versioned`, `pre_v012_settings_file_does_not_check_for_updates`, `busy_guard_clears_the_flag_on_drop`, `busy_guard_clears_the_flag_when_unwound`, `an_update_check_that_overruns_is_bounded_and_says_so`, `a_failed_update_check_reports_its_reason` (Rust); `update.test.ts` (frontend).
+  - Decision record: [docs/decisions/in-app-updates.md](../decisions/in-app-updates.md).
 - `v0.11.0` — single-pass walk. **No command, event or type changed.**
   - **Behaviour:** the three project-tree providers (`node_modules`, `rust_target`, `python_cache`) share one traversal that matches and sizes in the same pass, instead of three walks plus a per-artifact re-walk. The rows and their sizes are identical (equivalence-tested against the pre-refactor output).
   - **Behaviour:** those three now emit `scan_provider_started` together when the shared walk begins and `scan_progress` together when it settles. `done` stays monotonic and `total` still counts every active provider once (behavioural note 12).

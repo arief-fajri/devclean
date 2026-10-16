@@ -311,6 +311,72 @@ pub enum CleanupStatus {
 /// One row of the cleanup history log (JSONL on disk, `get_history`
 /// over the bridge). Written after every `cleanup` call, one entry per
 /// resource — a durable mirror of [`CleanupResult`].
+/// Phase of the in-app updater (contract v0.12.0). Serialized to the
+/// frontend, so these strings are part of the contract.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum UpdatePhase {
+    /// Nothing has been checked yet this session.
+    #[default]
+    Idle,
+    /// A check is in flight.
+    Checking,
+    /// The endpoint answered and this build is current.
+    UpToDate,
+    /// A newer version exists and can be installed.
+    Available,
+    /// The payload is downloading; `progress_percent` may be set.
+    Downloading,
+    /// Download finished, the bundle is being installed.
+    Installing,
+    /// Installed — the app must restart to run the new version.
+    ReadyToRestart,
+    /// The last operation failed; `error` carries the reason (G-UPD-04).
+    Error,
+}
+
+/// State of the in-app updater (contract v0.12.0).
+///
+/// One value, emitted whole on every change (`update_status`), so the UI
+/// never has to stitch phases together from separate events.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UpdateStatus {
+    /// The version this build reports (`tauri.conf.json`).
+    pub current_version: String,
+    pub phase: UpdatePhase,
+    /// The newer version the channel offers, when one exists.
+    #[serde(default)]
+    pub available_version: Option<String>,
+    /// Release notes from the manifest, when the channel provides them.
+    #[serde(default)]
+    pub notes: Option<String>,
+    /// When the last check completed, unix seconds.
+    #[serde(default)]
+    pub checked_at_unix: Option<u64>,
+    /// Whole percent while downloading; `None` when the server sent no
+    /// `Content-Length` (then the UI shows an indeterminate bar).
+    #[serde(default)]
+    pub progress_percent: Option<u8>,
+    /// Why the last check or install failed. Never a silent no-op (G-UPD-04).
+    #[serde(default)]
+    pub error: Option<String>,
+}
+
+impl UpdateStatus {
+    /// The resting state: nothing checked yet, everything else empty.
+    pub fn idle(current_version: impl Into<String>) -> Self {
+        Self {
+            current_version: current_version.into(),
+            phase: UpdatePhase::Idle,
+            available_version: None,
+            notes: None,
+            checked_at_unix: None,
+            progress_percent: None,
+            error: None,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -390,6 +456,38 @@ mod tests {
         r.impact = None;
         let back: Resource = serde_json::from_str(&serde_json::to_string(&r).unwrap()).unwrap();
         assert_eq!(back.impact, None);
+    }
+
+    /// The wire format is the contract: the frontend switches on these
+    /// strings, so a rename must fail here first.
+    #[test]
+    fn update_phase_serializes_to_the_contract_strings() {
+        let cases = [
+            (UpdatePhase::Idle, "\"idle\""),
+            (UpdatePhase::Checking, "\"checking\""),
+            (UpdatePhase::UpToDate, "\"up_to_date\""),
+            (UpdatePhase::Available, "\"available\""),
+            (UpdatePhase::Downloading, "\"downloading\""),
+            (UpdatePhase::Installing, "\"installing\""),
+            (UpdatePhase::ReadyToRestart, "\"ready_to_restart\""),
+            (UpdatePhase::Error, "\"error\""),
+        ];
+        for (phase, expected) in cases {
+            assert_eq!(serde_json::to_string(&phase).unwrap(), expected);
+        }
+    }
+
+    /// `UpdateStatus::idle` is the resting shape: a version and nothing else,
+    /// and it round-trips so the frontend can hold it.
+    #[test]
+    fn idle_update_status_is_empty_but_versioned() {
+        let s = UpdateStatus::idle("0.3.0");
+        assert_eq!(s.phase, UpdatePhase::Idle);
+        assert_eq!(s.current_version, "0.3.0");
+        assert!(s.available_version.is_none());
+        assert!(s.error.is_none());
+        let back: UpdateStatus = serde_json::from_str(&serde_json::to_string(&s).unwrap()).unwrap();
+        assert_eq!(back.phase, UpdatePhase::Idle);
     }
 }
 

@@ -8,10 +8,11 @@
 //! per-platform app data dir (never inside a scan root).
 
 use devclean_cleanup::CleanupEngine;
-use devclean_core::{app_data_dir, DiskFree, Resource, Settings, ThemeMode};
+use devclean_core::{app_data_dir, DiskFree, Resource, Settings, ThemeMode, UpdateStatus};
 use devclean_scanner::ScanManager;
 use std::collections::HashMap;
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use tauri::{AppHandle, Manager};
 
@@ -31,6 +32,38 @@ pub struct AppState {
     /// that spawns `df` must never run on "the user opened a menu" (G-REL-01 —
     /// no unbounded work on a UI path).
     pub disk_free: Mutex<DiskFree>,
+    /// v0.12.0: the pending update, held between `check_for_update` and
+    /// `install_update`. The updater handle owns the download URL and the
+    /// signature that must be verified, so it cannot be re-derived from a
+    /// version string alone.
+    pub update: Mutex<Option<tauri_plugin_updater::Update>>,
+    /// v0.12.0: the last updater state, so `get_update_status` answers
+    /// without a network call and the Settings page renders on mount.
+    pub update_status: Mutex<UpdateStatus>,
+    /// v0.12.0: true while a scan or cleanup owns the filesystem. Installing
+    /// an update restarts the app, and a restart mid-cleanup would interrupt
+    /// a deletion, so `install_update` refuses while this is set (G-UPD-03).
+    pub op_running: AtomicBool,
+}
+
+/// RAII marker for "a scan or cleanup is running" (G-UPD-03).
+///
+/// Held for the whole command, so every exit path — success, error, panic —
+/// clears the flag. A plain `store(false)` at the end would leak the flag on
+/// the error paths and permanently block updates.
+pub struct BusyGuard<'a>(&'a AtomicBool);
+
+impl<'a> BusyGuard<'a> {
+    pub fn new(flag: &'a AtomicBool) -> Self {
+        flag.store(true, Ordering::SeqCst);
+        Self(flag)
+    }
+}
+
+impl Drop for BusyGuard<'_> {
+    fn drop(&mut self) {
+        self.0.store(false, Ordering::SeqCst);
+    }
 }
 
 impl Default for AppState {
@@ -52,6 +85,11 @@ impl Default for AppState {
                 known: false,
                 mount: None,
             }),
+            update: Mutex::new(None),
+            // Stamped with the app's version by the commands; the field only
+            // needs to exist before the first check.
+            update_status: Mutex::new(UpdateStatus::idle(env!("CARGO_PKG_VERSION"))),
+            op_running: AtomicBool::new(false),
         }
     }
 }
@@ -128,5 +166,49 @@ pub fn apply_window_background(app: &AppHandle, theme: ThemeMode) {
     };
     if let Err(e) = window.set_background_color(Some(if dark { BG_DARK } else { BG_LIGHT })) {
         tracing::warn!("could not set window background: {e}");
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// G-UPD-03: the busy flag must clear on the normal path, so a finished
+    /// scan does not permanently block updates.
+    #[test]
+    fn busy_guard_clears_the_flag_on_drop() {
+        let flag = AtomicBool::new(false);
+        {
+            let _guard = BusyGuard::new(&flag);
+            assert!(flag.load(Ordering::SeqCst), "the guard must raise the flag");
+        }
+        assert!(!flag.load(Ordering::SeqCst), "and lower it on drop");
+    }
+
+    /// ...and on the panic path too: an unwinding scan must not leave the app
+    /// in a state where updates can never be installed.
+    #[test]
+    fn busy_guard_clears_the_flag_when_unwound() {
+        let flag = AtomicBool::new(false);
+        let caught = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let _guard = BusyGuard::new(&flag);
+            panic!("scan blew up");
+        }));
+        assert!(caught.is_err(), "the panic must propagate");
+        assert!(
+            !flag.load(Ordering::SeqCst),
+            "a panic must not leave the filesystem marked busy forever"
+        );
+    }
+
+    /// The updater rests in `Idle` with the running version, so
+    /// `get_update_status` can answer before any check happens.
+    #[test]
+    fn default_state_rests_in_idle() {
+        let state = AppState::default();
+        let status = state.update_status.lock().unwrap();
+        assert_eq!(status.phase, devclean_core::UpdatePhase::Idle);
+        assert!(!status.current_version.is_empty());
+        assert!(state.update.lock().unwrap().is_none());
     }
 }

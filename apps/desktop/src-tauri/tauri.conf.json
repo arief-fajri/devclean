@@ -42,5 +42,13 @@
     "android": {
       "debugApplicationIdSuffix": ".debug"
     }
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDgyM0M5MEUxMzBBNUNBMjEKUldRaHlxVXc0WkE4Z3VKRUN3TzUrVnM4b0tsdzdWSktIRXp0M3kwZ3dWalc1ekJSV1d3WTJudVcK",
+      "endpoints": [
+        "https://github.com/arief-fajri/devclean/releases/latest/download/latest.json"
+      ]
+    }
   }
 }

@@ -37,6 +37,12 @@ cargo tauri build
 # → target/release/bundle/dmg/*.dmg
 ```
 
+### Updates
+
+DevClean can update itself: **Settings → Updates** checks the release channel, and a newer version can be downloaded and installed without leaving the app. Every update bundle is signed with a minisign key and verified before it is installed, over HTTPS — even though the app itself is not Apple-signed. Nothing is downloaded until you press **Check for updates**; an optional "check at startup" toggle is off by default. A restart is a separate button, and installing is refused while a scan or cleanup is running.
+
+> The first updater-enabled release still has to be installed by hand (an older build has no updater to receive it); automatic updates work from the next release onward. Updates are arm64 only.
+
 ## Development
 
 ```bash

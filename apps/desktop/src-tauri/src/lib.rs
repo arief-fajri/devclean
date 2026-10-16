@@ -35,6 +35,28 @@ pub fn run() {
             // Restrained notifications only (scan/cleanup completion while
             // the window is unfocused — see commands::notify_if_background).
             app.handle().plugin(tauri_plugin_notification::init())?;
+            // In-app updates (contract v0.12.0). The plugin verifies every
+            // payload against the minisign public key in tauri.conf.json
+            // before installing it (G-UPD-01).
+            app.handle()
+                .plugin(tauri_plugin_updater::Builder::new().build())?;
+
+            // A startup check runs ONLY when the user opted in: DevClean makes
+            // no routine outbound request otherwise. Spawned, never awaited,
+            // so the window can never wait on the network (G-UPD-02, G-REL-06).
+            let check_on_start = app
+                .state::<AppState>()
+                .settings
+                .lock()
+                .unwrap()
+                .check_updates_automatically;
+            if check_on_start {
+                let handle = app.handle().clone();
+                tauri::async_runtime::spawn(async move {
+                    let state = handle.state::<AppState>();
+                    let _ = commands::run_update_check(&handle, &state).await;
+                });
+            }
             tray::setup(app.handle())?;
             Ok(())
         })
@@ -64,6 +86,10 @@ pub fn run() {
             get_providers,
             detect_scan_roots,
             get_disk_free,
+            get_update_status,
+            check_for_update,
+            install_update,
+            restart_app,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application");

@@ -181,6 +181,9 @@ export interface Settings {
   delete_mode: DeleteMode;
   /** Allow cleanup of AI conversation history. Default false. */
   ai_cleanup_enabled: boolean;
+  /** Check GitHub Releases for a newer version at startup. Default false —
+   * DevClean makes no routine outbound request unless asked. v0.12.0. */
+  check_updates_automatically: boolean;
 }
 
 /** A folder DevClean suggests as a scan root. */
@@ -311,3 +314,45 @@ export interface TrayAction {
 
 export const onTrayAction = (cb: (a: TrayAction) => void): Promise<UnlistenFn> =>
   listen<TrayAction>("tray_action", (e) => cb(e.payload));
+
+/** Phase of the in-app updater (contract v0.12.0). The backend switches on
+ * these strings, so they are part of the contract. */
+export type UpdatePhase =
+  | "idle"
+  | "checking"
+  | "up_to_date"
+  | "available"
+  | "downloading"
+  | "installing"
+  | "ready_to_restart"
+  | "error";
+
+/** State of the in-app updater (contract v0.12.0). One value, emitted whole
+ * on every change, so the UI never stitches phases together. */
+export interface UpdateStatus {
+  /** The version this build reports. */
+  current_version: string;
+  phase: UpdatePhase;
+  /** The newer version the channel offers, when one exists. */
+  available_version?: string | null;
+  /** Release notes from the manifest, when the channel provides them. */
+  notes?: string | null;
+  checked_at_unix?: number | null;
+  /** Whole percent while downloading; null when the server sent no length. */
+  progress_percent?: number | null;
+  /** Why the last check or install failed. Never a silent no-op. */
+  error?: string | null;
+}
+
+/** The last updater state, without a network call. */
+export const getUpdateStatus = () => invoke<UpdateStatus>("get_update_status");
+/** Ask the release channel whether a newer version exists (bounded). */
+export const checkForUpdate = () => invoke<UpdateStatus>("check_for_update");
+/** Download + install the pending update. Does NOT restart the app. */
+export const installUpdate = () => invoke<UpdateStatus>("install_update");
+/** Relaunch into the freshly installed version. */
+export const restartApp = () => invoke<void>("restart_app");
+
+/** v0.12.0: the whole updater state after any change. */
+export const onUpdateStatus = (cb: (s: UpdateStatus) => void): Promise<UnlistenFn> =>
+  listen<UpdateStatus>("update_status", (e) => cb(e.payload));

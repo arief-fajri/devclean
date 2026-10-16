@@ -17,6 +17,12 @@ pub const CLEANUP_STARTED: &str = "cleanup_started";
 pub const CLEANUP_PROGRESS: &str = "cleanup_progress";
 pub const CLEANUP_COMPLETED: &str = "cleanup_completed";
 
+/// v0.12.0: the whole updater state after any change — check result,
+/// download progress, install, error. One event, one payload
+/// ([`devclean_core::UpdateStatus`]), so the UI never stitches phases
+/// together from separate signals.
+pub const UPDATE_STATUS: &str = "update_status";
+
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct ScanProgressPayload {
     pub provider: String,

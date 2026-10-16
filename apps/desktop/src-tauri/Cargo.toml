@@ -24,6 +24,10 @@ log = "0.4"
 tauri = { version = "2", features = ["tray-icon", "image-png"] }
 tauri-plugin-log = "2"
 tauri-plugin-notification.workspace = true
+tauri-plugin-updater = { version = "2", default-features = false, features = [
+  "rustls-tls",
+  "system-proxy",
+] }
 
 devclean-core.workspace = true
 devclean-providers.workspace = true

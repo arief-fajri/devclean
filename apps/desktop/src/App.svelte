@@ -22,6 +22,7 @@
   import { navStore } from "$lib/stores/nav.svelte";
   import { scanStore } from "$lib/stores/scan.svelte";
   import { settingsStore } from "$lib/stores/settings.svelte";
+  import { updateStore } from "$lib/stores/update.svelte";
   import { onTrayAction } from "$lib/tauri";
   import type { RouteId } from "$lib/nav";
 
@@ -36,6 +37,11 @@
   onMount(() => {
     scanStore.listen();
     cleanupStore.listen();
+    // The updater is passive: mirror the backend state and read the last
+    // status so Settings renders on mount. No check runs here — that is the
+    // user's click, or the opt-in startup check in Rust.
+    updateStore.listen();
+    void updateStore.refresh();
     void onTrayAction((action) => {
       // The menu bar may only ask for a page; it can never clean. An id we do
       // not know is ignored rather than guessed at.

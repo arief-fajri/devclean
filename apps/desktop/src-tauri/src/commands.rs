@@ -8,13 +8,15 @@ use crate::metrics::MemSample;
 use crate::state::AppState;
 use devclean_core::{
     format_bytes, CachedScan, CleanupPreview, CleanupResult, CleanupRun, DiskFree, HistoryEntry,
-    ProviderInfo, Resource, SafetyValidator, ScanRootCandidate, ScanSummary, Settings,
-    PREVIEW_TIMEOUT,
+    ProviderInfo, Resource, SafetyValidator, ScanRootCandidate, ScanSummary, Settings, UpdatePhase,
+    UpdateStatus, PREVIEW_TIMEOUT, UPDATE_CHECK_TIMEOUT, UPDATE_DOWNLOAD_TIMEOUT,
 };
 use devclean_providers::{all_providers, Provider};
 use std::collections::HashMap;
+use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use tauri::{AppHandle, Emitter, Manager, State};
+use tauri_plugin_updater::UpdaterExt;
 
 fn now_unix() -> u64 {
     std::time::SystemTime::now()
@@ -57,6 +59,9 @@ pub async fn scan_all(app: AppHandle, state: State<'_, AppState>) -> Result<Scan
 /// Shared scan implementation, callable from the `scan_all` command and
 /// from the tray menu (M3) without going through the command layer.
 pub async fn run_scan(app: &AppHandle, state: &AppState) -> Result<ScanSummary, String> {
+    // G-UPD-03: a scan owns the filesystem, so an update install (which
+    // restarts the app) must wait until it finishes.
+    let _busy = crate::state::BusyGuard::new(&state.op_running);
     let mem_before = MemSample::capture();
     let (roots, excluded, disabled, policy) = {
         let s = state.settings.lock().unwrap();
@@ -360,6 +365,9 @@ pub async fn cleanup(
     ids: Vec<String>,
     preview_token: Option<String>,
 ) -> Result<Vec<CleanupResult>, String> {
+    // G-UPD-03: a restart mid-cleanup would interrupt a deletion. The flag is
+    // cleared by the guard on every exit path, including a panic.
+    let _busy = crate::state::BusyGuard::new(&state.op_running);
     let mem_before = MemSample::capture();
     let settings = state.settings.lock().unwrap().clone();
 
@@ -605,6 +613,242 @@ fn disk_free() -> DiskFree {
     disk::report()
 }
 
+// ----------------------------------------------------------------- updater
+//
+// In-app updates (contract v0.12.0). The payload is verified by the Tauri
+// updater against the minisign public key in `tauri.conf.json` BEFORE it is
+// installed (G-UPD-01) — the frontend never sees a byte of it. Check and
+// download are bounded (G-UPD-02), and every failure becomes a visible
+// `UpdatePhase::Error` (G-UPD-04), never a silent no-op.
+
+/// The running build's version, from `tauri.conf.json` — the value the
+/// updater compares against the release channel.
+fn app_version(app: &AppHandle) -> String {
+    app.package_info().version.to_string()
+}
+
+/// Store + broadcast the updater state. Every phase change goes through here,
+/// so `get_update_status` and the `update_status` event cannot disagree.
+fn publish_update_status(app: &AppHandle, status: UpdateStatus) {
+    if let Some(state) = app.try_state::<AppState>() {
+        *state.update_status.lock().unwrap() = status.clone();
+    }
+    let _ = app.emit(UPDATE_STATUS, &status);
+}
+
+/// A deadline for updater work, with messages that name the update.
+///
+/// Separate from [`bounded`] because that one's text is written for
+/// re-measuring a cleanup selection; a user reading "Re-measuring took longer
+/// than 15s" after clicking Check for updates would learn nothing.
+async fn bounded_update<F, T, E>(
+    work: F,
+    limit: std::time::Duration,
+    what: &str,
+) -> Result<T, String>
+where
+    F: std::future::Future<Output = Result<T, E>>,
+    E: std::fmt::Display,
+{
+    match tokio::time::timeout(limit, work).await {
+        Ok(Ok(value)) => Ok(value),
+        Ok(Err(e)) => Err(format!("{what} failed: {e}")),
+        Err(_) => Err(format!(
+            "{what} did not answer within {}s — check your connection and try again.",
+            limit.as_secs()
+        )),
+    }
+}
+
+/// Check the release channel for a newer version.
+///
+/// Shared by the `check_for_update` command and the opt-in startup check, so
+/// the two can never behave differently.
+pub async fn run_update_check(app: &AppHandle, state: &AppState) -> UpdateStatus {
+    let current = app_version(app);
+    publish_update_status(
+        app,
+        UpdateStatus {
+            phase: UpdatePhase::Checking,
+            ..UpdateStatus::idle(current.clone())
+        },
+    );
+
+    let checked_at_unix = now_unix();
+    let outcome = match app.updater() {
+        Ok(updater) => {
+            bounded_update(updater.check(), UPDATE_CHECK_TIMEOUT, "The update check").await
+        }
+        Err(e) => Err(format!("The updater is not configured: {e}")),
+    };
+
+    let status = match outcome {
+        Ok(Some(update)) => {
+            let status = UpdateStatus {
+                current_version: current,
+                phase: UpdatePhase::Available,
+                available_version: Some(update.version.clone()),
+                notes: update.body.clone(),
+                checked_at_unix: Some(checked_at_unix),
+                progress_percent: None,
+                error: None,
+            };
+            // Keep the handle: install must verify the signature that came
+            // with THIS manifest, not one fetched later.
+            *state.update.lock().unwrap() = Some(update);
+            status
+        }
+        Ok(None) => UpdateStatus {
+            phase: UpdatePhase::UpToDate,
+            checked_at_unix: Some(checked_at_unix),
+            ..UpdateStatus::idle(current)
+        },
+        Err(error) => UpdateStatus {
+            phase: UpdatePhase::Error,
+            checked_at_unix: Some(checked_at_unix),
+            error: Some(error),
+            ..UpdateStatus::idle(current)
+        },
+    };
+    publish_update_status(app, status.clone());
+    status
+}
+
+/// The last updater state, without touching the network. Lets the Settings
+/// page render on mount, including a check that ran at startup.
+#[tauri::command]
+pub fn get_update_status(
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<UpdateStatus, String> {
+    let mut status = state.update_status.lock().unwrap().clone();
+    // The running build's version is authoritative and cheap to stamp.
+    status.current_version = app_version(&app);
+    Ok(status)
+}
+
+/// Ask the release channel whether a newer version exists.
+#[tauri::command]
+pub async fn check_for_update(
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<UpdateStatus, String> {
+    Ok(run_update_check(&app, &state).await)
+}
+
+/// Download and install the pending update.
+///
+/// The app is NOT restarted here — the caller shows the result and then calls
+/// `restart_app`, so the user sees that the install succeeded before the
+/// window disappears. Refused while a scan or cleanup is running (G-UPD-03).
+#[tauri::command]
+pub async fn install_update(
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<UpdateStatus, String> {
+    if state.op_running.load(Ordering::SeqCst) {
+        return Err(
+            "A scan or cleanup is running — let it finish before installing the update."
+                .to_string(),
+        );
+    }
+    let current = app_version(&app);
+    let Some(update) = state.update.lock().unwrap().take() else {
+        return Err("No update is pending — check for updates first.".to_string());
+    };
+    let version = update.version.clone();
+
+    publish_update_status(
+        &app,
+        UpdateStatus {
+            phase: UpdatePhase::Downloading,
+            available_version: Some(version.clone()),
+            ..UpdateStatus::idle(current.clone())
+        },
+    );
+
+    // Progress is emitted only when the whole-number percent moves, so a fast
+    // download does not flood the IPC channel with hundreds of events.
+    let mut downloaded: u64 = 0;
+    let mut last_percent: Option<u8> = None;
+    let progress_app = app.clone();
+    let progress_current = current.clone();
+    let progress_version = version.clone();
+    let finish_app = app.clone();
+    let finish_current = current.clone();
+    let finish_version = version.clone();
+
+    let result = tokio::time::timeout(
+        UPDATE_DOWNLOAD_TIMEOUT,
+        update.download_and_install(
+            move |chunk_len, content_len| {
+                downloaded += chunk_len as u64;
+                let percent = content_len
+                    .filter(|total| *total > 0)
+                    .map(|total| (downloaded.saturating_mul(100) / total).min(100) as u8);
+                if percent != last_percent {
+                    last_percent = percent;
+                    publish_update_status(
+                        &progress_app,
+                        UpdateStatus {
+                            phase: UpdatePhase::Downloading,
+                            available_version: Some(progress_version.clone()),
+                            progress_percent: percent,
+                            ..UpdateStatus::idle(progress_current.clone())
+                        },
+                    );
+                }
+            },
+            move || {
+                publish_update_status(
+                    &finish_app,
+                    UpdateStatus {
+                        phase: UpdatePhase::Installing,
+                        available_version: Some(finish_version.clone()),
+                        ..UpdateStatus::idle(finish_current.clone())
+                    },
+                );
+            },
+        ),
+    )
+    .await;
+
+    let status = match result {
+        Ok(Ok(())) => UpdateStatus {
+            phase: UpdatePhase::ReadyToRestart,
+            available_version: Some(version),
+            ..UpdateStatus::idle(current)
+        },
+        Ok(Err(error)) => UpdateStatus {
+            phase: UpdatePhase::Error,
+            available_version: Some(version),
+            error: Some(format!("The update could not be installed: {error}")),
+            ..UpdateStatus::idle(current)
+        },
+        Err(_) => UpdateStatus {
+            phase: UpdatePhase::Error,
+            available_version: Some(version),
+            error: Some(format!(
+                "The download did not finish within {}s — check your connection and try again.",
+                UPDATE_DOWNLOAD_TIMEOUT.as_secs()
+            )),
+            ..UpdateStatus::idle(current)
+        },
+    };
+    publish_update_status(&app, status.clone());
+    Ok(status)
+}
+
+/// Relaunch into the freshly installed version.
+///
+/// macOS and Linux only run the new build after a restart, which is why
+/// install and restart are separate commands: the user gets to see that the
+/// install succeeded first.
+#[tauri::command]
+pub fn restart_app(app: AppHandle) {
+    app.restart();
+}
+
 #[cfg(test)]
 mod preview_deadline_tests {
     use super::*;
@@ -636,6 +880,34 @@ mod preview_deadline_tests {
             .await
             .expect_err("the worker's error must surface");
         assert!(err.contains("disk went away"), "{err}");
+    }
+
+    /// G-UPD-02: the update check is bounded, and an overrun names the update
+    /// — not a cleanup preview — so the message actually helps.
+    #[tokio::test]
+    async fn an_update_check_that_overruns_is_bounded_and_says_so() {
+        let slow = async {
+            tokio::time::sleep(Duration::from_secs(30)).await;
+            Ok::<u8, String>(1)
+        };
+        let err = bounded_update(slow, Duration::from_millis(20), "The update check")
+            .await
+            .expect_err("an overrun must not succeed");
+        assert!(err.contains("The update check"), "{err}");
+        assert!(
+            err.contains("longer than") || err.contains("within"),
+            "{err}"
+        );
+    }
+
+    /// G-UPD-04: a failed check surfaces its reason instead of a silent no-op.
+    #[tokio::test]
+    async fn a_failed_update_check_reports_its_reason() {
+        let broken = async { Err::<u8, String>("no route to host".into()) };
+        let err = bounded_update(broken, Duration::from_secs(30), "The update check")
+            .await
+            .expect_err("the network error must surface");
+        assert!(err.contains("no route to host"), "{err}");
     }
 
     #[tokio::test]
@@ -721,6 +993,9 @@ mod preview_deadline_tests {
                 known: false,
                 mount: None,
             }),
+            update: std::sync::Mutex::new(None),
+            update_status: std::sync::Mutex::new(devclean_core::UpdateStatus::idle("0.0.0-test")),
+            op_running: std::sync::atomic::AtomicBool::new(false),
         };
 
         let cached = cached_scan(&state).expect("cached scan");

@@ -15,6 +15,10 @@ A contract bump therefore does not imply a product release, and vice versa.
 
 ## [0.3.0] — 2026-10-16
 
+### Added
+
+- **In-app updates.** Settings gains an **Updates** tab: the running version, Check for updates, release notes, a download progress bar, Download & install, and Restart to apply. Update bundles are signed with a minisign key and verified by the backend **before** they are installed, over HTTPS; nothing is downloaded until you ask. Installing is refused while a scan or cleanup is running, and it never restarts the app on its own. An optional "check at startup" toggle is **off by default** — with it off, DevClean makes no outbound request until you press Check. Contract v0.12.0; decision record: [docs/decisions/in-app-updates.md](docs/decisions/in-app-updates.md).
+
 ### Changed
 
 - **Project trees are scanned once (Wave C).** `node_modules`, Rust `target/` and the Python caches used to walk every scan root apiece and then re-walk each artifact for its size. They now contribute rules to one shared traversal that matches and sizes in the same pass, so a scan of a large dev tree does a single walk instead of three plus per-match re-walks (isolated benchmark: **2.1×** the old three walks, **1.6×** the old three walks plus re-measurement). The reported resources and their sizes are unchanged — the pre-refactor output is pinned by an equivalence suite. The only visible difference is event timing: those three providers now emit `scan_provider_started` together and `scan_progress` together, instead of each firing as its own walk finished. Contract v0.11.0; decision record: [docs/decisions/single-pass-walk.md](docs/decisions/single-pass-walk.md).

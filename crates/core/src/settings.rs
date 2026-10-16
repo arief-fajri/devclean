@@ -131,6 +131,14 @@ pub struct Settings {
     /// and refuse to delete until the user opts in explicitly (I11).
     #[serde(default)]
     pub ai_cleanup_enabled: bool,
+    /// v0.12.0: check GitHub Releases for a newer version at startup.
+    ///
+    /// Defaults to FALSE. DevClean makes no routine outbound request unless
+    /// the user asks it to; the check is an HTTPS call to the release channel,
+    /// so it is opt-in. `#[serde(default)]` keeps older settings.json files
+    /// readable — they get "off", never a surprise request.
+    #[serde(default)]
+    pub check_updates_automatically: bool,
 }
 
 impl Default for Settings {
@@ -149,6 +157,7 @@ impl Default for Settings {
             sqlite_backup: false,
             delete_mode: DeleteMode::default(),
             ai_cleanup_enabled: false,
+            check_updates_automatically: false,
         }
     }
 }
@@ -254,6 +263,24 @@ mod tests {
         let loaded = Settings::load_from(&path);
         assert_eq!(loaded.theme, ThemeMode::System);
         assert!(loaded.require_confirmation);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// v0.12.0: a settings file written before the updater existed must load
+    /// with the update check OFF — never a surprise outbound request.
+    #[test]
+    fn pre_v012_settings_file_does_not_check_for_updates() {
+        let dir = std::env::temp_dir().join(format!("devclean-set-pre12-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("settings.json");
+        std::fs::write(
+            &path,
+            r#"{"scan_roots":[],"excluded_paths":[],"require_confirmation":true,"show_preview":true,"allow_privileged_operations":false,"scan_automatically":false,"theme":"system"}"#,
+        )
+        .unwrap();
+        let loaded = Settings::load_from(&path);
+        assert!(!loaded.check_updates_automatically);
         let _ = std::fs::remove_dir_all(&dir);
     }
 

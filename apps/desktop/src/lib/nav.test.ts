@@ -70,11 +70,12 @@ describe("isRouteId", () => {
 });
 
 describe("settings tabs", () => {
-  it("keeps the four tabs that replaced the dialog's tab strip", () => {
+  it("keeps the tabs that replaced the dialog's tab strip", () => {
     expect(SETTINGS_TABS.map((t) => t.id)).toEqual([
       "scan",
       "cleanup",
       "appearance",
+      "updates",
       "advanced",
     ]);
   });

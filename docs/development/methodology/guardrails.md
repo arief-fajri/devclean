@@ -250,6 +250,38 @@ git -c user.name=test -c user.email=test@example.invalid commit -m "..."
 git -c core.excludesFile=/dev/null -c core.fileMode=false check-ignore <path>
 ```
 
+## 8. Updates (G-UPD)
+
+```text
+G-UPD-01  Update payloads are signature-verified before install, over HTTPS.
+            The minisign public key is committed; the private key is a repo
+            secret; `dangerousInsecureTransportProtocol` is never set, so a
+            plaintext endpoint cannot be used.
+            Enforcement: config — `plugins.updater.pubkey` + an HTTPS endpoint
+            in tauri.conf.json, no insecure-transport flag ✅ ·
+            code — verification lives in tauri-plugin-updater and cannot be
+            disabled ✅ ·
+            test — update.test.ts keeps the frontend off the plugin API ✅
+G-UPD-02  The update check and download are bounded, and an opt-in startup
+            check never blocks the window.
+            Enforcement: code — `UPDATE_CHECK_TIMEOUT` (15s) via
+            `bounded_update`, `UPDATE_DOWNLOAD_TIMEOUT` (300s) around the
+            download; the startup check is spawned, never awaited ✅ ·
+            test — an_update_check_that_overruns_is_bounded_and_says_so ✅
+G-UPD-03  Installing an update is an explicit user action, is refused while a
+            scan or cleanup is running, and never restarts the app on its own.
+            Enforcement: code — `install_update` refuses while `op_running`
+            (an RAII `BusyGuard` set by `run_scan`/`cleanup`); install and
+            `restart_app` are separate commands ✅ ·
+            test — busy_guard_clears_the_flag_on_drop,
+            busy_guard_clears_the_flag_when_unwound (Rust) ·
+            update.test.ts — install does not restart (frontend) ✅
+G-UPD-04  A failed check or install is reported, never a silent no-op.
+            Enforcement: code — every failure becomes `UpdatePhase::Error`
+            carrying the reason ✅ ·
+            test — a_failed_update_check_reports_its_reason ✅
+```
+
 ### Why these guardrails exist
 
 Every entry above names a mechanism a test can fail against. That is the whole point of the file, and it was learned the hard way: several controls shipped with prose that named an enforcement they did not have.
