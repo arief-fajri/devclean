@@ -6,6 +6,7 @@
 use devclean_core::{Resource, ResourceImpact, SafetyLevel};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 
 /// How a resource must be removed. Providers declare *what* removal means;
 /// the cleanup engine + safety validator decide *whether* it may run
@@ -64,17 +65,8 @@ pub trait Provider: Send + Sync {
     fn name(&self) -> &'static str;
     fn default_safety(&self) -> SafetyLevel;
 
-    /// Find resources under `roots`. Returned [`Resource`]s carry `id == ""`;
-    /// the [`crate::ProviderRegistry`] assigns opaque ids after scanning so
-    /// providers never invent the security-sensitive identifier.
-    ///
-    /// `cancel` is checked cooperatively (at least once per directory
-    /// entry); when set, return whatever has been found so far so the scan
-    /// settles in <1s (G-SCAN-02).
-    fn scan(&self, roots: &[PathBuf], cancel: &AtomicBool) -> Vec<Resource>;
-
-    /// How `path` (previously returned by [`Provider::scan`]) must be
-    /// removed. Called only after the safety validator approves the path.
+    /// How `path` (previously returned by a scan) must be removed. Called
+    /// only after the safety validator approves the path.
     fn cleanup_action(&self, path: &Path) -> CleanupAction;
 
     /// Current reclaimable size of a resource, re-read NOW.
@@ -139,6 +131,57 @@ pub trait Provider: Send + Sync {
     /// provider ids in the scanner (P1).
     fn project_root(&self, _artifact: &Path) -> Option<PathBuf> {
         None
+    }
+}
+
+/// Providers that own their traversal: Docker, the Go and npm caches, the
+/// fixed `$HOME` directories, the AI data providers. They scan
+/// independently of each other, one `spawn_blocking` task apiece.
+///
+/// The project-tree providers (`node_modules`, `rust_target`,
+/// `python_cache`) do NOT implement this — they contribute rules to the
+/// shared walk instead (see [`crate::TreeRule`]), so one traversal of a
+/// dev tree serves all of them.
+pub trait OwnScanner: Provider {
+    /// Find resources under `roots`. Returned [`Resource`]s carry
+    /// `id == ""`; the [`crate::ProviderRegistry`] assigns opaque ids after
+    /// scanning so providers never invent the security-sensitive
+    /// identifier.
+    ///
+    /// `cancel` is checked cooperatively (at least once per directory
+    /// entry); when set, return whatever has been found so far so the scan
+    /// settles in <1s (G-SCAN-02).
+    fn scan(&self, roots: &[PathBuf], cancel: &AtomicBool) -> Vec<Resource>;
+}
+
+/// One provider, in whichever way it scans. The registry hands these out
+/// (one entry per provider, in scan order) so the scanner can fan out
+/// without caring which shape a given provider has, and every other
+/// consumer can still reach the plain [`Provider`] view for identity,
+/// cleanup and policy.
+#[derive(Clone)]
+pub enum Scannable {
+    Own(Arc<dyn OwnScanner>),
+    // The `Tree` variant arrives with the shared walk (Wave C, phase 2);
+    // keeping the enum single-variant here lets the trait split land as a
+    // pure mechanical change.
+}
+
+impl Scannable {
+    /// The identity/cleanup/policy view, for policy stamping, the git pass
+    /// and everything that never scans.
+    pub fn provider(&self) -> &dyn Provider {
+        match self {
+            Scannable::Own(p) => p.as_ref(),
+        }
+    }
+
+    /// An owned handle to the same view (trait upcast), for the cleanup
+    /// engine's `Arc<dyn Provider>` maps.
+    pub fn provider_arc(&self) -> Arc<dyn Provider> {
+        match self {
+            Scannable::Own(p) => p.clone() as Arc<dyn Provider>,
+        }
     }
 }
 

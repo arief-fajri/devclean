@@ -15,7 +15,7 @@
 use devclean_providers::{
     CargoRegistryProvider, ClaudeProvider, DockerProvider, DockerPrunedProvider,
     GlobalCacheProvider, GoProvider, GradleCacheProvider, NodeModulesProvider, NpmCacheProvider,
-    OpencodeDbProvider, OpencodeFsProvider, Provider, PythonCacheProvider, RustTargetProvider,
+    OpencodeDbProvider, OpencodeFsProvider, OwnScanner, PythonCacheProvider, RustTargetProvider,
     XcodeDataProvider,
 };
 use std::path::PathBuf;
@@ -23,7 +23,7 @@ use std::sync::atomic::AtomicBool;
 
 /// A scan that must never touch the filesystem: every provider checks the
 /// flag before its first probe or measurement.
-fn cancelled_scan(p: &dyn Provider) -> Vec<devclean_core::Resource> {
+fn cancelled_scan(p: &dyn OwnScanner) -> Vec<devclean_core::Resource> {
     let cancel = AtomicBool::new(true);
     let roots: Vec<PathBuf> = Vec::new();
     p.scan(&roots, &cancel)

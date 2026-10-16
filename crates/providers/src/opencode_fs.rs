@@ -12,7 +12,7 @@
 
 use super::ai_guard;
 use super::provider::{
-    dir_size_detail_checked, home_dir, impact, project_detail, CleanupAction, Provider,
+    dir_size_detail_checked, home_dir, impact, project_detail, CleanupAction, OwnScanner, Provider,
 };
 use devclean_core::{Resource, SafetyLevel};
 use std::path::{Path, PathBuf};
@@ -51,6 +51,43 @@ impl Provider for OpencodeFsProvider {
         SafetyLevel::Caution
     }
 
+    fn cleanup_action(&self, path: &Path) -> CleanupAction {
+        let (pattern, empty) = TARGETS
+            .iter()
+            .find(|(_, _, sub, _, _)| path.ends_with(sub))
+            .map(|(_, _, _, p, e)| (*p, *e))
+            .unwrap_or(("*", false));
+        CleanupAction::PruneOlderThan {
+            dir: path.to_path_buf(),
+            // 0 = the user's retention policy decides; the engine applies
+            // `retention_days` before this action can ever run.
+            min_age_days: 0,
+            pattern,
+            prune_empty_dirs: empty,
+            skip_names: ai_guard::NEVER_PRUNED,
+        }
+    }
+
+    fn measure(&self, path: &Path) -> Option<u64> {
+        super::provider::measure_dir(path)
+    }
+
+    /// opencode keeps a single `log/` dir rather than per-item history, so
+    /// a whole-directory age is the only signal available. It still counts:
+    /// a log dir untouched for months is safe to clear.
+    fn is_user_data(&self) -> bool {
+        true
+    }
+
+    fn retention_days(&self) -> Option<u32> {
+        Some(30)
+    }
+
+    fn extra_allowed_roots(&self) -> Vec<PathBuf> {
+        opencode_dir().into_iter().collect()
+    }
+}
+impl OwnScanner for OpencodeFsProvider {
     fn scan(&self, _roots: &[PathBuf], cancel: &AtomicBool) -> Vec<Resource> {
         let Some(base) = opencode_dir() else {
             return Vec::new();
@@ -106,42 +143,6 @@ impl Provider for OpencodeFsProvider {
                 })
             })
             .collect()
-    }
-
-    fn cleanup_action(&self, path: &Path) -> CleanupAction {
-        let (pattern, empty) = TARGETS
-            .iter()
-            .find(|(_, _, sub, _, _)| path.ends_with(sub))
-            .map(|(_, _, _, p, e)| (*p, *e))
-            .unwrap_or(("*", false));
-        CleanupAction::PruneOlderThan {
-            dir: path.to_path_buf(),
-            // 0 = the user's retention policy decides; the engine applies
-            // `retention_days` before this action can ever run.
-            min_age_days: 0,
-            pattern,
-            prune_empty_dirs: empty,
-            skip_names: ai_guard::NEVER_PRUNED,
-        }
-    }
-
-    fn measure(&self, path: &Path) -> Option<u64> {
-        super::provider::measure_dir(path)
-    }
-
-    /// opencode keeps a single `log/` dir rather than per-item history, so
-    /// a whole-directory age is the only signal available. It still counts:
-    /// a log dir untouched for months is safe to clear.
-    fn is_user_data(&self) -> bool {
-        true
-    }
-
-    fn retention_days(&self) -> Option<u32> {
-        Some(30)
-    }
-
-    fn extra_allowed_roots(&self) -> Vec<PathBuf> {
-        opencode_dir().into_iter().collect()
     }
 }
 

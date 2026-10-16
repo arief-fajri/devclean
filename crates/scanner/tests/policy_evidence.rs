@@ -19,7 +19,7 @@
 //! deterministically, on any machine. See G-CI-03.
 
 use devclean_core::{BlockReason, PolicyInputs, Resource, SafetyLevel};
-use devclean_providers::{CleanupAction, Provider};
+use devclean_providers::{CleanupAction, OwnScanner, Provider, Scannable};
 use devclean_scanner::manager::ScanManager;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::AtomicBool;
@@ -61,9 +61,7 @@ impl Provider for UserDataStub {
     fn default_safety(&self) -> SafetyLevel {
         SafetyLevel::Caution
     }
-    fn scan(&self, _roots: &[PathBuf], _cancel: &AtomicBool) -> Vec<Resource> {
-        vec![resource("ud:0001", self.id(), Some(999))]
-    }
+
     fn cleanup_action(&self, path: &Path) -> CleanupAction {
         CleanupAction::RemoveDir(path.to_path_buf())
     }
@@ -92,9 +90,7 @@ impl Provider for AgedStub {
     fn default_safety(&self) -> SafetyLevel {
         SafetyLevel::Safe
     }
-    fn scan(&self, _roots: &[PathBuf], _cancel: &AtomicBool) -> Vec<Resource> {
-        vec![resource("ag:0001", self.id(), self.age_days)]
-    }
+
     fn cleanup_action(&self, path: &Path) -> CleanupAction {
         CleanupAction::RemoveDir(path.to_path_buf())
     }
@@ -103,8 +99,8 @@ impl Provider for AgedStub {
     }
 }
 
-fn manager(provider: Arc<dyn Provider>) -> ScanManager {
-    ScanManager::with_config(vec![provider], Duration::from_secs(10))
+fn manager(provider: Arc<dyn OwnScanner>) -> ScanManager {
+    ScanManager::with_config(vec![Scannable::Own(provider)], Duration::from_secs(10))
 }
 
 /// The gate applies because the provider says so, not because a directory
@@ -228,4 +224,16 @@ async fn the_ai_gate_outranks_the_retention_gate() {
         Some(BlockReason::AiReadOnly),
         "the setting that actually matters must be the one reported"
     );
+}
+
+impl OwnScanner for AgedStub {
+    fn scan(&self, _roots: &[PathBuf], _cancel: &AtomicBool) -> Vec<Resource> {
+        vec![resource("ag:0001", self.id(), self.age_days)]
+    }
+}
+
+impl OwnScanner for UserDataStub {
+    fn scan(&self, _roots: &[PathBuf], _cancel: &AtomicBool) -> Vec<Resource> {
+        vec![resource("ud:0001", self.id(), Some(999))]
+    }
 }

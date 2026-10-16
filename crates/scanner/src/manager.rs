@@ -4,7 +4,7 @@ use devclean_core::{
     stamp_blocked_reason, PolicyInputs, ProviderSummary, Resource, ScanSummary,
     PROVIDER_SCAN_TIMEOUT,
 };
-use devclean_providers::{all_providers, Provider, ProviderRegistry};
+use devclean_providers::{all_providers, Provider, ProviderRegistry, Scannable};
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::{
@@ -42,7 +42,7 @@ struct ScanRequest<'a> {
 pub const DEFAULT_SCAN_CONCURRENCY: usize = 4;
 
 pub struct ScanManager {
-    providers: Vec<Arc<dyn Provider>>,
+    providers: Vec<Scannable>,
     semaphore: Arc<Semaphore>,
     cancelled: Arc<AtomicBool>,
     /// Per-provider wall clock limit (G-REL-01). Exceeded → that provider
@@ -57,14 +57,14 @@ impl Default for ScanManager {
 }
 
 impl ScanManager {
-    pub fn with_config(providers: Vec<Arc<dyn Provider>>, timeout: Duration) -> Self {
+    pub fn with_config(providers: Vec<Scannable>, timeout: Duration) -> Self {
         Self::with_concurrency(providers, timeout, DEFAULT_SCAN_CONCURRENCY)
     }
 
     /// Same, with the fan-out width chosen by the caller. Used by the
     /// concurrency benchmark; the app itself always takes the default.
     pub fn with_concurrency(
-        providers: Vec<Arc<dyn Provider>>,
+        providers: Vec<Scannable>,
         timeout: Duration,
         max_concurrent: usize,
     ) -> Self {
@@ -160,11 +160,11 @@ impl ScanManager {
         let on_started: Option<Arc<StartedFn>> = on_started.map(Arc::new);
         let mut handles = Vec::new();
 
-        let active: Vec<&Arc<dyn Provider>> = self
+        let active: Vec<&Scannable> = self
             .providers
             .iter()
-            .filter(|p| !disabled.contains(&p.id().to_string()))
-            .filter(|p| only.is_none_or(|id| p.id() == id))
+            .filter(|p| !disabled.contains(&p.provider().id().to_string()))
+            .filter(|p| only.is_none_or(|id| p.provider().id() == id))
             .collect();
         let total = active.len();
         // Monotonic completion counter for THIS run. `scan_progress.done`
@@ -175,7 +175,7 @@ impl ScanManager {
         // struct field) so two concurrent runs never share it.
         let completed = Arc::new(AtomicUsize::new(0));
         for provider in &active {
-            let p = Arc::clone(provider);
+            let p = (*provider).clone();
             let roots = roots.clone();
             let sem = Arc::clone(&self.semaphore);
             let cancelled = Arc::clone(&self.cancelled);
@@ -185,8 +185,9 @@ impl ScanManager {
             let completed = Arc::clone(&completed);
             handles.push(tokio::spawn(async move {
                 let _permit = sem.acquire_owned().await.unwrap();
+                let pid = p.provider().id().to_string();
                 if let Some(started) = &started {
-                    started(p.id());
+                    started(&pid);
                 }
                 let report = |cb: &Option<Arc<ProgressFn>>, pid: &str| {
                     // Fires exactly once per provider, on every exit path
@@ -198,12 +199,13 @@ impl ScanManager {
                     }
                 };
                 if cancelled.load(Ordering::SeqCst) {
-                    report(&cb, p.id());
-                    return (p.id().to_string(), Vec::new());
+                    report(&cb, &pid);
+                    return (pid, Vec::new());
                 }
                 let roots = roots.clone();
-                let pid = p.id().to_string();
-                let scan = tokio::task::spawn_blocking(move || p.scan(&roots, &cancelled));
+                let scan = tokio::task::spawn_blocking(move || match &p {
+                    Scannable::Own(o) => o.scan(&roots, &cancelled),
+                });
                 let found = match tokio::time::timeout(timeout, scan).await {
                     Ok(Ok(found)) => found,
                     Ok(Err(e)) => {
@@ -235,8 +237,10 @@ impl ScanManager {
         let git_providers = self.providers.clone();
         let git_cancel = Arc::clone(&self.cancelled);
         let (mut resources, protected) = tokio::task::spawn_blocking(move || {
-            let by_id: HashMap<&str, &Arc<dyn Provider>> =
-                git_providers.iter().map(|p| (p.id(), p)).collect();
+            let by_id: HashMap<&str, &dyn Provider> = git_providers
+                .iter()
+                .map(|s| (s.provider().id(), s.provider()))
+                .collect();
             let protected =
                 crate::git_classify::classify_repositories(&mut resources, &by_id, &git_cancel);
             (resources, protected)
@@ -248,8 +252,11 @@ impl ScanManager {
         // explain a resource before the user tries to select it. The engine
         // re-derives the same verdict from the same function, so the
         // explanation and the enforcement cannot drift apart (I11).
-        let by_id: HashMap<&str, &Arc<dyn Provider>> =
-            self.providers.iter().map(|p| (p.id(), p)).collect();
+        let by_id: HashMap<&str, &dyn Provider> = self
+            .providers
+            .iter()
+            .map(|s| (s.provider().id(), s.provider()))
+            .collect();
         for r in &mut resources {
             let provider = by_id.get(r.provider.as_str());
             stamp_blocked_reason(
@@ -312,8 +319,8 @@ fn aggregate(resources: Vec<Resource>) -> ScanSummary {
         .map(|(provider, rs)| {
             let name = providers
                 .iter()
-                .find(|p| p.id() == provider)
-                .map(|p| p.name().to_string())
+                .find(|s| s.provider().id() == provider)
+                .map(|s| s.provider().name().to_string())
                 .unwrap_or_else(|| provider.clone());
             ProviderSummary {
                 provider,
@@ -343,6 +350,7 @@ fn aggregate(resources: Vec<Resource>) -> ScanSummary {
 mod tests {
     use super::*;
     use devclean_core::SafetyLevel;
+    use devclean_providers::OwnScanner;
     use std::path::Path;
 
     /// Stub provider that works in small cooperative slices so cancellation
@@ -363,6 +371,15 @@ mod tests {
         fn default_safety(&self) -> SafetyLevel {
             SafetyLevel::Safe
         }
+
+        fn measure(&self, _path: &Path) -> Option<u64> {
+            None
+        }
+        fn cleanup_action(&self, path: &Path) -> devclean_providers::CleanupAction {
+            devclean_providers::CleanupAction::RemoveDir(path.to_path_buf())
+        }
+    }
+    impl OwnScanner for SlowProvider {
         fn scan(&self, _roots: &[PathBuf], cancel: &AtomicBool) -> Vec<Resource> {
             let mut out = Vec::new();
             for i in 0..self.slices {
@@ -390,12 +407,6 @@ mod tests {
             }
             out
         }
-        fn measure(&self, _path: &Path) -> Option<u64> {
-            None
-        }
-        fn cleanup_action(&self, path: &Path) -> devclean_providers::CleanupAction {
-            devclean_providers::CleanupAction::RemoveDir(path.to_path_buf())
-        }
     }
 
     /// Nothing blocked: tests exercise discovery, not policy.
@@ -411,8 +422,8 @@ mod tests {
         }
     }
 
-    fn manager_with(provider: Arc<dyn Provider>, timeout: Duration) -> ScanManager {
-        ScanManager::with_config(vec![provider], timeout)
+    fn manager_with(provider: Arc<dyn OwnScanner>, timeout: Duration) -> ScanManager {
+        ScanManager::with_config(vec![Scannable::Own(provider)], timeout)
     }
 
     #[tokio::test]
@@ -543,7 +554,10 @@ mod tests {
             tag: "slow",
             slices: 100,
         });
-        let mgr = ScanManager::with_config(vec![fast, slow], Duration::from_secs(60));
+        let mgr = ScanManager::with_config(
+            vec![Scannable::Own(fast), Scannable::Own(slow)],
+            Duration::from_secs(60),
+        );
         // Disabling the expensive stub must both drop its rows and make
         // the run finish immediately (it never occupies a semaphore slot).
         let t0 = std::time::Instant::now();
@@ -609,6 +623,15 @@ mod tests {
         fn default_safety(&self) -> SafetyLevel {
             SafetyLevel::Safe
         }
+
+        fn measure(&self, _path: &Path) -> Option<u64> {
+            None
+        }
+        fn cleanup_action(&self, path: &Path) -> devclean_providers::CleanupAction {
+            devclean_providers::CleanupAction::RemoveDir(path.to_path_buf())
+        }
+    }
+    impl OwnScanner for ReverseSpeedProvider {
         fn scan(&self, _roots: &[PathBuf], _cancel: &AtomicBool) -> Vec<Resource> {
             std::thread::sleep(Duration::from_millis(self.delay_ms));
             (0..self.slices)
@@ -631,44 +654,38 @@ mod tests {
                 })
                 .collect()
         }
-        fn measure(&self, _path: &Path) -> Option<u64> {
-            None
-        }
-        fn cleanup_action(&self, path: &Path) -> devclean_providers::CleanupAction {
-            devclean_providers::CleanupAction::RemoveDir(path.to_path_buf())
-        }
     }
 
     #[tokio::test]
     async fn progress_done_counts_completions_and_is_monotonic() {
         // Listed slowest-first; the last one finishes first. The old
         // `idx + 1` counter would have emitted done=5 before done=1.
-        let providers: Vec<Arc<dyn Provider>> = vec![
-            Arc::new(ReverseSpeedProvider {
+        let providers: Vec<Scannable> = vec![
+            Scannable::Own(Arc::new(ReverseSpeedProvider {
                 tag: "p0",
                 slices: 1,
                 delay_ms: 120,
-            }),
-            Arc::new(ReverseSpeedProvider {
+            })),
+            Scannable::Own(Arc::new(ReverseSpeedProvider {
                 tag: "p1",
                 slices: 1,
                 delay_ms: 90,
-            }),
-            Arc::new(ReverseSpeedProvider {
+            })),
+            Scannable::Own(Arc::new(ReverseSpeedProvider {
                 tag: "p2",
                 slices: 1,
                 delay_ms: 60,
-            }),
-            Arc::new(ReverseSpeedProvider {
+            })),
+            Scannable::Own(Arc::new(ReverseSpeedProvider {
                 tag: "p3",
                 slices: 1,
                 delay_ms: 30,
-            }),
-            Arc::new(ReverseSpeedProvider {
+            })),
+            Scannable::Own(Arc::new(ReverseSpeedProvider {
                 tag: "p4",
                 slices: 1,
                 delay_ms: 5,
-            }),
+            })),
         ];
         let mgr = ScanManager::with_config(providers, Duration::from_secs(60));
 
@@ -706,19 +723,19 @@ mod tests {
     /// for a provider that was disabled.
     #[tokio::test]
     async fn provider_started_fires_once_per_enabled_provider() {
-        let providers: Vec<Arc<dyn Provider>> = vec![
-            Arc::new(SlowProvider {
+        let providers: Vec<Scannable> = vec![
+            Scannable::Own(Arc::new(SlowProvider {
                 tag: "s0",
                 slices: 1,
-            }),
-            Arc::new(SlowProvider {
+            })),
+            Scannable::Own(Arc::new(SlowProvider {
                 tag: "s1",
                 slices: 1,
-            }),
-            Arc::new(SlowProvider {
+            })),
+            Scannable::Own(Arc::new(SlowProvider {
                 tag: "s2",
                 slices: 1,
-            }),
+            })),
         ];
         let mgr = ScanManager::with_config(providers, Duration::from_secs(60));
 
@@ -749,12 +766,12 @@ mod tests {
     async fn cancelled_providers_still_emit_progress() {
         // A cancel before the fan-out runs: every provider takes the early
         // exit, and each must still tick the bar or it stalls forever.
-        let providers: Vec<Arc<dyn Provider>> = (0..3)
+        let providers: Vec<Scannable> = (0..3)
             .map(|i| {
-                Arc::new(SlowProvider {
+                Scannable::Own(Arc::new(SlowProvider {
                     tag: if i == 0 { "s0" } else { "s1" },
                     slices: 50,
-                }) as Arc<dyn Provider>
+                }) as Arc<dyn OwnScanner>)
             })
             .collect();
         let mgr = Arc::new(ScanManager::with_config(providers, Duration::from_secs(60)));
@@ -796,15 +813,15 @@ mod tests {
         let providers = all_providers();
         let mut seen: HashMap<&str, &str> = HashMap::new();
         for p in &providers {
-            let prefix = short_prefix(p.id());
+            let id = p.provider().id();
+            let prefix = short_prefix(id);
             assert_ne!(
-                prefix,
-                "xx",
+                prefix, "xx",
                 "provider {} has no prefix in short_prefix",
-                p.id()
+                id
             );
-            if let Some(previous) = seen.insert(prefix, p.id()) {
-                panic!("prefix {prefix} is shared by {previous} and {}", p.id());
+            if let Some(previous) = seen.insert(prefix, id) {
+                panic!("prefix {prefix} is shared by {previous} and {}", id);
             }
         }
         assert_eq!(seen.len(), providers.len());
@@ -823,9 +840,11 @@ mod tests {
             "claude",
             "opencode_db",
         ];
-        let providers: Vec<Arc<dyn Provider>> = ids
+        let providers: Vec<Scannable> = ids
             .iter()
-            .map(|id| Arc::new(SlowProvider { tag: id, slices: 2 }) as Arc<dyn Provider>)
+            .map(|id| {
+                Scannable::Own(Arc::new(SlowProvider { tag: id, slices: 2 }) as Arc<dyn OwnScanner>)
+            })
             .collect();
         let mgr = ScanManager::with_config(providers, Duration::from_secs(60));
         let summary = mgr

@@ -5,7 +5,7 @@
 //! only, `Safe`). Images/containers/volumes are reported as
 //! `Caution`/`Dangerous` and are NOT cleaned by default.
 
-use super::provider::{impact, CleanupAction, Provider};
+use super::provider::{impact, CleanupAction, OwnScanner, Provider};
 use devclean_core::{Resource, SafetyLevel};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -136,6 +136,29 @@ impl Provider for DockerProvider {
         SafetyLevel::Caution
     }
 
+    fn cleanup_action(&self, _path: &Path) -> CleanupAction {
+        CleanupAction::RunCommand {
+            program: "docker",
+            args: &["builder", "prune", "-af"],
+        }
+    }
+
+    /// Docker build cache has no directory of ours — the sentinel path is
+    /// never a real dir — so the only honest measurement is re-querying
+    /// `docker system df`. `None` (daemon down, output unparseable) means
+    /// "unmeasurable", and the engine reports 0 freed with a reason rather
+    /// than assuming the requested figure was reclaimed.
+    fn measure(&self, _path: &Path) -> Option<u64> {
+        docker_available().then(build_cache_bytes).flatten()
+    }
+
+    /// Docker build cache has no per-item age — a prune either reclaims the
+    /// whole thing or nothing — so retention never holds it back (I9).
+    fn required_docker_scope(&self) -> Option<devclean_core::DockerPruneScope> {
+        Some(devclean_core::DockerPruneScope::BuildCache)
+    }
+}
+impl OwnScanner for DockerProvider {
     fn scan(&self, _roots: &[PathBuf], cancel: &AtomicBool) -> Vec<Resource> {
         if cancel.load(Ordering::Relaxed) {
             return Vec::new();
@@ -179,28 +202,6 @@ impl Provider for DockerProvider {
                 Some("docker builder prune -af"),
             ),
         }]
-    }
-
-    fn cleanup_action(&self, _path: &Path) -> CleanupAction {
-        CleanupAction::RunCommand {
-            program: "docker",
-            args: &["builder", "prune", "-af"],
-        }
-    }
-
-    /// Docker build cache has no directory of ours — the sentinel path is
-    /// never a real dir — so the only honest measurement is re-querying
-    /// `docker system df`. `None` (daemon down, output unparseable) means
-    /// "unmeasurable", and the engine reports 0 freed with a reason rather
-    /// than assuming the requested figure was reclaimed.
-    fn measure(&self, _path: &Path) -> Option<u64> {
-        docker_available().then(build_cache_bytes).flatten()
-    }
-
-    /// Docker build cache has no per-item age — a prune either reclaims the
-    /// whole thing or nothing — so retention never holds it back (I9).
-    fn required_docker_scope(&self) -> Option<devclean_core::DockerPruneScope> {
-        Some(devclean_core::DockerPruneScope::BuildCache)
     }
 }
 

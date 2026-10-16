@@ -20,7 +20,7 @@
 //! under `~/Documents` or `~/.ssh` can be reached from here.
 
 use super::provider::{
-    dir_size_detail_checked, home_dir, impact, measure_dir, CleanupAction, Provider,
+    dir_size_detail_checked, home_dir, impact, measure_dir, CleanupAction, OwnScanner, Provider,
 };
 use devclean_core::{Resource, SafetyLevel};
 use std::path::{Path, PathBuf};
@@ -113,6 +113,32 @@ impl Provider for GlobalCacheProvider {
         SafetyLevel::Caution
     }
 
+    fn cleanup_action(&self, path: &Path) -> CleanupAction {
+        CleanupAction::RemoveDir(path.to_path_buf())
+    }
+
+    fn measure(&self, path: &Path) -> Option<u64> {
+        measure_dir(path)
+    }
+
+    /// No per-item age: these are single directories, and holding them
+    /// back by age would only fill the disk (I9).
+    fn extra_allowed_roots(&self) -> Vec<PathBuf> {
+        let Some(home) = home_dir() else {
+            return Vec::new();
+        };
+        // Declare exactly the directories we own — NOT `~/.cache` or
+        // `~/Library`, which hold far more than we are allowed to touch.
+        TARGETS
+            .iter()
+            .filter_map(|t| {
+                let p = home.join(t.rel);
+                p.is_dir().then_some(p)
+            })
+            .collect()
+    }
+}
+impl OwnScanner for GlobalCacheProvider {
     fn scan(&self, _roots: &[PathBuf], cancel: &AtomicBool) -> Vec<Resource> {
         TARGETS
             .iter()
@@ -149,31 +175,6 @@ impl Provider for GlobalCacheProvider {
                         None,
                     ),
                 })
-            })
-            .collect()
-    }
-
-    fn cleanup_action(&self, path: &Path) -> CleanupAction {
-        CleanupAction::RemoveDir(path.to_path_buf())
-    }
-
-    fn measure(&self, path: &Path) -> Option<u64> {
-        measure_dir(path)
-    }
-
-    /// No per-item age: these are single directories, and holding them
-    /// back by age would only fill the disk (I9).
-    fn extra_allowed_roots(&self) -> Vec<PathBuf> {
-        let Some(home) = home_dir() else {
-            return Vec::new();
-        };
-        // Declare exactly the directories we own — NOT `~/.cache` or
-        // `~/Library`, which hold far more than we are allowed to touch.
-        TARGETS
-            .iter()
-            .filter_map(|t| {
-                let p = home.join(t.rel);
-                p.is_dir().then_some(p)
             })
             .collect()
     }

@@ -17,7 +17,7 @@
 //! directory.
 
 use super::ai_guard;
-use super::provider::{home_dir, impact, CleanupAction, Provider};
+use super::provider::{home_dir, impact, CleanupAction, OwnScanner, Provider};
 use devclean_core::{Resource, SafetyLevel};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::AtomicBool;
@@ -186,6 +186,39 @@ impl Provider for OpencodeDbProvider {
         SafetyLevel::Dangerous
     }
 
+    fn cleanup_action(&self, path: &Path) -> CleanupAction {
+        CleanupAction::RunSql {
+            db: path.to_path_buf(),
+            statements: &[DELETE_OLD_SESSIONS],
+            bound_cutoff: now_millis() - SESSION_RETENTION_DAYS * 86_400 * 1000,
+            checkpoint: CHECKPOINT,
+            vacuum: true,
+            require_idle: Some("opencode"),
+        }
+    }
+
+    fn measure(&self, path: &Path) -> Option<u64> {
+        // The file size is the reclaimable figure. Reading it while the
+        // database is closed is safe; the process gate, not this, is what
+        // stops us writing to a live file.
+        std::fs::metadata(path).ok().map(|m| m.len())
+    }
+
+    fn is_user_data(&self) -> bool {
+        true
+    }
+
+    fn retention_days(&self) -> Option<u32> {
+        Some(SESSION_RETENTION_DAYS as u32)
+    }
+
+    fn extra_allowed_roots(&self) -> Vec<PathBuf> {
+        home_dir()
+            .map(|h| vec![h.join(".local/share/opencode")])
+            .unwrap_or_default()
+    }
+}
+impl OwnScanner for OpencodeDbProvider {
     fn scan(&self, _roots: &[PathBuf], cancel: &AtomicBool) -> Vec<Resource> {
         // The survey itself is one indexed COUNT — milliseconds, not a walk
         // — but the entry check keeps the cancel contract uniform: a
@@ -238,38 +271,6 @@ impl Provider for OpencodeDbProvider {
                 None,
             ),
         }]
-    }
-
-    fn cleanup_action(&self, path: &Path) -> CleanupAction {
-        CleanupAction::RunSql {
-            db: path.to_path_buf(),
-            statements: &[DELETE_OLD_SESSIONS],
-            bound_cutoff: now_millis() - SESSION_RETENTION_DAYS * 86_400 * 1000,
-            checkpoint: CHECKPOINT,
-            vacuum: true,
-            require_idle: Some("opencode"),
-        }
-    }
-
-    fn measure(&self, path: &Path) -> Option<u64> {
-        // The file size is the reclaimable figure. Reading it while the
-        // database is closed is safe; the process gate, not this, is what
-        // stops us writing to a live file.
-        std::fs::metadata(path).ok().map(|m| m.len())
-    }
-
-    fn is_user_data(&self) -> bool {
-        true
-    }
-
-    fn retention_days(&self) -> Option<u32> {
-        Some(SESSION_RETENTION_DAYS as u32)
-    }
-
-    fn extra_allowed_roots(&self) -> Vec<PathBuf> {
-        home_dir()
-            .map(|h| vec![h.join(".local/share/opencode")])
-            .unwrap_or_default()
     }
 }
 

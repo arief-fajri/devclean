@@ -1,7 +1,9 @@
 //! Go cache provider. Split into build cache + module cache, cleaned via
 //! the official `go` tool — never by deleting cache internals by hand.
 
-use super::provider::{dir_size_detail_checked, impact, measure_dir, CleanupAction, Provider};
+use super::provider::{
+    dir_size_detail_checked, impact, measure_dir, CleanupAction, OwnScanner, Provider,
+};
 use devclean_core::{Resource, SafetyLevel};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -27,6 +29,28 @@ impl Provider for GoProvider {
         SafetyLevel::Safe
     }
 
+    fn measure(&self, path: &Path) -> Option<u64> {
+        measure_dir(path)
+    }
+
+    fn cleanup_action(&self, path: &Path) -> CleanupAction {
+        // Module cache needs `-modcache`; build cache uses `-cache`.
+        // The path was resolved server-side from our own scan, so comparing
+        // it against `go env` output is safe (no user input involved).
+        if go_env("GOMODCACHE").as_deref() == Some(path) {
+            CleanupAction::RunCommand {
+                program: "go",
+                args: &["clean", "-modcache"],
+            }
+        } else {
+            CleanupAction::RunCommand {
+                program: "go",
+                args: &["clean", "-cache"],
+            }
+        }
+    }
+}
+impl OwnScanner for GoProvider {
     fn scan(&self, _roots: &[PathBuf], cancel: &AtomicBool) -> Vec<Resource> {
         let mut out = Vec::new();
         // (label, env key, clean args, consequence, cost) — fixed strings
@@ -78,26 +102,5 @@ impl Provider for GoProvider {
             }
         }
         out
-    }
-
-    fn measure(&self, path: &Path) -> Option<u64> {
-        measure_dir(path)
-    }
-
-    fn cleanup_action(&self, path: &Path) -> CleanupAction {
-        // Module cache needs `-modcache`; build cache uses `-cache`.
-        // The path was resolved server-side from our own scan, so comparing
-        // it against `go env` output is safe (no user input involved).
-        if go_env("GOMODCACHE").as_deref() == Some(path) {
-            CleanupAction::RunCommand {
-                program: "go",
-                args: &["clean", "-modcache"],
-            }
-        } else {
-            CleanupAction::RunCommand {
-                program: "go",
-                args: &["clean", "-cache"],
-            }
-        }
     }
 }

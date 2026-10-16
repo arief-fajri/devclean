@@ -13,7 +13,9 @@
 //! rules per provider.
 
 use devclean_core::Resource;
-use devclean_providers::{NodeModulesProvider, Provider, PythonCacheProvider, RustTargetProvider};
+use devclean_providers::{
+    NodeModulesProvider, OwnScanner, PythonCacheProvider, RustTargetProvider,
+};
 use std::collections::BTreeSet;
 use std::fs;
 use std::path::{Path, PathBuf};

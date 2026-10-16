@@ -6,7 +6,9 @@
 //! test with a message rather than failing for an absent external tool.
 
 use devclean_core::{Activity, BlockReason, PolicyInputs, Resource, SafetyLevel, ScanSummary};
-use devclean_providers::{git_available, repo_root_for, CleanupAction, Provider};
+use devclean_providers::{
+    git_available, repo_root_for, CleanupAction, OwnScanner, Provider, Scannable,
+};
 use devclean_scanner::ScanManager;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
@@ -31,25 +33,7 @@ impl Provider for ProjectStub {
     fn default_safety(&self) -> SafetyLevel {
         SafetyLevel::Safe
     }
-    fn scan(&self, _roots: &[PathBuf], _cancel: &AtomicBool) -> Vec<Resource> {
-        vec![Resource {
-            id: String::new(),
-            provider: self.id().to_string(),
-            name: "proj/cache".to_string(),
-            path: self.artifact.clone(),
-            size_bytes: 1024,
-            reclaimable_bytes: 1024,
-            apparent_bytes: None,
-            safety: SafetyLevel::Safe,
-            detail: None,
-            impact: None,
-            age_days: None,
-            activity: None,
-            last_commit_unix: None,
-            blocked_reason: None,
-            blocked_detail: None,
-        }]
-    }
+
     fn measure(&self, path: &Path) -> Option<u64> {
         devclean_providers::measure_dir(path)
     }
@@ -62,7 +46,10 @@ impl Provider for ProjectStub {
 }
 
 async fn scan(stub: ProjectStub) -> ScanSummary {
-    let mgr = ScanManager::with_config(vec![Arc::new(stub)], Duration::from_secs(10));
+    let mgr = ScanManager::with_config(
+        vec![Scannable::Own(Arc::new(stub))],
+        Duration::from_secs(10),
+    );
     mgr.scan_all(vec![], &[], &[], PolicyInputs::default(), None, None)
         .await
 }
@@ -320,4 +307,26 @@ async fn a_path_outside_any_repo_is_not_classified() {
     assert_eq!(r.last_commit_unix, None);
     assert_eq!(r.blocked_reason, None);
     let _ = std::fs::remove_dir_all(&root);
+}
+
+impl OwnScanner for ProjectStub {
+    fn scan(&self, _roots: &[PathBuf], _cancel: &AtomicBool) -> Vec<Resource> {
+        vec![Resource {
+            id: String::new(),
+            provider: self.id().to_string(),
+            name: "proj/cache".to_string(),
+            path: self.artifact.clone(),
+            size_bytes: 1024,
+            reclaimable_bytes: 1024,
+            apparent_bytes: None,
+            safety: SafetyLevel::Safe,
+            detail: None,
+            impact: None,
+            age_days: None,
+            activity: None,
+            last_commit_unix: None,
+            blocked_reason: None,
+            blocked_detail: None,
+        }]
+    }
 }

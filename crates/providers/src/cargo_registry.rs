@@ -8,7 +8,7 @@
 //! validator still enforces protected paths and the exact dir (I2, I7).
 
 use super::provider::{
-    dir_size_detail_checked, home_dir, impact, measure_dir, CleanupAction, Provider,
+    dir_size_detail_checked, home_dir, impact, measure_dir, CleanupAction, OwnScanner, Provider,
 };
 use devclean_core::{Resource, SafetyLevel};
 use std::path::{Path, PathBuf};
@@ -32,6 +32,19 @@ impl Provider for CargoRegistryProvider {
         SafetyLevel::Caution
     }
 
+    fn measure(&self, path: &Path) -> Option<u64> {
+        measure_dir(path)
+    }
+
+    fn cleanup_action(&self, path: &Path) -> CleanupAction {
+        CleanupAction::RemoveDir(path.to_path_buf())
+    }
+
+    fn extra_allowed_roots(&self) -> Vec<PathBuf> {
+        registry_dir().into_iter().collect()
+    }
+}
+impl OwnScanner for CargoRegistryProvider {
     fn scan(&self, _roots: &[PathBuf], cancel: &AtomicBool) -> Vec<Resource> {
         let Some(dir) = registry_dir() else {
             return Vec::new();
@@ -65,18 +78,6 @@ impl Provider for CargoRegistryProvider {
                 None,
             ),
         }]
-    }
-
-    fn measure(&self, path: &Path) -> Option<u64> {
-        measure_dir(path)
-    }
-
-    fn cleanup_action(&self, path: &Path) -> CleanupAction {
-        CleanupAction::RemoveDir(path.to_path_buf())
-    }
-
-    fn extra_allowed_roots(&self) -> Vec<PathBuf> {
-        registry_dir().into_iter().collect()
     }
 }
 

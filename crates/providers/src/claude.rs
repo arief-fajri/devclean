@@ -11,7 +11,7 @@
 
 use super::ai_guard;
 use super::provider::{
-    dir_size_detail_checked, home_dir, impact, measure_dir, CleanupAction, Provider,
+    dir_size_detail_checked, home_dir, impact, measure_dir, CleanupAction, OwnScanner, Provider,
 };
 use devclean_core::{Resource, SafetyLevel};
 use std::path::{Path, PathBuf};
@@ -49,6 +49,46 @@ impl Provider for ClaudeProvider {
         SafetyLevel::Caution
     }
 
+    fn cleanup_action(&self, path: &Path) -> CleanupAction {
+        if path.ends_with(CACHE_SUBDIR) {
+            // Regenerable: a plain directory wipe is correct and simpler
+            // than an age pass over a cache nobody reads.
+            return CleanupAction::RemoveDir(path.to_path_buf());
+        }
+        let (pattern, empty) = TARGETS
+            .iter()
+            .find(|(_, _, sub, _, _)| path.ends_with(sub))
+            .map(|(_, _, _, p, e)| (*p, *e))
+            .unwrap_or(("*", false));
+        CleanupAction::PruneOlderThan {
+            dir: path.to_path_buf(),
+            min_age_days: 0,
+            pattern,
+            prune_empty_dirs: empty,
+            // I10: `projects/` holds one subdir per conversation whose names
+            // are opaque hashes, so a stray `settings.json` there must still
+            // survive a `*` pattern.
+            skip_names: ai_guard::NEVER_PRUNED,
+        }
+    }
+
+    fn measure(&self, path: &Path) -> Option<u64> {
+        measure_dir(path)
+    }
+
+    fn is_user_data(&self) -> bool {
+        true
+    }
+
+    fn retention_days(&self) -> Option<u32> {
+        Some(30)
+    }
+
+    fn extra_allowed_roots(&self) -> Vec<PathBuf> {
+        claude_dir().into_iter().collect()
+    }
+}
+impl OwnScanner for ClaudeProvider {
     fn scan(&self, _roots: &[PathBuf], cancel: &AtomicBool) -> Vec<Resource> {
         let Some(base) = claude_dir() else {
             return Vec::new();
@@ -145,45 +185,6 @@ impl Provider for ClaudeProvider {
             }
         }
         out
-    }
-
-    fn cleanup_action(&self, path: &Path) -> CleanupAction {
-        if path.ends_with(CACHE_SUBDIR) {
-            // Regenerable: a plain directory wipe is correct and simpler
-            // than an age pass over a cache nobody reads.
-            return CleanupAction::RemoveDir(path.to_path_buf());
-        }
-        let (pattern, empty) = TARGETS
-            .iter()
-            .find(|(_, _, sub, _, _)| path.ends_with(sub))
-            .map(|(_, _, _, p, e)| (*p, *e))
-            .unwrap_or(("*", false));
-        CleanupAction::PruneOlderThan {
-            dir: path.to_path_buf(),
-            min_age_days: 0,
-            pattern,
-            prune_empty_dirs: empty,
-            // I10: `projects/` holds one subdir per conversation whose names
-            // are opaque hashes, so a stray `settings.json` there must still
-            // survive a `*` pattern.
-            skip_names: ai_guard::NEVER_PRUNED,
-        }
-    }
-
-    fn measure(&self, path: &Path) -> Option<u64> {
-        measure_dir(path)
-    }
-
-    fn is_user_data(&self) -> bool {
-        true
-    }
-
-    fn retention_days(&self) -> Option<u32> {
-        Some(30)
-    }
-
-    fn extra_allowed_roots(&self) -> Vec<PathBuf> {
-        claude_dir().into_iter().collect()
     }
 }
 

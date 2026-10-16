@@ -42,7 +42,7 @@ fn new_run_id() -> String {
 fn providers_map() -> HashMap<String, Arc<dyn Provider>> {
     all_providers()
         .into_iter()
-        .map(|p| (p.id().to_string(), p))
+        .map(|s| (s.provider().id().to_string(), s.provider_arc()))
         .collect()
 }
 
@@ -535,10 +535,10 @@ pub fn get_providers(state: State<'_, AppState>) -> Result<Vec<ProviderInfo>, St
     let disabled = state.settings.lock().unwrap().disabled_providers.clone();
     Ok(all_providers()
         .iter()
-        .map(|p| ProviderInfo {
-            id: p.id().to_string(),
-            name: p.name().to_string(),
-            enabled: !disabled.contains(&p.id().to_string()),
+        .map(|s| ProviderInfo {
+            id: s.provider().id().to_string(),
+            name: s.provider().name().to_string(),
+            enabled: !disabled.contains(&s.provider().id().to_string()),
         })
         .collect())
 }

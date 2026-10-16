@@ -3,7 +3,7 @@
 
 use super::provider::{
     age_days, dir_size_detail_checked, impact, measure_dir, project_detail, walk_cancelled,
-    CleanupAction, Provider,
+    CleanupAction, OwnScanner, Provider,
 };
 use devclean_core::{Resource, SafetyLevel};
 use std::path::{Path, PathBuf};
@@ -22,6 +22,20 @@ impl Provider for RustTargetProvider {
         SafetyLevel::Safe
     }
 
+    fn measure(&self, path: &Path) -> Option<u64> {
+        measure_dir(path)
+    }
+
+    fn cleanup_action(&self, path: &Path) -> CleanupAction {
+        CleanupAction::RemoveDir(path.to_path_buf())
+    }
+
+    /// `target/` sits one level under the Cargo project that owns it.
+    fn project_root(&self, artifact: &Path) -> Option<PathBuf> {
+        artifact.parent().map(Path::to_path_buf)
+    }
+}
+impl OwnScanner for RustTargetProvider {
     fn scan(&self, roots: &[PathBuf], cancel: &AtomicBool) -> Vec<Resource> {
         let mut out = Vec::new();
         for root in roots {
@@ -71,19 +85,6 @@ impl Provider for RustTargetProvider {
             });
         }
         out
-    }
-
-    fn measure(&self, path: &Path) -> Option<u64> {
-        measure_dir(path)
-    }
-
-    fn cleanup_action(&self, path: &Path) -> CleanupAction {
-        CleanupAction::RemoveDir(path.to_path_buf())
-    }
-
-    /// `target/` sits one level under the Cargo project that owns it.
-    fn project_root(&self, artifact: &Path) -> Option<PathBuf> {
-        artifact.parent().map(Path::to_path_buf)
     }
 }
 

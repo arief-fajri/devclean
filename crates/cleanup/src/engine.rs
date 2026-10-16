@@ -590,7 +590,7 @@ fn run_command_timeout(
 mod tests {
     use super::*;
     use devclean_core::{SafetyLevel, SafetyValidator};
-    use devclean_providers::NodeModulesProvider;
+    use devclean_providers::{NodeModulesProvider, OwnScanner};
     use std::path::PathBuf;
 
     fn fixture(tag: &str) -> (PathBuf, PathBuf) {
@@ -608,7 +608,7 @@ mod tests {
     ) {
         let providers: HashMap<String, Arc<dyn Provider>> = devclean_providers::all_providers()
             .into_iter()
-            .map(|p| (p.id().to_string(), p))
+            .map(|s| (s.provider().id().to_string(), s.provider_arc()))
             .collect();
         (HashMap::new(), providers)
     }
@@ -838,9 +838,7 @@ mod tests {
         fn default_safety(&self) -> SafetyLevel {
             SafetyLevel::Safe
         }
-        fn scan(&self, _roots: &[PathBuf], _cancel: &AtomicBool) -> Vec<Resource> {
-            Vec::new()
-        }
+
         fn cleanup_action(&self, _path: &Path) -> CleanupAction {
             CleanupAction::RunCommand {
                 program: "/usr/bin/true",
@@ -849,6 +847,11 @@ mod tests {
         }
         fn measure(&self, _path: &Path) -> Option<u64> {
             self.sizes.lock().ok().and_then(|mut q| q.pop_front())
+        }
+    }
+    impl OwnScanner for SentinelProvider {
+        fn scan(&self, _roots: &[PathBuf], _cancel: &AtomicBool) -> Vec<Resource> {
+            Vec::new()
         }
     }
 
@@ -955,9 +958,7 @@ mod tests {
             fn default_safety(&self) -> SafetyLevel {
                 SafetyLevel::Safe
             }
-            fn scan(&self, _roots: &[PathBuf], _cancel: &AtomicBool) -> Vec<Resource> {
-                Vec::new()
-            }
+
             fn cleanup_action(&self, _path: &Path) -> CleanupAction {
                 CleanupAction::RunCommand {
                     program: "/usr/bin/true",
@@ -966,6 +967,11 @@ mod tests {
             }
             fn measure(&self, _path: &Path) -> Option<u64> {
                 None
+            }
+        }
+        impl OwnScanner for UnmeasurableProvider {
+            fn scan(&self, _roots: &[PathBuf], _cancel: &AtomicBool) -> Vec<Resource> {
+                Vec::new()
             }
         }
 
@@ -1284,9 +1290,7 @@ mod tests {
         fn default_safety(&self) -> SafetyLevel {
             SafetyLevel::Dangerous
         }
-        fn scan(&self, _roots: &[PathBuf], _cancel: &AtomicBool) -> Vec<Resource> {
-            Vec::new()
-        }
+
         fn cleanup_action(&self, path: &Path) -> CleanupAction {
             CleanupAction::RemoveDir(path.to_path_buf())
         }
@@ -1295,6 +1299,11 @@ mod tests {
         }
         fn required_docker_scope(&self) -> Option<devclean_core::DockerPruneScope> {
             Some(devclean_core::DockerPruneScope::All)
+        }
+    }
+    impl OwnScanner for PrivilegedStub {
+        fn scan(&self, _roots: &[PathBuf], _cancel: &AtomicBool) -> Vec<Resource> {
+            Vec::new()
         }
     }
 
@@ -1309,9 +1318,7 @@ mod tests {
         fn default_safety(&self) -> SafetyLevel {
             SafetyLevel::Safe
         }
-        fn scan(&self, _roots: &[PathBuf], _cancel: &AtomicBool) -> Vec<Resource> {
-            Vec::new()
-        }
+
         fn cleanup_action(&self, path: &Path) -> CleanupAction {
             CleanupAction::RemoveDir(path.to_path_buf())
         }
@@ -1320,6 +1327,11 @@ mod tests {
         }
         fn required_docker_scope(&self) -> Option<devclean_core::DockerPruneScope> {
             Some(devclean_core::DockerPruneScope::Off)
+        }
+    }
+    impl OwnScanner for DockerOffStub {
+        fn scan(&self, _roots: &[PathBuf], _cancel: &AtomicBool) -> Vec<Resource> {
+            Vec::new()
         }
     }
 

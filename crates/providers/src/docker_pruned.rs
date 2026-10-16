@@ -17,7 +17,7 @@
 //! choose to free images without touching a volume that might hold a
 //! database.
 
-use super::provider::{impact, CleanupAction, Provider};
+use super::provider::{impact, CleanupAction, OwnScanner, Provider};
 use devclean_core::{DockerPruneScope, Resource, SafetyLevel};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::AtomicBool;
@@ -47,6 +47,40 @@ impl Provider for DockerPrunedProvider {
         SafetyLevel::Dangerous
     }
 
+    fn cleanup_action(&self, path: &Path) -> CleanupAction {
+        if path.to_string_lossy().contains("volumes") {
+            CleanupAction::RunCommand {
+                program: "docker",
+                args: &["volume", "prune", "-f"],
+            }
+        } else {
+            CleanupAction::RunCommand {
+                program: "docker",
+                args: &["image", "prune", "-af"],
+            }
+        }
+    }
+
+    fn measure(&self, path: &Path) -> Option<u64> {
+        if !docker_available() {
+            return None;
+        }
+        let text = super::docker::df_text()?;
+        let row = if path.to_string_lossy().contains("volumes") {
+            "Local Volumes"
+        } else {
+            "Images"
+        };
+        crate::docker::reclaimable_for(&text, row)
+    }
+
+    /// Declares the widest scope this provider can act on. The engine then
+    /// requires both that scope to be selected AND the privileged opt-in.
+    fn required_docker_scope(&self) -> Option<DockerPruneScope> {
+        Some(DockerPruneScope::All)
+    }
+}
+impl OwnScanner for DockerPrunedProvider {
     fn scan(&self, _roots: &[PathBuf], cancel: &AtomicBool) -> Vec<Resource> {
         if cancel.load(std::sync::atomic::Ordering::Relaxed) || !docker_available() {
             return Vec::new();
@@ -111,39 +145,6 @@ impl Provider for DockerPrunedProvider {
             },
         )
         .collect()
-    }
-
-    fn cleanup_action(&self, path: &Path) -> CleanupAction {
-        if path.to_string_lossy().contains("volumes") {
-            CleanupAction::RunCommand {
-                program: "docker",
-                args: &["volume", "prune", "-f"],
-            }
-        } else {
-            CleanupAction::RunCommand {
-                program: "docker",
-                args: &["image", "prune", "-af"],
-            }
-        }
-    }
-
-    fn measure(&self, path: &Path) -> Option<u64> {
-        if !docker_available() {
-            return None;
-        }
-        let text = super::docker::df_text()?;
-        let row = if path.to_string_lossy().contains("volumes") {
-            "Local Volumes"
-        } else {
-            "Images"
-        };
-        crate::docker::reclaimable_for(&text, row)
-    }
-
-    /// Declares the widest scope this provider can act on. The engine then
-    /// requires both that scope to be selected AND the privileged opt-in.
-    fn required_docker_scope(&self) -> Option<DockerPruneScope> {
-        Some(DockerPruneScope::All)
     }
 }
 

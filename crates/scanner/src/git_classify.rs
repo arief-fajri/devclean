@@ -29,7 +29,7 @@ use devclean_providers::{
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::Mutex;
 
 /// Cap on concurrent git subprocesses, as the roadmap specifies
 /// `min(NumCPU, 8)`. More is not free: each `git status` on a large tree is
@@ -67,7 +67,7 @@ struct Classification {
 /// scan stops scheduling new git work promptly (G-SCAN-02).
 pub fn classify_repositories(
     resources: &mut [Resource],
-    providers: &HashMap<&str, &Arc<dyn Provider>>,
+    providers: &HashMap<&str, &dyn Provider>,
     cancel: &AtomicBool,
 ) -> HashSet<String> {
     // Group first — this is pure path walking, no subprocess. When nothing

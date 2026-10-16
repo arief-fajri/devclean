@@ -5,7 +5,7 @@
 
 use super::provider::{
     dir_size_detail_checked, home_dir, impact, measure_dir, tool_output_dir, CleanupAction,
-    Provider,
+    OwnScanner, Provider,
 };
 use devclean_core::{Resource, SafetyLevel};
 use std::path::{Path, PathBuf};
@@ -84,6 +84,30 @@ impl Provider for NpmCacheProvider {
         SafetyLevel::Safe
     }
 
+    fn measure(&self, path: &Path) -> Option<u64> {
+        measure_dir(path)
+    }
+
+    fn cleanup_action(&self, path: &Path) -> CleanupAction {
+        // Match the scanned dir back to its manager by re-resolving the
+        // tool-reported dirs (server-side, no user input — G-SAFE-02).
+        for m in MANAGERS {
+            if cache_dir(m).as_deref() == Some(path) {
+                return CleanupAction::RunCommand {
+                    program: m.program,
+                    args: m.clean_args,
+                };
+            }
+        }
+        // Unknown dir (e.g. cache vanished after scan): npm clean is the
+        // conservative default — still an official fixed command.
+        CleanupAction::RunCommand {
+            program: "npm",
+            args: &["cache", "clean", "--force"],
+        }
+    }
+}
+impl OwnScanner for NpmCacheProvider {
     fn scan(&self, _roots: &[PathBuf], cancel: &AtomicBool) -> Vec<Resource> {
         let mut out = Vec::new();
         for m in MANAGERS {
@@ -118,29 +142,6 @@ impl Provider for NpmCacheProvider {
             });
         }
         out
-    }
-
-    fn measure(&self, path: &Path) -> Option<u64> {
-        measure_dir(path)
-    }
-
-    fn cleanup_action(&self, path: &Path) -> CleanupAction {
-        // Match the scanned dir back to its manager by re-resolving the
-        // tool-reported dirs (server-side, no user input — G-SAFE-02).
-        for m in MANAGERS {
-            if cache_dir(m).as_deref() == Some(path) {
-                return CleanupAction::RunCommand {
-                    program: m.program,
-                    args: m.clean_args,
-                };
-            }
-        }
-        // Unknown dir (e.g. cache vanished after scan): npm clean is the
-        // conservative default — still an official fixed command.
-        CleanupAction::RunCommand {
-            program: "npm",
-            args: &["cache", "clean", "--force"],
-        }
     }
 }
 

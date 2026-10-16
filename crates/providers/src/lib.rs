@@ -19,6 +19,7 @@ pub mod provider;
 pub mod python_cache;
 pub mod registry;
 pub mod rust_target;
+pub mod tree;
 pub mod xcode_data;
 
 pub use ai_guard::{probe_process, sqlite_exclusive_available, ProcState};
@@ -38,30 +39,31 @@ pub use opencode_fs::OpencodeFsProvider;
 pub use provider::{
     dir_size, dir_size_checked, dir_size_detail, dir_size_detail_checked, home_dir, impact,
     measure_dir, project_detail, stale_note, stale_note_for_age, tool_output_dir, walk_cancelled,
-    CleanupAction, DirSize, Provider,
+    CleanupAction, DirSize, OwnScanner, Provider, Scannable,
 };
 pub use python_cache::PythonCacheProvider;
 pub use registry::ProviderRegistry;
 pub use rust_target::RustTargetProvider;
+pub use tree::{Match, TreeRule, TreeRuleSpec};
 pub use xcode_data::XcodeDataProvider;
 
 /// All providers in scan order.
-pub fn all_providers() -> Vec<std::sync::Arc<dyn Provider>> {
+pub fn all_providers() -> Vec<Scannable> {
     use std::sync::Arc;
     vec![
-        Arc::new(NodeModulesProvider),
-        Arc::new(RustTargetProvider),
-        Arc::new(GoProvider),
-        Arc::new(DockerProvider),
-        Arc::new(DockerPrunedProvider),
-        Arc::new(GlobalCacheProvider),
-        Arc::new(NpmCacheProvider),
-        Arc::new(PythonCacheProvider),
-        Arc::new(CargoRegistryProvider),
-        Arc::new(GradleCacheProvider),
-        Arc::new(XcodeDataProvider),
-        Arc::new(OpencodeFsProvider),
-        Arc::new(ClaudeProvider),
-        Arc::new(OpencodeDbProvider),
+        Scannable::Own(Arc::new(NodeModulesProvider)),
+        Scannable::Own(Arc::new(RustTargetProvider)),
+        Scannable::Own(Arc::new(GoProvider)),
+        Scannable::Own(Arc::new(DockerProvider)),
+        Scannable::Own(Arc::new(DockerPrunedProvider)),
+        Scannable::Own(Arc::new(GlobalCacheProvider)),
+        Scannable::Own(Arc::new(NpmCacheProvider)),
+        Scannable::Own(Arc::new(PythonCacheProvider)),
+        Scannable::Own(Arc::new(CargoRegistryProvider)),
+        Scannable::Own(Arc::new(GradleCacheProvider)),
+        Scannable::Own(Arc::new(XcodeDataProvider)),
+        Scannable::Own(Arc::new(OpencodeFsProvider)),
+        Scannable::Own(Arc::new(ClaudeProvider)),
+        Scannable::Own(Arc::new(OpencodeDbProvider)),
     ]
 }
