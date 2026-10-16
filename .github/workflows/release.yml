@@ -91,12 +91,25 @@ jobs:
         id: tauri
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Updater signing (minisign). The private key and its password are
+          # repo secrets; the matching public key is committed in
+          # tauri.conf.json → plugins.updater.pubkey. If these are missing the
+          # build fails on purpose — an unsigned release must not ship, because
+          # every installed copy would then refuse it.
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
-          # No signing identity or notarization credentials are configured, so
-          # the build is unsigned by design. The README documents the one-time
-          # Gatekeeper step this requires.
+          # No Apple signing identity or notarization credentials are
+          # configured, so the .app is unsigned by design. That does not stop
+          # in-app updates: the updater's minisign signature is a separate
+          # chain, and the swapped bundle is written by the app process, so no
+          # quarantine is applied. The README documents the one-time Gatekeeper
+          # step a first install needs.
           projectPath: apps/desktop
-          args: --bundles app,dmg
+          # createUpdaterArtifacts is turned on HERE, not in tauri.conf.json:
+          # that keeps a local `cargo tauri build` working without the signing
+          # key, while a release build always signs its updater artifacts.
+          args: --bundles app,dmg --config '{"bundle":{"createUpdaterArtifacts":true}}'
           # Packaging a .dmg on CI is the flakiest step in this pipeline, and a
           # failure costs the whole ~10 minute build. The action retries the
           # build (and the upload) rather than the job.
@@ -123,8 +136,51 @@ jobs:
           # The action has already packaged the .app as a .tar.gz; reuse it
           # rather than making a second archive of the same thing.
           cp "$BUNDLE"/macos/*.app.tar.gz dist-artifacts/
+          # The updater signature produced by createUpdaterArtifacts. It must
+          # travel with the tarball — latest.json quotes it verbatim, and the
+          # app verifies the tarball against it before installing.
+          cp "$BUNDLE"/macos/*.app.tar.gz.sig dist-artifacts/
 
           ls -la dist-artifacts
+
+      # The manifest the in-app updater polls
+      # (tauri.conf.json → plugins.updater.endpoints). Generated here rather
+      # than by the action so the release stays created by the `publish` job:
+      # tauri-action's own `includeUpdaterJson` would attach it to a release
+      # the action made, which this workflow deliberately never does.
+      - name: Build the updater manifest (latest.json)
+        working-directory: dist-artifacts
+        env:
+          TAG: ${{ inputs.tag }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          TARBALL=$(ls *.app.tar.gz)
+          VERSION="${TAG#v}"
+          PUB_DATE=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+          # Point at THIS tag's asset, not `latest`, so the manifest and the
+          # binary it describes can never drift apart.
+          URL="https://github.com/${REPO}/releases/download/${TAG}/${TARBALL}"
+          python3 - "$VERSION" "$PUB_DATE" "$URL" "$(cat "$TARBALL.sig")" > latest.json <<'PY'
+          import json, sys
+
+          version, pub_date, url, signature = sys.argv[1:5]
+          print(
+              json.dumps(
+                  {
+                      "version": version,
+                      "pub_date": pub_date,
+                      # arm64 only: the release builds on macos-latest, which is
+                      # Apple Silicon. An Intel build would add "darwin-x86_64".
+                      "platforms": {
+                          "darwin-aarch64": {"signature": signature, "url": url}
+                      },
+                  },
+                  indent=2,
+              )
+          )
+          PY
+          cat latest.json
 
       - name: Checksums over exactly what is uploaded
         working-directory: dist-artifacts
