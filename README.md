@@ -122,11 +122,11 @@ A `settings.json` written before this release with an empty `scan_roots` array i
 
 ## Status
 
-**`0.1.0` — public alpha, macOS only.** The product works end to end: it scans 14 providers, reports sizes that match `du`, and cleans up recoverably. What is still missing is listed in the [roadmap](docs/development/roadmap.md); what has shipped is in the [changelog](CHANGELOG.md).
+**`0.3.0` — public alpha, macOS only.** The product works end to end: it scans 14 providers, reports sizes that match `du`, cleans up recoverably, classifies project activity from git history, scans every project tree in a single pass, and can update itself in-app. What is still missing is listed in the [roadmap](docs/development/roadmap.md); what has shipped is in the [changelog](CHANGELOG.md).
 
 Not yet done, and worth knowing before you rely on it:
 
-- **Git-aware classification.** Activity comes from filesystem mtime alone, and nothing knows whether an artifact is committed.
+- **Automatic updates start with the next release.** 0.3.0 ships the updater, but an older build has no updater to receive it — this one must still be installed by hand, and updates are arm64 only. See [Updates](#updates).
 - **Broad ecosystem coverage.** Ruby, Flutter, Android and LLM model stores are not scanned yet.
 - **A CLI.** There is no way to run this from cron or a script.
 - **Unsigned builds.** See [Install](#install).

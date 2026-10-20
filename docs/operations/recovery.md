@@ -63,8 +63,6 @@ The resource is listed with a badge explaining why. Each reason has one fix:
 | `scope off` | Docker cleanup is off. | **Settings → Cleanup → Docker**: choose a scope. |
 | `protected` | A tracked file in a repository with uncommitted changes. | Commit or stash the changes, then rescan. |
 
-`protected` arrives with git-aware classification; see the [roadmap](../development/roadmap.md). Until then no resource carries it.
-
 None of these are bypassable from the UI. The backend refuses the resource even if its id is sent directly to the cleanup command, so a badge is an explanation rather than a suggestion.
 
 ## "DevClean wants to delete something it should not"

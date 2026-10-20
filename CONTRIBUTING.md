@@ -54,7 +54,7 @@ These exist because each one has already been violated once.
 4. Write fixture tests with `t.TempDir()`-style scratch directories. Cover the false positives: a directory that looks like an artifact but is not one.
 5. **Run it against a real project on a real machine.** A wrong marker file passes unit tests and fails in the wild.
 
-If the provider lives inside project trees, it should contribute a rule to the shared walk once Wave C of the [roadmap](docs/development/roadmap.md) lands — otherwise it walks the scan root independently and every added ecosystem costs another full traversal.
+If the provider lives inside project trees, it should contribute a rule to the shared walk (the `TreeRule` trait) rather than scan the root on its own — an independent walk costs another full traversal of every scan root for each ecosystem added, which is the cost the shared walk exists to remove.
 
 ## Changing something a user sees
 

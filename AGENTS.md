@@ -77,7 +77,7 @@ cargo tauri dev                        # run from root (frontendDist ../dist)
 - `crates/providers/` — `Provider` trait + scan shapes (`OwnScanner`, `TreeRule`) + 14 providers (`node_modules`, `rust_target`, `go`, `docker`, `python_cache`, …). Depends only on `core`.
 - `crates/scanner/` — concurrent `ScanManager` + last-scan cache.
 - `crates/cleanup/` — `preview` + safety-validated executor.
-- `apps/desktop/src-tauri/src/` — thin layer: `commands.rs` (15 commands), `events.rs`, `state.rs`. No filesystem logic beyond wiring.
+- `apps/desktop/src-tauri/src/` — thin layer: `commands.rs` (19 commands), `events.rs`, `state.rs`. No filesystem logic beyond wiring.
 - `apps/desktop/src/` — Svelte 5 (runes) + Tailwind only:
   - `App.svelte` — the shell: sidebar, page switch, selection bar, resource drawer, and the cleanup-flow modal (the only modal; G-UI-03).
   - `lib/routes/` — one file per page (Overview, Resources, History, Settings). Pages may not call the cleanup API (`architecture.test.ts`).

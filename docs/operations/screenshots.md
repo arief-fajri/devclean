@@ -23,14 +23,12 @@ demo/make-fixture.sh run
 
 # 2. In the app:
 #    - Overview  → wait for the scan to finish
-#    - Select a safe provider, click "Review & clean selected"
-#      → the confirmation dialog opens on its review phase
+#    - Settings  → the Updates tab included
 #    - Screenshot both, at a consistent window size (Cmd-Shift-4, then Space
 #      to capture the window rather than a region)
 
 # 3. Save as:
 #      demo/overview.png    the dashboard
-#      demo/confirm.png     the confirmation dialog (select items first)
 #      demo/settings.png    Settings
 
 # 4. Tear the fixture down
@@ -39,7 +37,7 @@ demo/make-fixture.sh clean
 
 ## Wiring them into the README
 
-The three images are already referenced. `G-PUB-04` asserts two things and will fail the build if either is violated:
+The two images are already referenced. `G-PUB-04` asserts two things and will fail the build if either is violated:
 
 1. every local image path starts with `demo/` — so a screenshot of a real machine, with real project names, cannot be committed
 2. every local image path exists on disk — so the README cannot reference a screenshot nobody generated

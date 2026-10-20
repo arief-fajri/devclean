@@ -114,5 +114,6 @@ Four controls were found claiming enforcement they did not have. All four are fi
 - No known vulnerabilities at release.
 - Report suspected ones privately: see [SECURITY.md](SECURITY.md).
 
+[0.3.0]: https://github.com/arief-fajri/devclean/releases/tag/v0.3.0
 [0.2.0]: https://github.com/arief-fajri/devclean/releases/tag/v0.2.0
 [0.1.0]: https://github.com/arief-fajri/devclean/releases/tag/v0.1.0

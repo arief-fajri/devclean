@@ -31,64 +31,9 @@ Rules that apply to every wave:
 
 ---
 
-## Wave C — Single-pass walk
-
-**Status: shipped** (product 0.3.0, contract v0.11.0). Decision record: [docs/decisions/single-pass-walk.md](../decisions/single-pass-walk.md).
-
-### Problem
-
-`node_modules`, Rust `target/`, Python caches, `npm_cache`, `cargo_registry` and `gradle_cache` each walk the scan root independently. One scan over a large dev tree traverses it several times, and the cost grows with every provider Wave D adds.
-
-### The trait split
-
-`Provider` currently mixes two concerns: identity/cleanup, and how to find resources. They are separated.
-
-```rust
-/// Identity, cleanup, measurement, policy flags. Knows nothing about scanning.
-pub trait Provider: Send + Sync {
-    fn id(&self) -> &'static str;
-    fn name(&self) -> &'static str;
-    fn default_safety(&self) -> SafetyLevel;
-    fn cleanup_action(&self, path: &Path) -> CleanupAction;
-    fn measure(&self, path: &Path) -> Option<u64>;
-    // is_user_data, retention_days, required_docker_scope, extra_allowed_roots
-}
-
-/// Providers that own their traversal: docker, opencode_db, global_cache, …
-pub trait OwnScanner: Provider {
-    fn scan(&self, roots: &[PathBuf], cancel: &AtomicBool) -> Vec<Resource>;
-}
-
-/// Providers that contribute RULES to one shared walk: node, rust_target, python, …
-pub trait TreeRule: Provider {
-    fn spec(&self) -> TreeRuleSpec;
-    fn materialize(&self, m: &Match, size: &DirSize) -> Option<Resource>;
-}
-```
-
-`all_providers()` returns `Vec<Scannable>` (`Own` or `Tree`); non-scanning consumers use `Scannable::provider()`. `TreeRuleSpec` carries the per-provider differences that are easy to lose when merging walks: the directory name(s) to match, a sibling file that must exist (`package.json` for `node_modules`), the maximum match depth (node uses 6), whether to skip nested matches of the same kind, and additional prune directories.
-
-Sizing folded into the same walk (phase 2): a match opens a per-artifact `SizeScope`, fed every file beneath it and closed when the walk steps out; a matched artifact is sized in full regardless of the match depth, and the walk prunes at the deepest rule's depth only when nothing is open. `rust_target` is re-expressed as "a `target/` dir with a sibling `Cargo.toml`" (same walkdir depth as the old `Cargo.toml`-file match).
-
-### What must not regress
-
-- cancellation settles in < 1s (I5, G-SCAN-02)
-- symlinks are never followed (G-SCAN-03)
-- a scan never silently reports less than the truth (G-SCAN-06)
-
-### Tests
-
-Equivalence is the main mitigation: for the same fixture, the set of resources and their sizes before and after the refactor must be identical — the suite needed only its driver swapped. Plus one test per rule row, the tree-group progress characterization, and `bench_tree_walk` for the isolated speedup.
-
-This was the largest refactor of the five. One traversal bug would have broken every project-tree provider at once.
-
-Contract `v0.11.0`: no type change. The only caller-visible change is the event timing for the three tree providers, which now tick together (one `scan_provider_started` per rule at group entry, one `scan_progress` per rule at settle); `done` stays monotonic and `total` counts every active provider once.
-
----
-
 ## Wave D — Coverage
 
-Depends on Wave C. Without the shared walk this adds roughly eight full traversals.
+Depends on the shared walk Wave C shipped in 0.3.0. Without it this would add roughly eight full traversals.
 
 ### New providers
 
@@ -111,7 +56,7 @@ Depends on Wave C. Without the shared walk this adds roughly eight full traversa
 
 Cross-artifact deduplication for the *total*. Per-artifact figures already deduplicate hard links within one tree; the total does not.
 
-Contract `v0.12.0`, additive: new provider ids in `get_providers` and in scan results.
+Contract `v0.13.0`, additive: new provider ids in `get_providers` and in scan results.
 
 **Level B** — new providers change what is offered for deletion, and `browser_temp` is destructive.
 
