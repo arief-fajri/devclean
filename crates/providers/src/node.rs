@@ -42,7 +42,7 @@ impl TreeRule for NodeModulesProvider {
     fn spec(&self) -> TreeRuleSpec {
         TreeRuleSpec {
             dir_names: &["node_modules"],
-            sibling_file: Some("package.json"),
+            sibling_files: &["package.json"],
             max_depth: 6,
             // A node_modules inside a node_modules: not a second artifact —
             // its bytes already belong to the enclosing one.

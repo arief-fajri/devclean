@@ -4,7 +4,8 @@
 //! roots once apiece, each re-traversing the same dev tree, and then each
 //! measured its matches by walking the artifact AGAIN. They now contribute a
 //! [`TreeRuleSpec`] — what directory names to match, what sibling file must
-//! exist, how deep the match may sit — and the scanner walks each root once,
+//! exist (any of a fixed list), how deep the match may sit — and the scanner
+//! walks each root once,
 //! offering every entry to every rule and sizing each match inside the same
 //! traversal.
 //!
@@ -25,10 +26,11 @@ pub struct TreeRuleSpec {
     /// Directory names this rule matches (`node_modules`; `target`;
     /// `__pycache__`, `.pytest_cache`, `.mypy_cache`).
     pub dir_names: &'static [&'static str],
-    /// A file that must exist in the matched directory's PARENT for the
-    /// match to count: `package.json` for node, `Cargo.toml` for rust.
-    /// `None` matches on the directory name alone (python).
-    pub sibling_file: Option<&'static str>,
+    /// Files of which AT LEAST ONE must exist in the matched directory's
+    /// PARENT for the match to count: `package.json` for node, `Cargo.toml`
+    /// for rust, any of the four gradle markers for android. An empty list
+    /// matches on the directory name alone (python).
+    pub sibling_files: &'static [&'static str],
     /// Maximum depth, counted from the scan root the way `walkdir` counts
     /// it (the root itself is depth 0): 6 for node and python, 5 for rust.
     /// Depth gates the MATCH only — a matched artifact is always sized in
@@ -146,10 +148,12 @@ pub fn walk_tree_rules(
                     if spec.skip_nested && parent_has_dir_name(path, spec.dir_names) {
                         continue;
                     }
-                    let sibling_ok = match spec.sibling_file {
-                        None => true,
-                        Some(file) => path.parent().unwrap_or(path).join(file).is_file(),
-                    };
+                    let parent = path.parent().unwrap_or(path);
+                    let sibling_ok = spec.sibling_files.is_empty()
+                        || spec
+                            .sibling_files
+                            .iter()
+                            .any(|file| parent.join(file).is_file());
                     if !sibling_ok {
                         continue;
                     }

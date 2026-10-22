@@ -46,7 +46,7 @@ impl TreeRule for PythonCacheProvider {
     fn spec(&self) -> TreeRuleSpec {
         TreeRuleSpec {
             dir_names: CACHE_DIRS,
-            sibling_file: None,
+            sibling_files: &[],
             max_depth: 6,
             // The old walk reported __pycache__ wherever it sat, including
             // one inside another — characterized by the equivalence suite,
