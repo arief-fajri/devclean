@@ -378,6 +378,14 @@ fn short_prefix(provider_id: &str) -> &str {
         "opencode_fs" => "of",
         "claude" => "cl",
         "opencode_db" => "od",
+        // Wave D3/D4/D5.
+        "go_vendor" => "gv",
+        "flutter" => "fl",
+        "android" => "ad",
+        "pods" => "pd",
+        "browser_temp" => "bt",
+        "llm_models" => "lm",
+        "ruby" => "rb",
         // Stubs and future providers share one prefix on purpose: the
         // uniqueness test turns this into a failure instead of two
         // providers quietly sharing `xx:0000`.

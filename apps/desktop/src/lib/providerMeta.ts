@@ -7,14 +7,17 @@
 import {
   Apple,
   Archive,
+  Bird,
   Boxes,
   Coffee,
   Container,
   Database,
   FileText,
+  Gem,
   HardDrive,
   MessageSquare,
   Package,
+  Smartphone,
   Terminal,
   Trash2,
 } from "lucide-svelte";
@@ -107,7 +110,7 @@ export const PROVIDER_META: Record<string, ProviderMeta> = {
   xcode_data: {
     icon: Apple,
     tick: Apple,
-    label: "Xcode DerivedData",
+    label: "Xcode data",
     accent: "text-zinc-500 dark:text-zinc-400",
     tile: "bg-zinc-100 dark:bg-zinc-800",
   },
@@ -138,6 +141,34 @@ export const PROVIDER_META: Record<string, ProviderMeta> = {
     label: "Claude data",
     accent: "text-orange-600 dark:text-orange-400",
     tile: "bg-orange-100 dark:bg-orange-950",
+  },
+  go_vendor: {
+    icon: Coffee,
+    tick: Coffee,
+    label: "Go vendor",
+    accent: "text-teal-700 dark:text-teal-300",
+    tile: "bg-teal-100 dark:bg-teal-950",
+  },
+  flutter: {
+    icon: Bird,
+    tick: Bird,
+    label: "Flutter",
+    accent: "text-blue-500 dark:text-blue-300",
+    tile: "bg-blue-100 dark:bg-blue-950",
+  },
+  android: {
+    icon: Smartphone,
+    tick: Smartphone,
+    label: "Android build",
+    accent: "text-green-600 dark:text-green-400",
+    tile: "bg-green-100 dark:bg-green-950",
+  },
+  pods: {
+    icon: Gem,
+    tick: Gem,
+    label: "CocoaPods",
+    accent: "text-rose-600 dark:text-rose-400",
+    tile: "bg-rose-100 dark:bg-rose-950",
   },
 };
 

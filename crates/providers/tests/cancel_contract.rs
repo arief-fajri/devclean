@@ -13,9 +13,10 @@
 //! a cancelled scan reports nothing.
 
 use devclean_providers::{
-    walk_tree_rules, CargoRegistryProvider, ClaudeProvider, DockerProvider, DockerPrunedProvider,
-    GlobalCacheProvider, GoProvider, GradleCacheProvider, NodeModulesProvider, NpmCacheProvider,
-    OpencodeDbProvider, OpencodeFsProvider, OwnScanner, PythonCacheProvider, RustTargetProvider,
+    walk_tree_rules, AndroidProvider, CargoRegistryProvider, ClaudeProvider, DockerProvider,
+    DockerPrunedProvider, FlutterProvider, GlobalCacheProvider, GoProvider, GoVendorProvider,
+    GradleCacheProvider, NodeModulesProvider, NpmCacheProvider, OpencodeDbProvider,
+    OpencodeFsProvider, OwnScanner, PodsProvider, PythonCacheProvider, RustTargetProvider,
     TreeRule, XcodeDataProvider,
 };
 use std::path::PathBuf;
@@ -53,6 +54,20 @@ fn tree_fixture(tag: &str) -> PathBuf {
     std::fs::write(root.join("rs/target/app"), b"x").unwrap();
     std::fs::create_dir_all(root.join("py/__pycache__")).unwrap();
     std::fs::write(root.join("py/__pycache__/m.pyc"), b"x").unwrap();
+    // Wave D3: one match per new rule, each in its own project so no two
+    // rules contend for one directory.
+    std::fs::create_dir_all(root.join("gomod/vendor")).unwrap();
+    std::fs::write(root.join("gomod/go.mod"), b"module example.com/p\n").unwrap();
+    std::fs::write(root.join("gomod/vendor/x.go"), b"x").unwrap();
+    std::fs::create_dir_all(root.join("fl/build")).unwrap();
+    std::fs::write(root.join("fl/pubspec.yaml"), b"name: fl\n").unwrap();
+    std::fs::write(root.join("fl/build/app.dill"), b"x").unwrap();
+    std::fs::create_dir_all(root.join("andr/build")).unwrap();
+    std::fs::write(root.join("andr/build.gradle"), b"// module\n").unwrap();
+    std::fs::write(root.join("andr/build/out.apk"), b"x").unwrap();
+    std::fs::create_dir_all(root.join("iospods/Pods")).unwrap();
+    std::fs::write(root.join("iospods/Podfile"), b"platform :ios\n").unwrap();
+    std::fs::write(root.join("iospods/Pods/x.swift"), b"x").unwrap();
     root
 }
 
@@ -74,6 +89,10 @@ fn the_tree_cancel_fixture_actually_matches() {
         Arc::new(NodeModulesProvider) as Arc<dyn TreeRule>,
         Arc::new(RustTargetProvider),
         Arc::new(PythonCacheProvider),
+        Arc::new(GoVendorProvider),
+        Arc::new(FlutterProvider),
+        Arc::new(AndroidProvider),
+        Arc::new(PodsProvider),
     ] {
         assert_eq!(tree_scan(rule, false).len(), 1, "fixture must match once");
     }
@@ -117,6 +136,26 @@ fn npm_cache_stops_when_cancelled() {
 #[test]
 fn python_cache_stops_when_cancelled() {
     assert!(tree_scan(Arc::new(PythonCacheProvider), true).is_empty());
+}
+
+#[test]
+fn go_vendor_stops_when_cancelled() {
+    assert!(tree_scan(Arc::new(GoVendorProvider), true).is_empty());
+}
+
+#[test]
+fn flutter_stops_when_cancelled() {
+    assert!(tree_scan(Arc::new(FlutterProvider), true).is_empty());
+}
+
+#[test]
+fn android_stops_when_cancelled() {
+    assert!(tree_scan(Arc::new(AndroidProvider), true).is_empty());
+}
+
+#[test]
+fn pods_stops_when_cancelled() {
+    assert!(tree_scan(Arc::new(PodsProvider), true).is_empty());
 }
 
 #[test]

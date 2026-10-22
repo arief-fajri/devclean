@@ -16,8 +16,8 @@
 
 use devclean_core::Resource;
 use devclean_providers::{
-    dir_size_detail, walk_tree_rules, NodeModulesProvider, PythonCacheProvider, RustTargetProvider,
-    TreeRule,
+    dir_size_detail, walk_tree_rules, AndroidProvider, FlutterProvider, GoVendorProvider,
+    NodeModulesProvider, PodsProvider, PythonCacheProvider, RustTargetProvider, TreeRule,
 };
 use std::collections::BTreeSet;
 use std::fs;
@@ -169,6 +169,42 @@ fn build_fixture(root: &Path) {
     // python (characterized — its bytes land in both rows).
     write_file(&root.join("py-tox/.tox/py3/lib/__pycache__/x.pyc"), b"pyc");
 
+    // Wave D3 — the four new tree rules: one matched artifact and one
+    // negative (the marker missing) apiece. The two `build/` dirs never
+    // share a parent with both markers, so no directory matches twice.
+    write_file(&root.join("gv-proj/go.mod"), b"module example.com/gv\n");
+    write_file(
+        &root.join("gv-proj/vendor/example.com/lib/lib.go"),
+        &pseudo_random(1000, 12),
+    );
+    write_file(&root.join("gv-stray/vendor/x.go"), b"stray");
+
+    write_file(&root.join("fl-proj/pubspec.yaml"), b"name: fl\n");
+    write_file(&root.join("fl-proj/.dart_tool/package_config.json"), b"{}");
+    write_file(
+        &root.join("fl-proj/build/app.dill"),
+        &pseudo_random(1000, 13),
+    );
+    write_file(&root.join("fl-stray/build/x.js"), b"stray");
+
+    write_file(&root.join("ad-proj/build.gradle.kts"), b"// root module\n");
+    write_file(
+        &root.join("ad-proj/build/out.apk"),
+        &pseudo_random(1000, 14),
+    );
+    write_file(&root.join("ad-proj/.gradle/file.bin"), b"gradle");
+    // A nested gradle module (android/app/): its own marker, its own row.
+    write_file(&root.join("ad-proj/app/build.gradle"), b"// app module\n");
+    write_file(&root.join("ad-proj/app/build/out.apk"), b"apk");
+    write_file(&root.join("ad-stray/build/x"), b"stray");
+
+    write_file(&root.join("pods-proj/Podfile"), b"platform :ios\n");
+    write_file(
+        &root.join("pods-proj/Pods/Alamofire/Source.swift"),
+        &pseudo_random(1000, 15),
+    );
+    write_file(&root.join("pods-stray/Pods/x.swift"), b"stray");
+
     // Depth boundaries (WalkDir depth: root=0, direct children=1, so the
     // `bound/` prefix itself is depth 1 and eats one level of budget).
     // node_modules at depth 6: matched. At depth 7: invisible.
@@ -211,13 +247,17 @@ fn scan_tree_providers(root: &Path) -> Vec<Resource> {
         .collect()
 }
 
-/// The three tree rules, in registry order — the same objects
+/// The tree rules, in registry order — the same objects
 /// `all_providers()` hands the ScanManager.
 fn tree_rules() -> Vec<Arc<dyn TreeRule>> {
     vec![
         Arc::new(NodeModulesProvider),
         Arc::new(RustTargetProvider),
         Arc::new(PythonCacheProvider),
+        Arc::new(GoVendorProvider),
+        Arc::new(FlutterProvider),
+        Arc::new(AndroidProvider),
+        Arc::new(PodsProvider),
     ]
 }
 
@@ -259,6 +299,14 @@ fn expected_set() -> BTreeSet<(String, String)> {
         ("python_cache", "py-proj/__pypackages__"),
         ("python_cache", "py-tox/.tox"),
         ("python_cache", "py-tox/.tox/py3/lib/__pycache__"),
+        // Wave D3 additions.
+        ("go_vendor", "gv-proj/vendor"),
+        ("flutter", "fl-proj/.dart_tool"),
+        ("flutter", "fl-proj/build"),
+        ("android", "ad-proj/build"),
+        ("android", "ad-proj/.gradle"),
+        ("android", "ad-proj/app/build"),
+        ("pods", "pods-proj/Pods"),
     ]
     .into_iter()
     .map(|(p, r)| (p.to_string(), r.to_string()))
@@ -290,7 +338,12 @@ fn the_tree_rules_report_the_expected_resource_set() {
         "the walk found a different set of artifacts"
     );
     for r in &found {
-        assert_eq!(r.safety, devclean_core::SafetyLevel::Safe);
+        assert_eq!(
+            r.safety,
+            expected_safety(&r.provider, &rel(&root, &r.path)),
+            "wrong safety for {}",
+            r.path.display()
+        );
         assert!(
             r.blocked_reason.is_none(),
             "{} should carry no blocked_reason",
@@ -299,6 +352,19 @@ fn the_tree_rules_report_the_expected_resource_set() {
         assert_eq!(r.reclaimable_bytes, r.size_bytes);
     }
     fs::remove_dir_all(&root).unwrap();
+}
+
+/// The safety each row must carry. Most rules are uniformly safe or
+/// caution; flutter splits per directory, which is why this is a table
+/// rather than a per-provider constant.
+fn expected_safety(provider: &str, relpath: &str) -> devclean_core::SafetyLevel {
+    use devclean_core::SafetyLevel;
+    match (provider, relpath) {
+        ("flutter", "fl-proj/.dart_tool") => SafetyLevel::Safe,
+        ("flutter", _) => SafetyLevel::Caution,
+        ("go_vendor", _) | ("android", _) | ("pods", _) => SafetyLevel::Caution,
+        _ => SafetyLevel::Safe,
+    }
 }
 
 #[test]
@@ -424,7 +490,7 @@ fn g_scan_03_a_symlink_loop_terminates_and_the_walk_continues() {
 fn the_shared_walk_reports_exactly_the_sum_of_the_solo_walks() {
     // One traversal must not make the rules see each other: driving each
     // rule alone over the same fixture yields the same rows as driving all
-    // three together (per-rule isolation inside the shared walk).
+    // of them together (per-rule isolation inside the shared walk).
     let root = scratch("solo");
     build_fixture(&root);
     let combined = structural_set(&root, &scan_tree_providers(&root));

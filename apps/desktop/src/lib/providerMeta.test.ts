@@ -22,6 +22,10 @@ const KNOWN = [
   "opencode_fs",
   "opencode_db",
   "claude",
+  "go_vendor",
+  "flutter",
+  "android",
+  "pods",
 ];
 
 describe("providerMeta", () => {
