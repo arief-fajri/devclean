@@ -166,3 +166,64 @@ describe("G-UI-05 — a clickable surface looks clickable", () => {
     }
   });
 });
+
+/**
+ * Layering of the fixed surfaces (the 0.3.1 fix).
+ *
+ * The selection bar is `fixed` at the bottom edge. With `z-index: auto` it
+ * paints in DOM order, but a sibling that establishes its own stacking
+ * context — the sticky provider headers, `z-10` — climbs above it, so while
+ * the page scrolled the bar and the actions it carries sat under the list.
+ *
+ * The rule is an ORDER, not a set of numbers: page content below the bar,
+ * the drawer and the cleanup dialog above it (review must be possible with
+ * the bar on screen). Exact values may drift; the order may not. Both the
+ * presence of an explicit z-index and the ordering are asserted inside the
+ * tests, so a regression is reported against a name rather than the file.
+ */
+function firstZ(source: string, surface: string): number {
+  const m = source.match(/\bz-(\d+)\b/);
+  expect(
+    m,
+    `${surface} has no explicit z-index — with auto it paints in DOM order, which is the 0.3.1 bug`,
+  ).not.toBeNull();
+  return Number(m![1]);
+}
+
+function component(name: string): string {
+  return readFileSync(join(here, "components", name), "utf8");
+}
+
+describe("layering — the selection bar is covered by nothing it must beat", () => {
+  it("puts the selection bar above the page content it floats over", () => {
+    const bar = firstZ(component("SelectionBar.svelte"), "SelectionBar");
+    // The sticky header of a provider card — the surface that covered the bar.
+    const sticky = firstZ(component("ProviderCard.svelte"), "ProviderCard's sticky header");
+    expect(
+      bar,
+      "the sticky provider headers must stack under the selection bar, or they cover its buttons",
+    ).toBeGreaterThanOrEqual(sticky);
+  });
+
+  it("keeps the drawer and the cleanup dialog above the selection bar", () => {
+    const bar = firstZ(component("SelectionBar.svelte"), "SelectionBar");
+    const drawer = firstZ(component("ResourceDrawer.svelte"), "ResourceDrawer");
+    const dialog = firstZ(component("CleanupFlowDialog.svelte"), "CleanupFlowDialog");
+    expect(drawer, "the resource drawer must open over the selection bar").toBeGreaterThan(bar);
+    expect(dialog, "the cleanup dialog must open over the selection bar").toBeGreaterThan(bar);
+  });
+
+  it("mounts the selection bar after the page content it ties with", () => {
+    // Selection bar and sticky headers are both `z-10`, so DOM order breaks
+    // the tie: the bar only wins because the shell renders it last. Hoisting
+    // it above `<main>` in the source would put the bug straight back.
+    const shell = readFileSync(join(here, "..", "App.svelte"), "utf8");
+    for (const token of ["SelectionBar", "ResourceDrawer", "CleanupFlowDialog"]) {
+      expect(shell, `App.svelte mounts ${token}`).toContain(token);
+    }
+    expect(
+      shell.indexOf("<SelectionBar"),
+      "the selection bar must be mounted after <main>, or the sticky headers tie-break above it",
+    ).toBeGreaterThan(shell.indexOf("<main"));
+  });
+});

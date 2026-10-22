@@ -41,7 +41,7 @@ cargo tauri build
 
 DevClean can update itself: **Settings → Updates** checks the release channel, and a newer version can be downloaded and installed without leaving the app. Every update bundle is signed with a minisign key and verified before it is installed, over HTTPS — even though the app itself is not Apple-signed. Nothing is downloaded until you press **Check for updates**; an optional "check at startup" toggle is off by default. A restart is a separate button, and installing is refused while a scan or cleanup is running.
 
-> The first updater-enabled release still has to be installed by hand (an older build has no updater to receive it); automatic updates work from the next release onward. Updates are arm64 only.
+> 0.3.0 is the first updater-enabled release: a build older than it has no updater to receive an update and must be installed by hand. From 0.3.0 on, each release arrives in-app. Updates are arm64 only.
 
 ## Development
 
@@ -122,11 +122,11 @@ A `settings.json` written before this release with an empty `scan_roots` array i
 
 ## Status
 
-**`0.3.0` — public alpha, macOS only.** The product works end to end: it scans 14 providers, reports sizes that match `du`, cleans up recoverably, classifies project activity from git history, scans every project tree in a single pass, and can update itself in-app. What is still missing is listed in the [roadmap](docs/development/roadmap.md); what has shipped is in the [changelog](CHANGELOG.md).
+**`0.3.1` — public alpha, macOS only.** The product works end to end: it scans 14 providers, reports sizes that match `du`, cleans up recoverably, classifies project activity from git history, scans every project tree in a single pass, and can update itself in-app. What is still missing is listed in the [roadmap](docs/development/roadmap.md); what has shipped is in the [changelog](CHANGELOG.md).
 
 Not yet done, and worth knowing before you rely on it:
 
-- **Automatic updates start with the next release.** 0.3.0 ships the updater, but an older build has no updater to receive it — this one must still be installed by hand, and updates are arm64 only. See [Updates](#updates).
+- **Automatic updates are live from 0.3.0 on.** 0.3.0 already ships the updater, so a 0.3.0 install receives 0.3.1 in-app; anything older has no updater and must still be installed by hand. Updates are arm64 only. See [Updates](#updates).
 - **Broad ecosystem coverage.** Ruby, Flutter, Android and LLM model stores are not scanned yet.
 - **A CLI.** There is no way to run this from cron or a script.
 - **Unsigned builds.** See [Install](#install).

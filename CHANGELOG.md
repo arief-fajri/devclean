@@ -13,6 +13,12 @@ A contract bump therefore does not imply a product release, and vice versa.
 
 ## [Unreleased]
 
+## [0.3.1] — 2026-10-22
+
+### Fixed
+
+- **The selection bar no longer sits behind page content.** With items selected, the bottom bar (count, safe/review split, *Review & clean selected*) could be painted under the sticky provider headers while the page scrolled, so the actions it carries were covered. It now takes its own stacking level, below the resource drawer and the cleanup dialog but above the page.
+
 ## [0.3.0] — 2026-10-16
 
 ### Added
@@ -114,6 +120,7 @@ Four controls were found claiming enforcement they did not have. All four are fi
 - No known vulnerabilities at release.
 - Report suspected ones privately: see [SECURITY.md](SECURITY.md).
 
+[0.3.1]: https://github.com/arief-fajri/devclean/releases/tag/v0.3.1
 [0.3.0]: https://github.com/arief-fajri/devclean/releases/tag/v0.3.0
 [0.2.0]: https://github.com/arief-fajri/devclean/releases/tag/v0.2.0
 [0.1.0]: https://github.com/arief-fajri/devclean/releases/tag/v0.1.0
