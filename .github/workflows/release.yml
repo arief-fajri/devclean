@@ -1,5 +1,10 @@
 name: release
 
+# Named after the tag being released. The sidebar `name` above is a static
+# identity and takes no expressions; this is per-run and reads `inputs`, so
+# every dispatch titles itself — release v0.3.1, release v0.4.0, …
+run-name: release ${{ inputs.tag }}
+
 # Manual on purpose. For a tool that deletes files, every tag is a support
 # statement — it should be a decision, not a side effect of a merge. The tag is
 # created first (and reviewed as a commit), then this workflow attaches
@@ -65,7 +70,7 @@ jobs:
         working-directory: apps/desktop
 
   build:
-    name: build .app + .dmg
+    name: build ${{ inputs.tag }} — .app + .dmg
     needs: verify
     runs-on: macos-latest
     steps:
@@ -205,7 +210,7 @@ jobs:
           if-no-files-found: error
 
   publish:
-    name: publish release
+    name: publish ${{ inputs.tag }} — release
     needs: build
     runs-on: ubuntu-latest
     steps:
