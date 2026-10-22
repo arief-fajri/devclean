@@ -34,7 +34,7 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 # sizes are not the point — the layout and the categories are.
 # Sized so the dashboard shows a realistic shape — hundreds of MB spread over
 # several providers — rather than a few MB per row. `mkfile` allocates real
-# blocks on APFS, so this is real disk: about 1.4 GB and a few seconds to build.
+# blocks on APFS, so this is real disk: about 2 GB and a few seconds to build.
 # Override both to shrink it.
 FILE_COUNT="${DEVCLEAN_FIXTURE_FILES:-100}"
 FILE_SIZE_KB="${DEVCLEAN_FIXTURE_FILE_KB:-512}"
@@ -86,6 +86,11 @@ JSON
   fill "$proj/dist/assets" "bundle"
   fill "$proj/.next/server" "chunk"
   fill "$proj/.turbo/cache" "turbo"
+
+  # Wave D2: the node rule grew two more framework caches (only ONE of the
+  # three node projects gets each, so the rows stay distinct).
+  write_file "$proj/.svelte-kit/output/app.js"
+  write_file "$proj/.expo/.cache/evidence.bin"
 }
 
 build_rust_project() {
@@ -131,6 +136,11 @@ build_python_project() {
   mkdir -p "$proj/.venv/lib/python3.12/site-packages"
   write_file "$proj/.venv/pyvenv.cfg"
   write_file "$proj/.venv/lib/python3.12/site-packages/pkg.py"
+
+  # Wave D2: the python rule grew three more cache dirs.
+  fill "$proj/.ruff_cache" "ruff"
+  fill "$proj/.tox/py39" "toxenv"
+  fill "$proj/__pypackages__/mypkg" "editable"
 }
 
 build_global_caches() {
@@ -173,6 +183,83 @@ build_global_caches() {
   printf '{"prompt":"keep me"}\n' > "$FIXTURE/.claude/history.jsonl"
 }
 
+build_more_global_caches() {
+  # Wave D2 global_cache additions (all caution; the target list in
+  # global_cache.rs owns them).
+  fill "$FIXTURE/Library/Caches/CocoaPods" "podcache"
+  write_file "$FIXTURE/Library/Caches/Yarn/metadata.cache"
+  write_file "$FIXTURE/Library/Caches/pip/http-v2/blob"
+  write_file "$FIXTURE/.cache/deno/deps/remote"
+  fill "$FIXTURE/.pub-cache/hosted/pub.dev" "pubpkg"
+  write_file "$FIXTURE/.dart-server/fileCache.bin"
+
+  # Wave D5 llm_models (caution; ~/.ollama itself is never a target).
+  fill "$FIXTURE/.ollama/models/blobs" "gguf"
+  fill "$FIXTURE/.cache/huggingface/hub/models--demo--tiny--bert" "weights"
+  write_file "$FIXTURE/.lmstudio/models/tiny.gguf"
+  write_file "$FIXTURE/.cache/llamafile/manifest.json"
+
+  # Wave D5 ruby (the ~/.bundle ROOT holds credentials — only its cache).
+  fill "$FIXTURE/.gem/specs" "gemspec"
+  fill "$FIXTURE/.bundle/cache" "gemcache"
+}
+
+build_xcode() {
+  # Wave D2: xcode_data is now a target list. Archives is DANGEROUS (its
+  # dSYMs die with it) and must show up that way; CoreSimulator/Devices is
+  # deliberately ABSENT — simulator data is not a cache.
+  fill "$FIXTURE/Library/Developer/Xcode/DerivedData/demo-abc/Build/Products" "derived"
+  fill "$FIXTURE/Library/Developer/Xcode/Archives/2026-10-20/demo.xcarchive/dSYMs" "dsym"
+  write_file "$FIXTURE/Library/Developer/Xcode/iOS DeviceSupport/18.0/lib"
+  write_file "$FIXTURE/Library/Developer/Xcode/CoreSimulator/Caches/dyld/dyld_sim"
+}
+
+build_go_project() {
+  # Wave D3: vendor/ next to go.mod.
+  local root="$1" name="$2"
+  local proj="$root/$name"
+  mkdir -p "$proj"
+  printf 'module example.com/%s\n\ngo 1.22\n' "$name" > "$proj/go.mod"
+  fill "$proj/vendor/example.com/dep" "govendor"
+  # A vendor/ WITHOUT go.mod (two levels up is the real risk; this is the
+  # flat negative) must never be offered.
+  write_file "$root/vendor-noise/vendor/keep.out"
+}
+
+build_flutter_project() {
+  # Wave D3: .dart_tool (safe) and build/ (caution) next to pubspec.yaml.
+  local root="$1" name="$2"
+  local proj="$root/$name"
+  mkdir -p "$proj"
+  printf 'name: %s\nenvironment:\n  sdk: ">=3.0.0 <4.0.0"\n' "$name" > "$proj/pubspec.yaml"
+  fill "$proj/build" "dartbuild"
+  fill "$proj/.dart_tool" "pubstate"
+}
+
+build_android_project() {
+  # Wave D3: build/, .gradle/ next to any gradle marker, including a
+  # nested module (android/app/). Separate directory from the flutter
+  # project so no `build/` ever carries both markers.
+  local root="$1" name="$2"
+  local proj="$root/$name"
+  mkdir -p "$proj/app"
+  printf '// root module\n' > "$proj/build.gradle.kts"
+  printf 'rootProject.name = "%s"\n' "$name" > "$proj/settings.gradle.kts"
+  fill "$proj/build" "apk"
+  fill "$proj/.gradle" "gradlehash"
+  printf '// app module\n' > "$proj/app/build.gradle"
+  fill "$proj/app/build" "apkm"
+}
+
+build_pods_project() {
+  # Wave D3: Pods/ next to Podfile (the iOS half of "React Native").
+  local root="$1" name="$2"
+  local proj="$root/$name"
+  mkdir -p "$proj"
+  printf 'platform :ios, "14.0"\n' > "$proj/Podfile"
+  fill "$proj/Pods/Alamofire" "podsrc"
+}
+
 build_settings() {
   # DevClean reads settings from the per-platform app data dir.
   local dir="$FIXTURE/Library/Application Support/devclean"
@@ -200,18 +287,29 @@ build() {
   log "building fixture at $FIXTURE"
   rm -rf "$FIXTURE"
   mkdir -p "$FIXTURE/Projects"
+  # Note: browser_temp is NOT fixture-able — its clone root lives in the
+  # system temp area (/var/folders/…/X), outside this $HOME. Unit tests
+  # cover it with an injected root instead (G-CI-03).
 
   build_node_project  "$FIXTURE/Projects" "storefront"
   build_node_project  "$FIXTURE/Projects" "analytics-dashboard"
   build_node_project  "$FIXTURE/Projects" "docs-site"
   build_rust_project  "$FIXTURE/Projects" "ingest-worker"
   build_python_project "$FIXTURE/Projects" "ml-pipeline"
+  # Wave D3 trees.
+  build_go_project      "$FIXTURE/Projects" "ingest-api"
+  build_flutter_project "$FIXTURE/Projects" "field-app"
+  build_android_project "$FIXTURE/Projects" "mobile-shell"
+  build_pods_project    "$FIXTURE/Projects/ios" "app"
   build_global_caches
+  build_more_global_caches
+  build_xcode
   build_settings
 
   log "node projects : $(find "$FIXTURE/Projects" -maxdepth 2 -name node_modules -type d | wc -l | tr -d ' ')"
   log "rust targets  : $(find "$FIXTURE/Projects" -maxdepth 2 -name target -type d | wc -l | tr -d ' ')"
   log "pycache dirs  : $(find "$FIXTURE/Projects" -name __pycache__ -type d | wc -l | tr -d ' ')"
+  log "wave-D trees  : $(find "$FIXTURE/Projects" \( -name vendor -o -name Pods -o -name .dart_tool -o -name .gradle \) -type d | wc -l | tr -d ' ')"
   log "fixture size  : $(du -sh "$FIXTURE" 2>/dev/null | cut -f1)"
 }
 

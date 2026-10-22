@@ -4,7 +4,7 @@ What is left, not what happened. Shipped work is in [CHANGELOG.md](../../CHANGEL
 
 ## Where we are
 
-Product **0.3.2** is 0.3.1 — the Settings restructure: the first tab is **Providers** (the list only), while scan roots and the ignore list live under **Appearance**. Before that, 0.3.0 — the single-pass project-tree walk (project caches are found and sized in one traversal) and **in-app updates**: Settings checks the release channel, and a signed, verified update can be downloaded and installed without leaving the app — plus a selection-bar layering fix. The contract sits at **v0.12.0**.
+Product **0.4.0** is Wave D — coverage: seven providers added (14 → 21), the existing node/Python/global-cache/Xcode rules widened, a live liveness gate for Chromium-family browser temp files (`BlockReason::BrowserRunning`, re-probed at cleanup), and the whole-scan dedup figure `ScanSummary.unique_bytes`. The contract sits at **v0.13.0**. The reasoning lives in [wave-d-coverage.md](../decisions/wave-d-coverage.md) and [browser-temp-probe.md](../decisions/browser-temp-probe.md); what shipped is in [CHANGELOG.md](../../CHANGELOG.md).
 
 Two numbers move independently — the product version a user installs, and the contract version of the IPC surface between the bundled frontend and backend. A contract bump does not imply a product release, and the reverse is also true. At 1.0 they are aligned deliberately.
 
@@ -17,9 +17,7 @@ Two numbers move independently — the product version a user installs, and the 
 | **B** | Git-aware classification | `0.2.0` | `v0.10.0` |
 | **C** | Single-pass walk | `0.3.0` | `v0.11.0` |
 | — | In-app updates | `0.3.0` | `v0.12.0` |
-| — | Selection-bar layering fix (no contract change) | `0.3.1` | `v0.12.0` |
-| — | Settings tabs restructure (no contract change) | `0.3.2` | `v0.12.0` |
-| **D** | Coverage | `0.4.0` | `v0.13.0` |
+| **D** | Coverage (shipped — see below) | `0.4.0` | `v0.13.0` |
 | **E** | Stabilisation and documentation | `1.0.0` | `v1.0.0` |
 
 Rules that apply to every wave:
@@ -33,77 +31,30 @@ Rules that apply to every wave:
 
 ---
 
-## Wave D — Coverage
+## Wave D — Coverage (SHIPPED — 0.4.0 / v0.13.0)
 
-Depends on the shared walk Wave C shipped in 0.3.0. Without it this would add roughly eight full traversals. Staged D1–D7, one commit per stage; ships as **0.4.0** / contract **v0.13.0**. Providers 14 → 21.
+Executed in seven commits, one per stage (D1–D7), on top of the Wave C shared
+walk it depended on. Providers **14 → 21**: `browser_temp`, `llm_models`,
+`ruby`, `go_vendor`, `flutter`, `android`, `pods`; existing `node_modules`,
+`python_cache`, `global_cache` and `xcode_data` rules widened. The two
+Level B decisions approved 2026-10-20 both shipped as designed:
 
-### Level B decisions (approved 2026-10-20, before implementation)
+- **browser_temp gate — design A.** `BlockReason::BrowserRunning` stamped
+  through `block_reason_for` at scan time, re-probed and refused live through
+  `refusal_for` at cleanup; a failed probe never blocks but floors the safety
+  to `caution` (`NotRunning` is the only state that yields `safe`). Enforced
+  by **G-SAFE-07** and its pin tests.
+- **Cross-artifact dedup — additive field.** `ScanSummary.unique_bytes`:
+  `Some` after a full scan, `None` when the figure can no longer be measured;
+  no `CACHE_VERSION` bump, frontend never recomputes it.
 
-- **browser_temp gate — design A.** A confirmed-running browser stamps a new `BlockReason::BrowserRunning` through `devclean_core::policy::block_reason_for` at scan time, and the cleanup path **re-probes** and refuses live through `CleanupEngine::refusal_for`, so a scan that went stale cannot delete the cache of a browser that started meanwhile. A failed probe (`ProcState::Unknown`) never blocks, but floors the safety to `caution` — never `safe`. `NotRunning` is the only state that yields `safe`. Enforced by the new G-SAFE-07 and tests that pin `Unknown` away from `safe`.
-- **Cross-artifact dedup — additive field.** `ScanSummary.unique_bytes: Option<u64>`: `Some` after a full scan, `None` whenever the figure can no longer be measured (targeted rescan, post-cleanup prune, an older cache). `total_bytes` keeps meaning "sum of the rows". No `CACHE_VERSION` bump: absence is the honest default, and an old cache loading `None` is correct rather than wrong.
-- **Nothing in this wave is deferred to E.** The Wave E carry-over bullet stays only as a contingency.
-
-### The shape of the coverage
-
-Seven new ids. Every path list is fixed server-side; exclusions are decisions, not omissions.
-
-| id | shape | what it finds | safety |
-|---|---|---|---|
-| `browser_temp` | own | zombie Chromium-family code-sign clones under `/var/folders/…/X/*.code_sign_clone` (one resource per browser, from a fixed bundle-prefix → `pgrep` pattern table: Chrome, Chromium, Edge, Brave, Arc, Vivaldi, Opera). Observed at 92 copies / 156 GB in the wild — though APFS copy-on-write means the real reclaim is often ~30× smaller than `du` claims; `freed_bytes` is measured, and `impact` says so. | `NotRunning` → `safe`; `Unknown` → `caution` (floor); `Running` → blocked |
-| `llm_models` | own | `~/.ollama/models` (never `~/.ollama` itself — keys and config live there), `~/.cache/huggingface/hub`, `~/.lmstudio/models`, `~/.cache/lm-studio/models` (legacy), `~/.cache/llamafile` | `caution` |
-| `ruby` | own | `~/.gem`, `~/.bundle/cache` (never the `~/.bundle` root — its config can hold credentials) | `caution` |
-| `flutter` | tree | `build/` and `.dart_tool/` next to a `pubspec.yaml` | `build` → `caution`, `.dart_tool` → `safe` |
-| `android` | tree | `build/`, `.gradle/`, `.cxx/` next to any gradle marker (`build.gradle(.kts)`, `settings.gradle(.kts)`) — covers plain Android projects and the Android half of React Native | `caution` |
-| `pods` | tree | `Pods/` next to a `Podfile` — CocoaPods, the iOS half of "React Native" | `caution` |
-| `go_vendor` | tree | `vendor/` next to a `go.mod` | `caution` |
-
-React Native coverage is therefore `.expo` under `node_modules` (D2), `android` (Gradle), and `pods` (CocoaPods). Shared caches that are not project artifacts — the Dart pub cache among them — ride `global_cache` rather than a tool-specific id.
-
-### D1 — rule enablers
-
-- `TreeRuleSpec.sibling_file` becomes `sibling_files` (any-of). The gradle markers and `Podfile` are one-of-many; the three existing rules change shape only, match semantics otherwise untouched.
-- Equivalence suite green, shared-walk bench re-run (no regression).
-
-### D2 — expanded rules on existing ids
-
-- node `dir_names` `+ .next`, `.turbo`, `.svelte-kit`, `.expo` (sibling `package.json`) — `safe`.
-- Python `CACHE_DIRS` `+ .ruff_cache`, `.tox`, `__pypackages__` — `safe`.
-- `global_cache` targets `+` CocoaPods, Yarn, pip, deno, Dart pub cache (`~/.pub-cache`), Dart server cache — all `caution` (we do not own their internals).
-- `xcode_data` restructured into a target list: DerivedData (`caution`), **Archives (`dangerous` — the dSYMs of shipped builds die with them)**, iOS DeviceSupport (`caution`), `CoreSimulator/Caches` (`caution`). `CoreSimulator/Devices` is deliberately excluded: simulator data is not a cache, and no gate can make it one.
-- Caller-visible (new rows under existing ids): behaviour note in the contract changelog + the equivalence `expected_set` grows as the regression test.
-
-### D3 — the four tree providers
-
-- `go_vendor`, `flutter`, `android`, `pods`: spec, `materialize` with the per-resource safety above, prefixes `gv` / `fl` / `ad` / `pd` in `short_prefix`, `providerMeta` entries + `KNOWN` list, a row each in the cancel contract, and the shared tree fixture extended so those rows are not vacuous.
-
-### D4 — browser_temp (the hazard)
-
-- Discovery: `std::env::temp_dir().parent()` + `X`, then the fixed bundle-prefix table; one resource per browser app dir; the clone root goes through `extra_allowed_roots`, protected-path rules still apply.
-- `safety_for(ProcState)` as a pure function, plus G-SAFE-07 in `guardrails.md`: *a failed liveness probe fails toward more caution, never less* — with the pin test that `Unknown` never yields `safe` and the floor property that it never lowers.
-- `BlockReason::BrowserRunning` + `label()`, `PolicyInputs.browser_running`, gate placed with the other authorization gates (before retention), mirrored in `refusal_for`, badge/hint in `blocked.ts`, and the probe wired in `commands.rs` **twice** — when the scan policy is built and when the cleanup policy is built.
-- ADR: `docs/decisions/browser-temp-probe.md`.
-
-### D5 — llm_models + ruby
-
-- Fixed target lists in the `global_cache` style. A running Ollama daemon changes `detail`/`impact` text only (the precedent `claude` sets); it is not a new gate.
-- ADR: `docs/decisions/wave-d-coverage.md` — every path choice and exclusion in this wave: `vendor/bundle` (its marker is two levels up; matching the whole `vendor/` would offer committed code), AVD userdata and system images, the `~/.bundle` root, and env-var model dirs (`OLLAMA_MODELS`, `HF_HOME`) as a recorded non-goal.
-
-### D6 — cross-artifact deduplication
-
-- Inode keys ride `DirSize` into `Resource` behind `#[serde(skip)]` (internal only; no scanner-context refactor, no shared mutex — providers keep their own sets, `aggregate()` folds them first-wins into `unique_bytes`). Per-artifact figures are unchanged.
-- Invalidation rules: full scan → `Some`; targeted rescan, post-cleanup prune, unknown provenance → `None`. The frontend carries the value and never recomputes it (it cannot: the keys never leave the backend).
-- Tests: `unique_bytes <= total_bytes`, an old cache loads `None`, a targeted merge clears it, and a new guard that no two resources in one scan share a path. Bench: no walk regression.
-
-### D7 — release 0.4.0 / contract v0.13.0
-
-- Contract changelog entry: Providers 14 → 21, `+BrowserRunning`, `+ScanSummary.unique_bytes`, the browser-temp behaviour, the expanded-rules behaviour; each with a named regression test.
-- Fixture (`demo/make-fixture.sh`) gains small trees for every new rule, README screenshots refreshed per `docs/operations/screenshots.md` (G-PUB-04).
-- `CHANGELOG.md`, product bump (`Cargo.toml`, `tauri.conf.json`, README), ADR status lines, "Where we are" rewritten, and **this plan trimmed** — it is an executed plan document once it ships.
-- Full gate: `cargo fmt`, `cargo clippy -D warnings`, `cargo test --workspace`, frontend `check` / `test` / `build`.
-
-Contract `v0.13.0`, additive: new provider ids in `get_providers` and in scan results, `BlockReason::BrowserRunning`, `ScanSummary.unique_bytes`.
-
-**Level B** — new providers change what is offered for deletion, and `browser_temp` is destructive. Both halves approved above, before implementation.
+Nothing was deferred to E. The per-stage plan that drove the work is trimmed
+here on purpose (a plan is an ephemeral artifact); the decisions live in
+[wave-d-coverage.md](../decisions/wave-d-coverage.md) and
+[browser-temp-probe.md](../decisions/browser-temp-probe.md), the shipped
+behaviour in [CHANGELOG.md](../../CHANGELOG.md) and
+[tauri-contract.md](../reference/tauri-contract.md) (v0.13.0, with each
+behaviour's named regression test).
 
 ---
 

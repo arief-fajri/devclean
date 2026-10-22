@@ -10,7 +10,7 @@ Svelte UI (untrusted)
    ▼
 src-tauri: commands + state (thin wiring, no filesystem logic)
    │
-   ├─ ScanManager ──→ providers (14: node_modules, rust target, Go, Docker, …)
+   ├─ ScanManager ──→ providers (21: node_modules, rust target, Go, Docker, …)
    ├─ CleanupEngine ─→ providers.cleanup_action()
    └─ SafetyValidator (gatekeeper, from core)
           │

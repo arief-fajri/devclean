@@ -1,6 +1,6 @@
 # Tauri Contract (public behavior contract)
 
-> The single document defining what the frontend may see. Changing this file = changing the contract → requires a deliberate review and a regression test. Version: **v0.12.0 (in-app updates)**.
+> The single document defining what the frontend may see. Changing this file = changing the contract → requires a deliberate review and a regression test. Version: **v0.13.0 (Wave D coverage)**.
 
 ## Commands (19)
 
@@ -31,8 +31,8 @@
 | Event | Payload | When |
 |---|---|---|
 | `scan_started` | `null` | Scan begins |
-| `scan_provider_started` | `string` (provider id) | A provider **begins** — lets the UI show which one is running, not just which are done (v0.5.0). The three project-tree providers (`node_modules`, `rust_target`, `python_cache`) share one traversal, so they emit together when it begins (v0.11.0) |
-| `scan_progress` | `{provider, done, total}` | Each provider finishes; `done` counts completions and is monotonic. The three project-tree providers tick together when the shared traversal settles (v0.11.0) |
+| `scan_provider_started` | `string` (provider id) | A provider **begins** — lets the UI show which one is running, not just which are done (v0.5.0). The project-tree providers (the original three at v0.11.0, **seven since v0.13.0**) share one traversal, so they emit together when it begins (v0.11.0) |
+| `scan_progress` | `{provider, done, total}` | Each provider finishes; `done` counts completions and is monotonic. The project-tree providers tick together when the shared traversal settles (v0.11.0) |
 | `scan_completed` | `ScanSummary` | All providers finished |
 | `cleanup_started` | `string[]` (ids) | Cleanup begins |
 | `cleanup_progress` | `{done, total}` | One per finished item |
@@ -98,7 +98,7 @@ type Activity = "active" | "recent" | "stale" | "dormant";
 // < 7d      7–30      30–90     90+
 
 type BlockReason = "retention" | "ai_read_only" | "privileged_required"
-  | "docker_scope" | "protected";
+  | "docker_scope" | "protected" | "browser_running";   // +browser_running (v0.13.0)
 
 interface ProviderSummary { provider: string; name: string; total_bytes: number;
   reclaimable_bytes: number; resource_count: number }
@@ -106,8 +106,17 @@ interface ProviderSummary { provider: string; name: string; total_bytes: number;
 interface ScanSummary { total_bytes: number; reclaimable_bytes: number;
   providers: ProviderSummary[]; resources: Resource[];
   /** Bytes the backend will refuse to clean, for ANY reason — retention,
-   *  AI report-only, privileged opt-in, Docker scope, git protection. */
-  blocked_bytes: number }
+   *  AI report-only, privileged opt-in, Docker scope, git protection,
+   *  a running browser. */
+  blocked_bytes: number;
+  /** v0.13.0: distinct-inode bytes across the WHOLE scan — what deleting
+   *  every reported artifact would return, with a hard-linked inode counted
+   *  once. Present after a full scan; null whenever it can no longer be
+   *  measured (targeted rescan, post-cleanup prune, an older cache).
+   *  `total_bytes` keeps meaning "sum of the rows". Carried, never
+   *  recomputed here — the inode keys that define it never leave the
+   *  backend. */
+  unique_bytes?: number | null }
 
 /** v0.9.0: the on-disk cache as the UI sees it. */
 interface CachedScan { summary: ScanSummary; saved_at_unix: number }
@@ -178,6 +187,9 @@ Not:
 11. **A finished cleanup re-scans only the providers it touched (v0.10.0).** It used to run a full scan of every provider, which dimmed the list, disabled selection and made the app feel frozen right after a delete. Now the shell removes the cleaned resources from the list immediately (the backend reported which ids succeeded), so the update does not wait on a scan, and then re-scans only the providers behind those resources, in the background: the list stays interactive, the other providers keep their last-known figures (flagged by the existing "partial re-scan" badge), and the touched providers' rows and the on-disk cache are refreshed. If nothing identifiable was touched, it falls back to a full scan. A full scan is still available from Scan Now / the menu bar.
 12. **The project-tree providers share one traversal (v0.11.0).** `node_modules`, `rust_target` and `python_cache` used to walk every scan root apiece and re-walk each artifact for its size. They now contribute rules to one shared walk that matches and sizes in the same pass. **No command, event or type changed** — the rows and their sizes are identical (equivalence-tested) — but the *timing* of their events did: all three emit `scan_provider_started` together when the shared walk begins, and all three emit `scan_progress` together when it settles, rather than each firing as its own walk finished. `done` stays monotonic and `total` still counts every active provider once, so the bar cannot stall (G-SCAN-05). One edge case changes: a `target/` that is itself a symlink is no longer reported (G-SCAN-03 — symlinks are never followed). Decision record: [docs/decisions/single-pass-walk.md](../decisions/single-pass-walk.md).
 13. **Updates are in-app, signed, and opt-in (v0.12.0).** Settings gains an **Updates** tab: the running version, a Check for updates button, release notes, a download progress bar, Download & install, and Restart to apply. The payload is verified against a minisign public key committed in `tauri.conf.json` **before** it is installed; the download is signature-checked and the endpoint is HTTPS. Nothing is downloaded until the user asks. `install_update` **refuses while a scan or cleanup is running** — restarting mid-deletion is the one dangerous interaction — and it never restarts on its own; that is a separate button. `Settings.check_updates_automatically` (default **false**) adds a startup check, spawned and bounded, never on the window's critical path. A failed check is reported as `phase: "error"` with the reason. Decision record: [docs/decisions/in-app-updates.md](../decisions/in-app-updates.md).
+14. **Seven new provider ids, four of them on the shared walk (v0.13.0).** `get_providers` and scan results now carry `browser_temp`, `llm_models`, `ruby`, `go_vendor`, `flutter`, `android` and `pods` (Providers 14 → 21). The four tree rules ride the Wave C shared walk — one traversal however many rules — so no command or event shape changed; their rows appear under their own ids with their own prefixes (`gv`, `fl`, `ad`, `pd`, `bt`, `lm`, `rb`). Every fixed path list and every exclusion in the wave is recorded in [docs/decisions/wave-d-coverage.md](../decisions/wave-d-coverage.md).
+15. **`blocked_reason: "browser_running"` can now appear, and a browser-temp row's safety reports what the probe knows (v0.13.0).** The seven Chromium-family browsers clone their `.app` bundle into `/var/folders/…/X/<bundle-id>.code_sign_clone/` when codesign re-signs a helper; leftovers of a crashed or automated session are reported as `browser_temp`. A **confirmed-running** browser stamps the new reason at scan time, and the cleanup path **re-probes and refuses live** — a stale scan cannot delete the clone of a browser that started meanwhile. A **failed** liveness probe never blocks, but floors the row's safety to `caution`; `NotRunning` is the only state that yields `safe` (G-SAFE-07). Also new under existing ids: node's rule matches `.next`/`.turbo`/`.svelte-kit`/`.expo`, python's matches `.ruff_cache`/`.tox`/`__pypackages__`, `global_cache` grows six targets, and `xcode_data` becomes four rows — including **Archives as the first `dangerous`** (its dSYMs die with it), with `CoreSimulator/Devices` deliberately excluded. Decision records: [browser-temp-probe.md](../decisions/browser-temp-probe.md), [wave-d-coverage.md](../decisions/wave-d-coverage.md).
+16. **`ScanSummary.unique_bytes` reports the deduplicated figure (v0.13.0).** After a full scan it is the distinct-inode total: an inode hard-linked into two artifacts counts once, while `total_bytes` keeps summing rows as before. It becomes `null` whenever the figure can no longer be measured — a targeted rescan, a post-cleanup prune, an older scan cache — and the frontend carries it without ever recomputing it (the inode keys never leave the backend). No cache version bump: absence is the honest default.
 
 ## Menu bar surface (v0.7.0)
 
@@ -198,6 +210,13 @@ One click of either button opens the menu (`show_menu_on_left_click`); the info 
 
 Contract versions are their own sequence, independent of the product version in `Cargo.toml` — the frontend and backend always ship together, so the contract changes on its own schedule. The two are aligned at 1.0.
 
+- `v0.13.0` — Wave D coverage. **No command or event added, removed or re-typed.** **Types (additive):** `+BlockReason: "browser_running"`; `+ScanSummary.unique_bytes?: number | null` (`#[serde(default)]` → absent is `null`, no `CACHE_VERSION` bump). **Providers 14 → 21:** `+browser_temp`, `+llm_models`, `+ruby`, `+go_vendor`, `+flutter`, `+android`, `+pods`.
+  - **Behaviour:** the four new tree rules ride the shared walk, so their rows appear without any command or event change; the new own-scanners surface through `get_providers` and scan results as every provider does. Every path choice and exclusion in the wave is recorded in [docs/decisions/wave-d-coverage.md](../decisions/wave-d-coverage.md).
+  - **Behaviour:** expanded rules on existing ids — node matches `.next`/`.turbo`/`.svelte-kit`/`.expo` beside `package.json`; python matches `.ruff_cache`/`.tox`/`__pypackages__`; `global_cache` grows CocoaPods, Yarn, pip, deno, the Dart pub cache and the Dart analysis server cache; `xcode_data` becomes a target list whose **Archives row is the first `dangerous`** in the product (`CoreSimulator/Devices` is deliberately excluded — simulator data is not a cache).
+  - **Behaviour:** a confirmed-running Chromium-family browser stamps `blocked_reason: "browser_running"` through `block_reason_for` at scan time, and `cleanup` **re-probes and refuses live** through `refusal_for` (G-SAFE-07): a stale scan cannot delete the clone of a browser that started meanwhile. A FAILED probe never blocks but floors the row's safety to `caution` — `NotRunning` is the only state that yields `safe`. The gate is provider-declared (`Provider::held_while_browsers_run`), never id-matched, so it cannot touch other providers.
+  - **Behaviour:** `ScanSummary.unique_bytes` is the distinct-inode total after a FULL scan (`total_bytes` keeps summing rows), and `null` after a targeted rescan, a post-cleanup prune or from an older cache. The frontend carries it and never recomputes it — the inode keys never leave the backend.
+  - Regression tests: `the_tree_rules_report_the_expected_resource_set`, `the_shared_walk_reports_exactly_the_sum_of_the_solo_walks`, `no_two_resources_in_one_scan_share_a_path` (equivalence); `every_provider_prefix_is_unique`, `the_tree_cancel_fixture_actually_matches`, `browser_temp_stops_when_cancelled`, `llm_models_stops_when_cancelled`, `ruby_stops_when_cancelled`; `a_running_browser_blocks_the_resource`, `browser_running_outranks_retention`, `every_reason_has_a_label` (core policy); `a_running_browser_refuses_browser_temp_even_after_a_clean_scan`, `the_browser_gate_never_touches_other_providers` (engine); `the_browser_gate_reaches_the_scan`, `the_browser_gate_never_reaches_a_provider_without_the_declaration` (scan policy); `unknown_never_yields_safe`, `not_running_is_the_only_state_that_yields_safe`, `the_floor_never_lowers_a_more_cautious_verdict` (G-SAFE-07); `unique_bytes_counts_a_shared_inode_once_and_a_targeted_scan_reports_none`, `a_cache_written_before_unique_bytes_loads_none`, `a_targeted_rescan_replaces_one_provider_and_keeps_the_rest` (Rust); `blocked.test.ts`, `providerMeta.test.ts`, `scan-merge.test.ts` (frontend).
+  - Decision records: [docs/decisions/browser-temp-probe.md](../decisions/browser-temp-probe.md), [docs/decisions/wave-d-coverage.md](../decisions/wave-d-coverage.md).
 - `v0.12.0` — in-app updates. **Commands:** `+get_update_status`, `+check_for_update`, `+install_update`, `+restart_app`. **Events:** `+update_status`. **Types (additive):** `UpdateStatus` + `UpdatePhase`; `Settings.check_updates_automatically` (`#[serde(default)]` → `false`).
   - **Behaviour:** the payload is verified against the minisign public key in `tauri.conf.json` before install; the endpoint is HTTPS and the insecure-transport flag is never set (G-UPD-01).
   - **Behaviour:** the check is bounded at 15s and the download at 300s; the opt-in startup check is spawned, never awaited, so it never holds the window (G-UPD-02).

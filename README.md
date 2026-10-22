@@ -54,7 +54,7 @@ cargo tauri dev
 **Your setup works if:**
 
 - The DevClean window opens (Vite at `http://localhost:1420`)
-- **Overview** shows a reclaimable total and the **Scan now** button lists 14 providers without any setup (see below)
+- **Overview** shows a reclaimable total and the **Scan now** button lists 21 providers without any setup (see below)
 - `cargo test --workspace` is green · `cargo clippy` has 0 warnings · `npm --prefix apps/desktop run check` has 0 errors
 
 Full details: [docs/development/developing.md](docs/development/developing.md), and [CONTRIBUTING.md](CONTRIBUTING.md) for the rules a change has to follow.
@@ -78,7 +78,7 @@ devclean/
 │   └── src-tauri/src/     # main.rs, commands.rs, events.rs, state.rs, tray.rs
 ├── crates/
 │   ├── core/              # types, SafetyValidator, settings, preview tokens
-│   ├── providers/         # Provider trait + 14 resource providers
+│   ├── providers/         # Provider trait + 21 resource providers
 │   ├── scanner/           # ScanManager (concurrent, cancellable) + cache
 │   └── cleanup/           # preview + gated executor, retention, SQLite
 └── docs/
@@ -122,7 +122,7 @@ A `settings.json` written before this release with an empty `scan_roots` array i
 
 ## Status
 
-**`0.3.2` — public alpha, macOS only.** The product works end to end: it scans 14 providers, reports sizes that match `du`, cleans up recoverably, classifies project activity from git history, scans every project tree in a single pass, and can update itself in-app. What is still missing is listed in the [roadmap](docs/development/roadmap.md); what has shipped is in the [changelog](CHANGELOG.md).
+**`0.4.0` — public alpha, macOS only.** The product works end to end: it scans 21 providers, reports sizes that match `du`, cleans up recoverably, classifies project activity from git history, scans every project tree in a single pass, and can update itself in-app. What is still missing is listed in the [roadmap](docs/development/roadmap.md); what has shipped is in the [changelog](CHANGELOG.md).
 
 Not yet done, and worth knowing before you rely on it:
 

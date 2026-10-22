@@ -13,6 +13,18 @@ A contract bump therefore does not imply a product release, and vice versa.
 
 ## [Unreleased]
 
+## [0.4.0] — 2026-10-23
+
+### Added
+
+- **Seven new providers (Wave D coverage): 14 → 21.** Four ride the shared tree walk — `go_vendor` (`vendor/` beside `go.mod`), `flutter` (`.dart_tool/` and `build/` beside `pubspec.yaml`), `android` (`build/`, `.gradle/`, `.cxx/` beside any gradle marker — plain Android projects and the Android half of React Native) and `pods` (`Pods/` beside `Podfile`, the iOS half) — one traversal however many rules, so a scan still walks each root once. Three scan fixed home paths: `llm_models` (Ollama, Hugging Face, LM Studio, llamafile model stores), `ruby` (`~/.gem`, `~/.bundle/cache` — never the `~/.bundle` root, which can hold registry credentials) and `browser_temp`. Every path choice and every deliberate exclusion is recorded in [docs/decisions/wave-d-coverage.md](docs/decisions/wave-d-coverage.md).
+- **Browser temp files, gated by a live liveness probe.** Chromium-family browsers (Chrome, Chromium, Edge, Brave, Arc, Vivaldi, Opera) clone their whole `.app` bundle into the system temp area when codesign re-signs a helper, and crashed or automated sessions leave the copies behind — 92 copies / 156 GB observed in the wild. `browser_temp` reports one row per browser, and a **confirmed-running** browser blocks it: the scan stamps `blocked_reason: "browser_running"` and the cleanup path **re-probes and refuses live**, so a scan that went stale cannot delete the clone of a browser that started meanwhile. A failed probe never blocks but floors the row's safety to `caution`. APFS copy-on-write means the real reclaim is often far smaller than the size shown — `freed_bytes` is measured and the row says so. Contract v0.13.0; decision record: [docs/decisions/browser-temp-probe.md](docs/decisions/browser-temp-probe.md).
+- **`ScanSummary.unique_bytes` — the deduplicated figure.** After a full scan, what deleting every reported artifact would actually return: an inode hard-linked into two artifacts counted once, while `total_bytes` keeps summing rows as before. It becomes `null` whenever the figure can no longer be measured (targeted rescan, post-cleanup prune, an older cache); the frontend carries it and never recomputes it.
+
+### Changed
+
+- **Existing providers cover more.** The node rule now matches `.next`, `.turbo`, `.svelte-kit` and `.expo` beside `package.json`; the Python rule matches `.ruff_cache`, `.tox` and `__pypackages__`; `global_cache` grows CocoaPods, Yarn, pip, deno, the Dart pub cache and the Dart analysis server cache. **Xcode data becomes four rows** — DerivedData (review), **Archives (dangerous: the dSYMs of shipped builds die with it)**, iOS DeviceSupport and the Simulator caches (review) — with Simulator *devices* deliberately excluded: simulator data is not a cache. Contract v0.13.0.
+
 ## [0.3.2] — 2026-10-22
 
 ### Changed
@@ -126,6 +138,7 @@ Four controls were found claiming enforcement they did not have. All four are fi
 - No known vulnerabilities at release.
 - Report suspected ones privately: see [SECURITY.md](SECURITY.md).
 
+[0.4.0]: https://github.com/arief-fajri/devclean/releases/tag/v0.4.0
 [0.3.2]: https://github.com/arief-fajri/devclean/releases/tag/v0.3.2
 [0.3.1]: https://github.com/arief-fajri/devclean/releases/tag/v0.3.1
 [0.3.0]: https://github.com/arief-fajri/devclean/releases/tag/v0.3.0
