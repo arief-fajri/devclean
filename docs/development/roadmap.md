@@ -4,7 +4,7 @@ What is left, not what happened. Shipped work is in [CHANGELOG.md](../../CHANGEL
 
 ## Where we are
 
-Product **0.3.1** is 0.3.0 — the single-pass project-tree walk (project caches are found and sized in one traversal) and **in-app updates**: Settings checks the release channel, and a signed, verified update can be downloaded and installed without leaving the app — plus a selection-bar layering fix. The contract sits at **v0.12.0**.
+Product **0.3.2** is 0.3.1 — the Settings restructure: the first tab is **Providers** (the list only), while scan roots and the ignore list live under **Appearance**. Before that, 0.3.0 — the single-pass project-tree walk (project caches are found and sized in one traversal) and **in-app updates**: Settings checks the release channel, and a signed, verified update can be downloaded and installed without leaving the app — plus a selection-bar layering fix. The contract sits at **v0.12.0**.
 
 Two numbers move independently — the product version a user installs, and the contract version of the IPC surface between the bundled frontend and backend. A contract bump does not imply a product release, and the reverse is also true. At 1.0 they are aligned deliberately.
 
@@ -18,6 +18,7 @@ Two numbers move independently — the product version a user installs, and the 
 | **C** | Single-pass walk | `0.3.0` | `v0.11.0` |
 | — | In-app updates | `0.3.0` | `v0.12.0` |
 | — | Selection-bar layering fix (no contract change) | `0.3.1` | `v0.12.0` |
+| — | Settings tabs restructure (no contract change) | `0.3.2` | `v0.12.0` |
 | **D** | Coverage | `0.4.0` | `v0.13.0` |
 | **E** | Stabilisation and documentation | `1.0.0` | `v1.0.0` |
 

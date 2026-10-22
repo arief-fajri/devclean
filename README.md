@@ -122,7 +122,7 @@ A `settings.json` written before this release with an empty `scan_roots` array i
 
 ## Status
 
-**`0.3.1` — public alpha, macOS only.** The product works end to end: it scans 14 providers, reports sizes that match `du`, cleans up recoverably, classifies project activity from git history, scans every project tree in a single pass, and can update itself in-app. What is still missing is listed in the [roadmap](docs/development/roadmap.md); what has shipped is in the [changelog](CHANGELOG.md).
+**`0.3.2` — public alpha, macOS only.** The product works end to end: it scans 14 providers, reports sizes that match `du`, cleans up recoverably, classifies project activity from git history, scans every project tree in a single pass, and can update itself in-app. What is still missing is listed in the [roadmap](docs/development/roadmap.md); what has shipped is in the [changelog](CHANGELOG.md).
 
 Not yet done, and worth knowing before you rely on it:
 

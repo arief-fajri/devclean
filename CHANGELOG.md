@@ -13,6 +13,12 @@ A contract bump therefore does not imply a product release, and vice versa.
 
 ## [Unreleased]
 
+## [0.3.2] — 2026-10-22
+
+### Changed
+
+- **Settings tabs: Scan → Providers.** The first Settings tab now lists only the providers, each with its on/off toggle and what the last scan found. *Scan roots* and the *Ignore list* moved to **Appearance** (after Theme), where a path-shaped setting fits better; the explanatory *Rows* section there is gone — the Paths toggle it described lives in the Resources toolbar and was never configurable from Settings anyway. Internal tab id, panel ids and test ids follow the rename (`scan` → `providers`). No command, event or response changed; the contract stays at v0.12.0.
+
 ## [0.3.1] — 2026-10-22
 
 ### Fixed
@@ -120,6 +126,7 @@ Four controls were found claiming enforcement they did not have. All four are fi
 - No known vulnerabilities at release.
 - Report suspected ones privately: see [SECURITY.md](SECURITY.md).
 
+[0.3.2]: https://github.com/arief-fajri/devclean/releases/tag/v0.3.2
 [0.3.1]: https://github.com/arief-fajri/devclean/releases/tag/v0.3.1
 [0.3.0]: https://github.com/arief-fajri/devclean/releases/tag/v0.3.0
 [0.2.0]: https://github.com/arief-fajri/devclean/releases/tag/v0.2.0
