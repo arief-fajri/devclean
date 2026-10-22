@@ -72,7 +72,7 @@ describe("isRouteId", () => {
 describe("settings tabs", () => {
   it("keeps the tabs that replaced the dialog's tab strip", () => {
     expect(SETTINGS_TABS.map((t) => t.id)).toEqual([
-      "scan",
+      "providers",
       "cleanup",
       "appearance",
       "updates",
@@ -81,6 +81,7 @@ describe("settings tabs", () => {
   });
 
   it("resolves a tab and refuses an unknown one", () => {
+    expect(settingsTab("providers").label).toBe("Providers");
     expect(settingsTab("cleanup").label).toBe("Cleanup");
     expect(() => settingsTab("nope" as never)).toThrow(/unknown settings tab/);
   });

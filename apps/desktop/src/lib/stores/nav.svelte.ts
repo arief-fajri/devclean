@@ -9,7 +9,7 @@ import { DEFAULT_ROUTE, type RouteId, type SettingsTab } from "$lib/nav";
 
 class NavStore {
   route = $state<RouteId>(DEFAULT_ROUTE);
-  settingsTab = $state<SettingsTab>("scan");
+  settingsTab = $state<SettingsTab>("providers");
   /** Set by ⌘F; the Resources toolbar consumes it once it is mounted, so a
    * later visit to that page never steals focus. */
   pendingSearchFocus = $state(false);

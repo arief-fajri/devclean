@@ -278,8 +278,8 @@
     </div>
 
     <div class="mt-5">
-      {#if navStore.settingsTab === "scan"}
-      <div id="settings-panel-scan" role="tabpanel" aria-labelledby="settings-tab-scan">
+      {#if navStore.settingsTab === "providers"}
+      <div id="settings-panel-providers" role="tabpanel" aria-labelledby="settings-tab-providers">
         <h3 class="text-sm font-semibold text-zinc-900 dark:text-zinc-100">Providers</h3>
         <p class="mt-1 text-xs text-zinc-500">
           A disabled provider is skipped entirely — it never runs and never appears in the
@@ -331,138 +331,6 @@
           </ul>
         {/if}
 
-        <h3 class="mt-6 text-sm font-semibold text-zinc-900 dark:text-zinc-100">Scan roots</h3>
-        <p class="mt-1 text-xs text-zinc-500">
-          Folders DevClean looks in. Cleanup outside these roots is always refused by the safety
-          validator — adding a root widens where caches are found, never what may be deleted.
-        </p>
-
-        <div class="mt-3 flex flex-wrap gap-2">
-          <button
-            class="inline-flex items-center gap-1.5 rounded-lg border border-zinc-200 px-3 py-1.5 text-xs font-medium hover:bg-zinc-100 disabled:opacity-50 dark:border-zinc-700 dark:hover:bg-zinc-800"
-            onclick={() => settingsStore.detect()}
-            disabled={settingsStore.detecting}
-            data-testid="detect-folders"
-          >
-            <span aria-hidden="true" class="flex"><Compass size={13} /></span>
-            {settingsStore.detecting ? "Looking…" : "Detect folders"}
-          </button>
-        </div>
-
-        {#if addable.length > 0}
-          <p class="mt-3 text-xs font-semibold text-zinc-600 dark:text-zinc-300">
-            Suggested folders
-          </p>
-          <ul class="mt-1.5 space-y-1.5" data-testid="root-candidates">
-            {#each addable as c (c.path)}
-              <li
-                class="flex items-center justify-between gap-2 rounded-lg bg-zinc-50 px-2.5 py-1.5 dark:bg-zinc-800/50"
-              >
-                <span class="min-w-0 flex-1">
-                  <span class="block truncate font-mono text-xs" title={c.path}>{c.path}</span>
-                  <span class="block text-[11px] text-zinc-400">
-                    ~{formatBytes(c.approximate_bytes ?? 0)} in {c.cache_count}
-                    {c.cache_count === 1 ? "cache" : "caches"}
-                  </span>
-                </span>
-                <button
-                  class="shrink-0 rounded border border-zinc-200 px-2 py-0.5 text-[11px] hover:bg-zinc-100 dark:border-zinc-700 dark:hover:bg-zinc-700"
-                  onclick={() => addCandidate(c)}
-                >
-                  Add
-                </button>
-              </li>
-            {/each}
-          </ul>
-        {:else if alreadyAdded > 0}
-          <p class="mt-3 text-xs text-zinc-400">
-            {alreadyAdded} suggested {alreadyAdded === 1 ? "folder is" : "folders are"} already
-            a scan root.
-          </p>
-        {/if}
-
-        <ul class="mt-3 space-y-1.5">
-          {#each roots as r (r)}
-            <li
-              class="flex items-center justify-between gap-2 rounded-lg bg-zinc-100 px-2 py-1.5 font-mono text-xs dark:bg-zinc-800"
-            >
-              <span class="min-w-0 flex-1 truncate" title={r}>{r}</span>
-              <button
-                class="shrink-0 rounded px-2 py-0.5 text-xs text-red-600 hover:bg-red-50 dark:hover:bg-red-950"
-                onclick={() => removeRoot(r)}
-                aria-label="Remove {r}"
-              >
-                Remove
-              </button>
-            </li>
-          {/each}
-        </ul>
-        {#if roots.length === 0}
-          <p class="mt-2 text-xs text-amber-700 dark:text-amber-400">
-            At least one scan root is required — without one, project caches such as
-            node_modules cannot be found.
-          </p>
-        {/if}
-        <div class="mt-2 flex gap-2">
-          <input
-            type="text"
-            class="min-w-0 flex-1 rounded-lg border border-zinc-200 bg-transparent px-2 py-1.5 font-mono text-xs dark:border-zinc-700"
-            placeholder="/Users/you/Projects"
-            bind:value={newRoot}
-            onkeydown={(e) => {
-              if (e.key === "Enter") addRoot(newRoot);
-            }}
-            aria-label="New scan root path"
-          />
-          <button
-            class="shrink-0 rounded-lg border border-zinc-200 px-3 py-1.5 text-sm hover:bg-zinc-100 dark:border-zinc-700 dark:hover:bg-zinc-800"
-            onclick={() => addRoot(newRoot)}
-            disabled={!newRoot.trim()}
-          >
-            <span aria-hidden="true" class="flex"><Plus size={14} /></span>
-          </button>
-        </div>
-
-        <h3 class="mt-6 text-sm font-semibold text-zinc-900 dark:text-zinc-100">Ignore list</h3>
-        <p class="mt-1 text-xs text-zinc-500">
-          Projects the scan skips. This is a reporting filter, not a safety control — the safety
-          validator still decides what may be deleted.
-        </p>
-        <ul class="mt-2 space-y-1.5">
-          {#each excluded as x (x)}
-            <li
-              class="flex items-center justify-between gap-2 rounded-lg bg-zinc-100 px-2 py-1.5 font-mono text-xs dark:bg-zinc-800"
-            >
-              <span class="min-w-0 flex-1 truncate" title={x}>{x}</span>
-              <button
-                class="shrink-0 rounded px-2 py-0.5 text-xs text-red-600 hover:bg-red-50 dark:hover:bg-red-950"
-                onclick={() => removeExcluded(x)}
-                aria-label="Remove {x} from the ignore list"
-              >
-                Remove
-              </button>
-            </li>
-          {/each}
-        </ul>
-        <div class="mt-2 flex gap-2">
-          <input
-            type="text"
-            class="min-w-0 flex-1 rounded-lg border border-zinc-200 bg-transparent px-2 py-1.5 font-mono text-xs dark:border-zinc-700"
-            placeholder="/Users/you/Projects/huge-monorepo"
-            bind:value={newExcluded}
-            onkeydown={(e) => {
-              if (e.key === "Enter") addExcluded(newExcluded);
-            }}
-            aria-label="New ignored path"
-          />
-          <button
-            class="shrink-0 rounded-lg border border-zinc-200 px-3 py-1.5 text-sm hover:bg-zinc-100 dark:border-zinc-700 dark:hover:bg-zinc-800"
-            onclick={() => addExcluded(newExcluded)}
-            disabled={!newExcluded.trim()}
-          >
-            <span aria-hidden="true" class="flex"><Plus size={14} /></span>
-          </button>
-        </div>
       </div>
       {:else if navStore.settingsTab === "cleanup"}
       <div id="settings-panel-cleanup" role="tabpanel" aria-labelledby="settings-tab-cleanup">
@@ -697,12 +565,138 @@
           {/each}
         </div>
 
-        <h3 class="mt-6 text-sm font-semibold text-zinc-900 dark:text-zinc-100">Rows</h3>
+        <h3 class="mt-6 text-sm font-semibold text-zinc-900 dark:text-zinc-100">Scan roots</h3>
         <p class="mt-1 text-xs text-zinc-500">
-          The <strong class="font-medium">Paths</strong> toggle in the list toolbar switches the
-          filesystem path under each item on or off. It is remembered for this session, so there
-          is nothing to save here.
+          Folders DevClean looks in. Cleanup outside these roots is always refused by the safety
+          validator — adding a root widens where caches are found, never what may be deleted.
         </p>
+
+        <div class="mt-3 flex flex-wrap gap-2">
+          <button
+            class="inline-flex items-center gap-1.5 rounded-lg border border-zinc-200 px-3 py-1.5 text-xs font-medium hover:bg-zinc-100 disabled:opacity-50 dark:border-zinc-700 dark:hover:bg-zinc-800"
+            onclick={() => settingsStore.detect()}
+            disabled={settingsStore.detecting}
+            data-testid="detect-folders"
+          >
+            <span aria-hidden="true" class="flex"><Compass size={13} /></span>
+            {settingsStore.detecting ? "Looking…" : "Detect folders"}
+          </button>
+        </div>
+
+        {#if addable.length > 0}
+          <p class="mt-3 text-xs font-semibold text-zinc-600 dark:text-zinc-300">
+            Suggested folders
+          </p>
+          <ul class="mt-1.5 space-y-1.5" data-testid="root-candidates">
+            {#each addable as c (c.path)}
+              <li
+                class="flex items-center justify-between gap-2 rounded-lg bg-zinc-50 px-2.5 py-1.5 dark:bg-zinc-800/50"
+              >
+                <span class="min-w-0 flex-1">
+                  <span class="block truncate font-mono text-xs" title={c.path}>{c.path}</span>
+                  <span class="block text-[11px] text-zinc-400">
+                    ~{formatBytes(c.approximate_bytes ?? 0)} in {c.cache_count}
+                    {c.cache_count === 1 ? "cache" : "caches"}
+                  </span>
+                </span>
+                <button
+                  class="shrink-0 rounded border border-zinc-200 px-2 py-0.5 text-[11px] hover:bg-zinc-100 dark:border-zinc-700 dark:hover:bg-zinc-700"
+                  onclick={() => addCandidate(c)}
+                >
+                  Add
+                </button>
+              </li>
+            {/each}
+          </ul>
+        {:else if alreadyAdded > 0}
+          <p class="mt-3 text-xs text-zinc-400">
+            {alreadyAdded} suggested {alreadyAdded === 1 ? "folder is" : "folders are"} already
+            a scan root.
+          </p>
+        {/if}
+
+        <ul class="mt-3 space-y-1.5">
+          {#each roots as r (r)}
+            <li
+              class="flex items-center justify-between gap-2 rounded-lg bg-zinc-100 px-2 py-1.5 font-mono text-xs dark:bg-zinc-800"
+            >
+              <span class="min-w-0 flex-1 truncate" title={r}>{r}</span>
+              <button
+                class="shrink-0 rounded px-2 py-0.5 text-xs text-red-600 hover:bg-red-50 dark:hover:bg-red-950"
+                onclick={() => removeRoot(r)}
+                aria-label="Remove {r}"
+              >
+                Remove
+              </button>
+            </li>
+          {/each}
+        </ul>
+        {#if roots.length === 0}
+          <p class="mt-2 text-xs text-amber-700 dark:text-amber-400">
+            At least one scan root is required — without one, project caches such as
+            node_modules cannot be found.
+          </p>
+        {/if}
+        <div class="mt-2 flex gap-2">
+          <input
+            type="text"
+            class="min-w-0 flex-1 rounded-lg border border-zinc-200 bg-transparent px-2 py-1.5 font-mono text-xs dark:border-zinc-700"
+            placeholder="/Users/you/Projects"
+            bind:value={newRoot}
+            onkeydown={(e) => {
+              if (e.key === "Enter") addRoot(newRoot);
+            }}
+            aria-label="New scan root path"
+          />
+          <button
+            class="shrink-0 rounded-lg border border-zinc-200 px-3 py-1.5 text-sm hover:bg-zinc-100 dark:border-zinc-700 dark:hover:bg-zinc-800"
+            onclick={() => addRoot(newRoot)}
+            disabled={!newRoot.trim()}
+          >
+            <span aria-hidden="true" class="flex"><Plus size={14} /></span>
+          </button>
+        </div>
+
+        <h3 class="mt-6 text-sm font-semibold text-zinc-900 dark:text-zinc-100">Ignore list</h3>
+        <p class="mt-1 text-xs text-zinc-500">
+          Projects the scan skips. This is a reporting filter, not a safety control — the safety
+          validator still decides what may be deleted.
+        </p>
+        <ul class="mt-2 space-y-1.5">
+          {#each excluded as x (x)}
+            <li
+              class="flex items-center justify-between gap-2 rounded-lg bg-zinc-100 px-2 py-1.5 font-mono text-xs dark:bg-zinc-800"
+            >
+              <span class="min-w-0 flex-1 truncate" title={x}>{x}</span>
+              <button
+                class="shrink-0 rounded px-2 py-0.5 text-xs text-red-600 hover:bg-red-50 dark:hover:bg-red-950"
+                onclick={() => removeExcluded(x)}
+                aria-label="Remove {x} from the ignore list"
+              >
+                Remove
+              </button>
+            </li>
+          {/each}
+        </ul>
+        <div class="mt-2 flex gap-2">
+          <input
+            type="text"
+            class="min-w-0 flex-1 rounded-lg border border-zinc-200 bg-transparent px-2 py-1.5 font-mono text-xs dark:border-zinc-700"
+            placeholder="/Users/you/Projects/huge-monorepo"
+            bind:value={newExcluded}
+            onkeydown={(e) => {
+              if (e.key === "Enter") addExcluded(newExcluded);
+            }}
+            aria-label="New ignored path"
+          />
+          <button
+            class="shrink-0 rounded-lg border border-zinc-200 px-3 py-1.5 text-sm hover:bg-zinc-100 dark:border-zinc-700 dark:hover:bg-zinc-800"
+            onclick={() => addExcluded(newExcluded)}
+            disabled={!newExcluded.trim()}
+          >
+            <span aria-hidden="true" class="flex"><Plus size={14} /></span>
+          </button>
+        </div>
       </div>
       {:else if navStore.settingsTab === "updates"}
       <div id="settings-panel-updates" role="tabpanel" aria-labelledby="settings-tab-updates">

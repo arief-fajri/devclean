@@ -72,7 +72,7 @@ export function routeByDigit(digit: number): RouteId | null {
   return ROUTES.find((r) => r.digit === digit)?.id ?? null;
 }
 
-export type SettingsTab = "scan" | "cleanup" | "appearance" | "updates" | "advanced";
+export type SettingsTab = "providers" | "cleanup" | "appearance" | "updates" | "advanced";
 
 export interface SettingsTabDef {
   id: SettingsTab;
@@ -81,9 +81,9 @@ export interface SettingsTabDef {
 }
 
 export const SETTINGS_TABS: SettingsTabDef[] = [
-  { id: "scan", label: "Scan", hint: "What gets looked at, and what is skipped" },
+  { id: "providers", label: "Providers", hint: "Which sources are scanned, and which are off" },
   { id: "cleanup", label: "Cleanup", hint: "What may be deleted, and when" },
-  { id: "appearance", label: "Appearance", hint: "Theme and row display" },
+  { id: "appearance", label: "Appearance", hint: "Theme, scan roots, and ignored paths" },
   { id: "updates", label: "Updates", hint: "Version and in-app updates" },
   { id: "advanced", label: "Advanced", hint: "Resets and details" },
 ];
