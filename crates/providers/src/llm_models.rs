@@ -123,6 +123,7 @@ impl OwnScanner for LlmModelsProvider {
                     size_bytes: size.allocated,
                     reclaimable_bytes: size.allocated,
                     apparent_bytes: size.apparent_if_material(),
+                    inode_bytes: size.inode_bytes.clone(),
                     safety: SafetyLevel::Caution,
                     detail: daemon_up
                         .then(|| "Ollama is running — quit it before cleaning".to_string()),

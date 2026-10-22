@@ -69,6 +69,7 @@ impl TreeRule for PodsProvider {
             size_bytes: size.allocated,
             reclaimable_bytes: size.allocated,
             apparent_bytes: size.apparent_if_material(),
+            inode_bytes: size.inode_bytes.clone(),
             safety: SafetyLevel::Caution,
             detail: Some(project_detail(&project_name, project, size.allocated)),
             age_days: age_days(project),

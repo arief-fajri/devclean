@@ -348,7 +348,14 @@ impl ScanManager {
             );
         }
 
-        aggregate(resources)
+        let mut summary = aggregate(resources);
+        // Wave D6 invalidation: a TARGETED rescan holds one provider's
+        // rows, so a whole-scan figure cannot be measured from it. `None`
+        // is the honest answer — never a stale `Some` from before.
+        if only.is_some() {
+            summary.unique_bytes = None;
+        }
+        summary
     }
 }
 
@@ -399,7 +406,21 @@ fn short_prefix(provider_id: &str) -> &str {
     }
 }
 
-fn aggregate(resources: Vec<Resource>) -> ScanSummary {
+fn aggregate(mut resources: Vec<Resource>) -> ScanSummary {
+    // Wave D6: fold the per-inode maps first-wins into the whole-scan
+    // figure, then CLEAR them — the keys are internal, must never be
+    // retained in `AppState`, the scan cache or any wire payload, and the
+    // maps for a large scan are only affordable while the fold runs.
+    // `BTreeMap` iterates in key order, so the fold is deterministic.
+    let mut seen: std::collections::BTreeSet<(u64, u64)> = std::collections::BTreeSet::new();
+    let mut unique = 0u64;
+    for r in &mut resources {
+        for (key, bytes) in std::mem::take(&mut r.inode_bytes) {
+            if seen.insert(key) {
+                unique = unique.saturating_add(bytes);
+            }
+        }
+    }
     let mut by_provider: HashMap<String, Vec<&Resource>> = HashMap::new();
     for r in &resources {
         by_provider.entry(r.provider.clone()).or_default().push(r);
@@ -432,6 +453,9 @@ fn aggregate(resources: Vec<Resource>) -> ScanSummary {
             .filter(|r| r.blocked_reason.is_some())
             .map(|r| r.reclaimable_bytes)
             .sum(),
+        // `Some` here; a TARGETED scan overrides it to `None` in `run()` —
+        // one provider's rows cannot measure a whole-scan figure.
+        unique_bytes: Some(unique),
         providers: summaries,
         resources,
     }
@@ -496,6 +520,7 @@ mod tests {
                     last_commit_unix: None,
                     blocked_reason: None,
                     blocked_detail: None,
+                    inode_bytes: Default::default(),
                 });
             }
             out
@@ -745,6 +770,7 @@ mod tests {
                     last_commit_unix: None,
                     blocked_reason: None,
                     blocked_detail: None,
+                    inode_bytes: Default::default(),
                 })
                 .collect()
         }
@@ -960,6 +986,84 @@ mod tests {
             summary.resources.iter().map(|r| &r.id).collect::<Vec<_>>()
         );
         assert_eq!(summary.resources.len(), 10, "2 resources × 5 providers");
+    }
+
+    /// Wave D6: two resources sharing an inode are counted ONCE in
+    /// `unique_bytes` (first-wins), while per-artifact figures stay as they
+    /// were; a TARGETED rescan reports `None`, because one provider's rows
+    /// cannot measure a whole-scan figure.
+    #[tokio::test]
+    async fn unique_bytes_counts_a_shared_inode_once_and_a_targeted_scan_reports_none() {
+        struct SharedInodeStub;
+        impl Provider for SharedInodeStub {
+            fn id(&self) -> &'static str {
+                "shared_inode_stub"
+            }
+            fn name(&self) -> &'static str {
+                "Shared-inode stub"
+            }
+            fn default_safety(&self) -> SafetyLevel {
+                SafetyLevel::Safe
+            }
+            fn measure(&self, _path: &Path) -> Option<u64> {
+                None
+            }
+            fn cleanup_action(&self, path: &Path) -> devclean_providers::CleanupAction {
+                devclean_providers::CleanupAction::RemoveDir(path.to_path_buf())
+            }
+        }
+        impl OwnScanner for SharedInodeStub {
+            fn scan(&self, _roots: &[PathBuf], _cancel: &AtomicBool) -> Vec<Resource> {
+                let row = |name: &str, size: u64, map: &[((u64, u64), u64)]| Resource {
+                    id: String::new(),
+                    provider: "shared_inode_stub".to_string(),
+                    name: name.to_string(),
+                    path: PathBuf::from(format!("/nonexistent/{name}")),
+                    size_bytes: size,
+                    reclaimable_bytes: size,
+                    apparent_bytes: None,
+                    safety: SafetyLevel::Safe,
+                    detail: None,
+                    impact: None,
+                    age_days: None,
+                    activity: None,
+                    last_commit_unix: None,
+                    blocked_reason: None,
+                    blocked_detail: None,
+                    inode_bytes: map.iter().copied().collect(),
+                };
+                vec![
+                    // Inode (7,7) appears in BOTH rows: 1000 bytes, counted
+                    // once by the fold. Row sizes are unchanged.
+                    row("a", 1000, &[((7, 7), 1000)]),
+                    row("b", 1500, &[((7, 7), 1000), ((8, 8), 500)]),
+                ]
+            }
+        }
+
+        let mgr = ScanManager::with_config(
+            vec![Scannable::Own(Arc::new(SharedInodeStub))],
+            Duration::from_secs(60),
+        );
+        let full = mgr
+            .scan_all(vec![], &[], &[], permissive(), None, None)
+            .await;
+        assert_eq!(full.total_bytes, 2500, "per-artifact figures unchanged");
+        assert_eq!(
+            full.unique_bytes,
+            Some(1500),
+            "1000 (shared, once) + 500 (distinct)"
+        );
+        assert!(full.unique_bytes.unwrap() <= full.total_bytes);
+        // The keys are cleared once folded: they never reach the cache or
+        // any payload derived from this summary.
+        assert!(full.resources.iter().all(|r| r.inode_bytes.is_empty()));
+
+        // Targeted: not measurable, honestly `None`.
+        let one = mgr
+            .scan_one("shared_inode_stub", vec![], &[], permissive(), None, None)
+            .await;
+        assert_eq!(one.unique_bytes, None, "a partial scan cannot measure it");
     }
 
     /// G-SCAN-05 for the SHARED walk: the three tree rules ride one

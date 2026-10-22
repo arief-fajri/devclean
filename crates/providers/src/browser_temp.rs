@@ -208,6 +208,7 @@ impl BrowserTempProvider {
                 size_bytes: size.allocated,
                 reclaimable_bytes: size.allocated,
                 apparent_bytes: size.apparent_if_material(),
+                inode_bytes: size.inode_bytes.clone(),
                 safety,
                 detail: Some(format!(
                     "{clones} clone dir{}",

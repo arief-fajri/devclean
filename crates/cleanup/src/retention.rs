@@ -375,6 +375,7 @@ mod tests {
             last_commit_unix: None,
             blocked_reason: None,
             blocked_detail: None,
+            inode_bytes: Default::default(),
         };
         let mut old = mk(Some(90));
         apply_retention(&mut old, Some(30));

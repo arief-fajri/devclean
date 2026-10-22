@@ -486,6 +486,29 @@ fn g_scan_03_a_symlink_loop_terminates_and_the_walk_continues() {
     fs::remove_dir_all(&root).unwrap();
 }
 
+/// Wave D6: no two resources in one scan may share a path. `structural_set`
+/// would silently COLLAPSE a duplicate, so this counts instead of comparing
+/// sets — a flutter `build/` and an android `build/` that ever matched the
+/// same directory would show up here as a count mismatch.
+#[test]
+fn no_two_resources_in_one_scan_share_a_path() {
+    let root = scratch("dup-path");
+    build_fixture(&root);
+    let found = scan_tree_providers(&root);
+    let mut seen = BTreeSet::new();
+    for r in &found {
+        assert!(
+            seen.insert(r.path.clone()),
+            "duplicate path in one scan: {} ({})",
+            r.path.display(),
+            r.provider
+        );
+    }
+    assert_eq!(found.len(), seen.len());
+    assert_eq!(found.len(), structural_set(&root, &found).len());
+    fs::remove_dir_all(&root).unwrap();
+}
+
 #[test]
 fn the_shared_walk_reports_exactly_the_sum_of_the_solo_walks() {
     // One traversal must not make the rules see each other: driving each

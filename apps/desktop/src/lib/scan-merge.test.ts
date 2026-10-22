@@ -83,6 +83,22 @@ describe("mergeProviderSummary", () => {
     const merged = mergeProviderSummary(summary(), "node_modules", partial);
     expect(merged.blocked_bytes).toBe(200);
   });
+
+  // Wave D6: one provider's rows cannot measure a whole-scan dedup figure.
+  // The frontend carries `unique_bytes`; a merge must null it, never
+  // recompute it (the inode keys never leave the backend).
+  it("clears unique_bytes — a targeted merge cannot measure it", () => {
+    const before = summary({ unique_bytes: 600 });
+    expect(before.unique_bytes).toBe(600);
+    const partial: ScanSummary = {
+      total_bytes: 50,
+      reclaimable_bytes: 50,
+      blocked_bytes: 0,
+      providers: [],
+      resources: [res({ id: "nm:new", provider: "node_modules", reclaimable_bytes: 50, size_bytes: 50 })],
+    };
+    expect(mergeProviderSummary(before, "node_modules", partial).unique_bytes).toBeNull();
+  });
 });
 
 describe("pruneResources", () => {
@@ -122,5 +138,11 @@ describe("pruneResources", () => {
     });
     const pruned = pruneResources(s, ["go:0"]);
     expect(pruned.blocked_bytes).toBe(0);
+  });
+
+  // Wave D6: rows changed, so the whole-scan figure no longer holds.
+  it("clears unique_bytes — the rows behind it changed", () => {
+    const pruned = pruneResources(summary({ unique_bytes: 600 }), ["nm:0"]);
+    expect(pruned.unique_bytes).toBeNull();
   });
 });

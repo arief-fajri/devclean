@@ -656,6 +656,7 @@ mod tests {
                 last_commit_unix: None,
                 blocked_reason: None,
                 blocked_detail: None,
+                inode_bytes: Default::default(),
             },
         );
         let validator = SafetyValidator::new(vec![root.clone()]);
@@ -703,6 +704,7 @@ mod tests {
                 last_commit_unix: None,
                 blocked_reason: None,
                 blocked_detail: None,
+                inode_bytes: Default::default(),
             },
         );
         // Validator rooted elsewhere: the same path must be refused.
@@ -750,6 +752,7 @@ mod tests {
             last_commit_unix: None,
             blocked_reason: None,
             blocked_detail: None,
+            inode_bytes: Default::default(),
         }
     }
 
@@ -902,6 +905,7 @@ mod tests {
             last_commit_unix: None,
             blocked_reason: None,
             blocked_detail: None,
+            inode_bytes: Default::default(),
         };
         let mut resources = HashMap::new();
         resources.insert(id.clone(), r);
@@ -948,6 +952,7 @@ mod tests {
             last_commit_unix: None,
             blocked_reason: None,
             blocked_detail: None,
+            inode_bytes: Default::default(),
         };
         let mut resources = HashMap::new();
         resources.insert(id.clone(), r);
@@ -1013,6 +1018,7 @@ mod tests {
             last_commit_unix: None,
             blocked_reason: None,
             blocked_detail: None,
+            inode_bytes: Default::default(),
         };
         let mut resources = HashMap::new();
         resources.insert(id.clone(), r);
@@ -1058,6 +1064,7 @@ mod tests {
                 last_commit_unix: None,
                 blocked_reason: None,
                 blocked_detail: None,
+                inode_bytes: Default::default(),
             },
         );
         let providers: HashMap<String, Arc<dyn Provider>> = HashMap::from([(
@@ -1186,6 +1193,7 @@ mod tests {
             last_commit_unix: None,
             blocked_reason: None,
             blocked_detail: None,
+            inode_bytes: Default::default(),
         };
         let mut resources = HashMap::new();
         resources.insert(id.clone(), r);
@@ -1233,6 +1241,7 @@ mod tests {
             last_commit_unix: None,
             blocked_reason: None,
             blocked_detail: None,
+            inode_bytes: Default::default(),
             impact: None,
         }
     }

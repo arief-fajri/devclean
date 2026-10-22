@@ -248,6 +248,7 @@ impl OwnScanner for OpencodeDbProvider {
             // A single database file: apparent and allocated are the same
             // number, so there is nothing extra to report.
             apparent_bytes: None,
+            inode_bytes: Default::default(),
             safety: SafetyLevel::Dangerous,
             detail: Some(format!(
                 "{old_sessions} of {total} sessions are older than {SESSION_RETENTION_DAYS} days"

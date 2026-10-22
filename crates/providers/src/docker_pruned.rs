@@ -130,6 +130,7 @@ impl OwnScanner for DockerPrunedProvider {
                     // External figure (`docker system df`), not a tree walk:
                     // there is no separate logical size to report.
                     apparent_bytes: None,
+                    inode_bytes: Default::default(),
                     safety,
                     detail: Some(format!(
                         "Needs Docker scope “{}” and Privileged operations",

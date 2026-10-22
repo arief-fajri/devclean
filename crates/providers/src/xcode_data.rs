@@ -120,6 +120,7 @@ impl OwnScanner for XcodeDataProvider {
                     size_bytes: size.allocated,
                     reclaimable_bytes: size.allocated,
                     apparent_bytes: size.apparent_if_material(),
+                    inode_bytes: size.inode_bytes.clone(),
                     safety: t.safety,
                     detail: None,
                     age_days: None,

@@ -119,6 +119,7 @@ impl OwnScanner for OpencodeFsProvider {
                     size_bytes: size.allocated,
                     reclaimable_bytes: size.allocated,
                     apparent_bytes: size.apparent_if_material(),
+                    inode_bytes: size.inode_bytes.clone(),
                     safety: SafetyLevel::Caution,
                     detail: Some(if running {
                         "opencode is running — cleanup will be skipped".to_string()

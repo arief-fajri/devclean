@@ -506,6 +506,7 @@ mod tests {
             total_bytes: 1_000,
             reclaimable_bytes: providers.iter().map(|p| p.2).sum(),
             blocked_bytes: kept,
+            unique_bytes: None,
             providers: providers
                 .into_iter()
                 .map(|(id, name, bytes)| ProviderSummary {
@@ -533,6 +534,7 @@ mod tests {
                     last_commit_unix: None,
                     blocked_reason: None,
                     blocked_detail: None,
+                    inode_bytes: Default::default(),
                 })
                 .collect(),
         }

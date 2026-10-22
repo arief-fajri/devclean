@@ -90,6 +90,7 @@ impl OwnScanner for GoProvider {
                     size_bytes: size.allocated,
                     reclaimable_bytes: size.allocated,
                     apparent_bytes: size.apparent_if_material(),
+                    inode_bytes: size.inode_bytes.clone(),
                     safety: SafetyLevel::Safe,
                     detail: None,
                     age_days: None,

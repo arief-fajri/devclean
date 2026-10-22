@@ -216,13 +216,21 @@ impl Scannable {
 /// them (ext4) and zero on APFS. We count **files only** on purpose: it
 /// keeps `allocated == 0` meaning "genuinely empty" everywhere, which the
 /// providers rely on to skip empty caches.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct DirSize {
     /// Allocated blocks (`st_blocks * 512`), hard-linked inodes counted
     /// once *within this tree*.
     pub allocated: u64,
     /// Sum of logical file sizes.
     pub apparent: u64,
+    /// Per-inode allocated bytes, for the cross-artifact dedup fold (Wave
+    /// D6). An inode shared between two artifacts is counted in BOTH
+    /// per-artifact figures (unchanged) and ONCE in
+    /// `ScanSummary.unique_bytes`, which `aggregate()` folds first-wins
+    /// from these maps. Internal only: the field rides `Resource` behind
+    /// `#[serde(skip)]` and is cleared once folded — the keys never leave
+    /// the backend.
+    pub inode_bytes: std::collections::BTreeMap<(u64, u64), u64>,
 }
 
 impl DirSize {
@@ -271,27 +279,32 @@ pub fn dir_size_checked(path: &Path, cancel: &AtomicBool) -> Option<u64> {
 pub(crate) struct SizeScope {
     allocated: u64,
     apparent: u64,
-    seen: std::collections::HashSet<(u64, u64)>,
+    seen: std::collections::BTreeMap<(u64, u64), u64>,
 }
 
 impl SizeScope {
     /// Feed one entry's metadata in. Directories and symlinks contribute
     /// nothing; every file adds its logical length to `apparent`, but a
-    /// hard-linked inode adds its blocks to `allocated` only once.
+    /// hard-linked inode adds its blocks to `allocated` only once — and
+    /// records its bytes under the key, for the D6 fold.
     pub(crate) fn add(&mut self, m: &std::fs::Metadata) {
         if !m.is_file() {
             return;
         }
         self.apparent = self.apparent.saturating_add(m.len());
-        if self.seen.insert(inode_key(m)) {
-            self.allocated = self.allocated.saturating_add(allocated_bytes(m));
+        let key = inode_key(m);
+        if let std::collections::btree_map::Entry::Vacant(e) = self.seen.entry(key) {
+            let bytes = allocated_bytes(m);
+            self.allocated = self.allocated.saturating_add(bytes);
+            e.insert(bytes);
         }
     }
 
-    pub(crate) fn finish(&self) -> DirSize {
+    pub(crate) fn finish(self) -> DirSize {
         DirSize {
             allocated: self.allocated,
             apparent: self.apparent,
+            inode_bytes: self.seen,
         }
     }
 }
@@ -616,43 +629,28 @@ mod tests {
     /// about ordinary trees, where block rounding makes allocated LARGER.
     #[test]
     fn apparent_is_reported_only_when_materially_larger() {
+        fn size(allocated: u64, apparent: u64) -> DirSize {
+            DirSize {
+                allocated,
+                apparent,
+                inode_bytes: Default::default(),
+            }
+        }
         // Ordinary tree: allocated > apparent. Must stay silent.
         assert_eq!(
-            DirSize {
-                allocated: 4096,
-                apparent: 1
-            }
-            .apparent_if_material(),
+            size(4096, 1).apparent_if_material(),
             None,
             "a dense tree must not carry an 'appears as' note"
         );
         // Sparse file: apparent far larger. Must be reported.
         assert_eq!(
-            DirSize {
-                allocated: 8 << 30,
-                apparent: 460 << 30
-            }
-            .apparent_if_material(),
+            size(8 << 30, 460 << 30).apparent_if_material(),
             Some(460 << 30)
         );
         // Larger, but not materially so: still silent.
-        assert_eq!(
-            DirSize {
-                allocated: 100,
-                apparent: 150
-            }
-            .apparent_if_material(),
-            None
-        );
+        assert_eq!(size(100, 150).apparent_if_material(), None);
         // Over 2× but under the 1 GiB floor: silent.
-        assert_eq!(
-            DirSize {
-                allocated: 1000,
-                apparent: 3000
-            }
-            .apparent_if_material(),
-            None
-        );
+        assert_eq!(size(1000, 3000).apparent_if_material(), None);
     }
 
     #[test]

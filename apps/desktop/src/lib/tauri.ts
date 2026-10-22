@@ -78,6 +78,11 @@ export interface ScanSummary {
   /** Bytes held back by the retention policy — reported separately so the
    * headline number never silently shrinks. */
   blocked_bytes: number;
+  /** v0.13.0: distinct-inode bytes across the whole scan — `Some` after a
+   * full scan, `null` whenever the figure can no longer be measured
+   * (targeted rescan, post-cleanup prune, an older cache). The backend
+   * measures it; the frontend carries it and never recomputes it. */
+  unique_bytes?: number | null;
 }
 
 /** The last scan as read from the on-disk cache, with the moment it was taken

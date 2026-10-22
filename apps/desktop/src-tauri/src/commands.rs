@@ -978,6 +978,7 @@ mod preview_deadline_tests {
             total_bytes: 10,
             reclaimable_bytes: 10,
             blocked_bytes: 0,
+            unique_bytes: None,
             providers: vec![devclean_core::ProviderSummary {
                 provider: "node_modules".into(),
                 name: "node_modules".into(),
@@ -1001,6 +1002,7 @@ mod preview_deadline_tests {
                 last_commit_unix: None,
                 blocked_reason: None,
                 blocked_detail: None,
+                inode_bytes: Default::default(),
             }],
         };
         devclean_scanner::save_cached_summary(&cache_path, &["/tmp".into()], &summary)

@@ -120,6 +120,7 @@ impl OwnScanner for ClaudeProvider {
                     size_bytes: size.allocated,
                     reclaimable_bytes: size.allocated,
                     apparent_bytes: size.apparent_if_material(),
+                    inode_bytes: size.inode_bytes.clone(),
                     safety: SafetyLevel::Caution,
                     detail: Some(if running {
                         "Claude Code is running — cleanup will be skipped".to_string()
@@ -164,6 +165,7 @@ impl OwnScanner for ClaudeProvider {
                         size_bytes: size.allocated,
                         reclaimable_bytes: size.allocated,
                         apparent_bytes: size.apparent_if_material(),
+                        inode_bytes: size.inode_bytes.clone(),
                         safety: SafetyLevel::Safe,
                         detail: Some(if running {
                             "Claude Code is running — cleanup will be skipped".to_string()

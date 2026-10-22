@@ -153,6 +153,10 @@ pub fn merge_cached_provider(
         .filter(|r| r.blocked_reason.is_some())
         .map(|r| r.reclaimable_bytes)
         .sum();
+    // Wave D6: a targeted merge replaces ONE provider's rows — the
+    // whole-scan dedup figure is no longer measurable, so it becomes
+    // `None`. Never a stale `Some` from the pre-merge scan.
+    envelope.summary.unique_bytes = None;
 
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
@@ -168,6 +172,7 @@ mod tests {
     fn summary() -> ScanSummary {
         ScanSummary {
             blocked_bytes: 0,
+            unique_bytes: None,
             total_bytes: 10,
             reclaimable_bytes: 10,
             providers: vec![],
@@ -187,6 +192,7 @@ mod tests {
                 last_commit_unix: None,
                 blocked_reason: None,
                 blocked_detail: None,
+                inode_bytes: Default::default(),
             }],
         }
     }
@@ -301,6 +307,7 @@ mod tests {
             last_commit_unix: None,
             blocked_reason: None,
             blocked_detail: None,
+            inode_bytes: Default::default(),
         }
     }
 
@@ -309,6 +316,9 @@ mod tests {
             total_bytes: 700,
             reclaimable_bytes: 700,
             blocked_bytes: 0,
+            // A full scan measured it — which is exactly why the targeted
+            // merge below must clear it.
+            unique_bytes: Some(700),
             providers: vec![
                 devclean_core::ProviderSummary {
                     provider: "node_modules".into(),
@@ -346,6 +356,7 @@ mod tests {
             total_bytes: 50,
             reclaimable_bytes: 50,
             blocked_bytes: 0,
+            unique_bytes: None,
             providers: vec![devclean_core::ProviderSummary {
                 provider: "node_modules".into(),
                 name: "node_modules".into(),
@@ -375,6 +386,12 @@ mod tests {
         );
         assert_eq!(after.summary.total_bytes, 350);
         assert_eq!(after.summary.reclaimable_bytes, 350);
+        // Wave D6: the merge replaced ONE provider's rows, so the whole-scan
+        // dedup figure is no longer measurable — cleared, never stale.
+        assert_eq!(
+            after.summary.unique_bytes, None,
+            "a targeted merge must clear unique_bytes"
+        );
         assert_eq!(
             after
                 .summary
@@ -384,6 +401,27 @@ mod tests {
                 .map(|p| p.reclaimable_bytes),
             Some(300),
             "the untouched provider must survive"
+        );
+        let _ = std::fs::remove_file(&path);
+    }
+
+    /// Wave D6: `unique_bytes` is `#[serde(default)]` with NO cache version
+    /// bump — a cache written before the field exists loads `None`, which is
+    /// the honest answer ("cannot measure"), not an error and not a zero.
+    #[test]
+    fn a_cache_written_before_unique_bytes_loads_none() {
+        let path = cache_path("pre-unique");
+        let _ = std::fs::remove_file(&path);
+        let pre = format!(
+            r#"{{"version":{CACHE_VERSION},"roots":[],"saved_at_unix":1,"summary":{{
+            "total_bytes":10,"reclaimable_bytes":10,"blocked_bytes":0,
+            "providers":[],"resources":[]}}}}"#
+        );
+        std::fs::write(&path, pre).unwrap();
+        let loaded = load_cached_scan(&path, &[]).expect("the cache must still load");
+        assert_eq!(
+            loaded.summary.unique_bytes, None,
+            "absence is the honest default for an older cache"
         );
         let _ = std::fs::remove_file(&path);
     }
@@ -398,6 +436,7 @@ mod tests {
             total_bytes: 0,
             reclaimable_bytes: 0,
             blocked_bytes: 0,
+            unique_bytes: None,
             providers: vec![],
             resources: vec![],
         };

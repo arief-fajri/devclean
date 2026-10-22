@@ -135,6 +135,15 @@ pub struct Resource {
     /// 30-day retention policy (this is 12d old)".
     #[serde(default)]
     pub blocked_detail: Option<String>,
+    /// Per-inode allocated bytes, carried from the sizing walk for the
+    /// cross-artifact dedup fold (Wave D6). **Internal only** —
+    /// `#[serde(skip)]` keeps it out of the contract, the scan cache and
+    /// every wire payload; `aggregate()` folds it first-wins into
+    /// `ScanSummary.unique_bytes` and clears it, so it never outlives the
+    /// scan that produced it. The frontend could not recompute it if it
+    /// wanted to: the keys never leave the backend.
+    #[serde(skip)]
+    pub inode_bytes: std::collections::BTreeMap<(u64, u64), u64>,
 }
 
 /// Why a reported resource cannot be cleaned (contract v0.8.0).
@@ -252,6 +261,21 @@ pub struct ScanSummary {
     /// of Docker images held back by the privileged opt-in.
     #[serde(default)]
     pub blocked_bytes: u64,
+    /// Distinct-inode bytes across the WHOLE scan (contract v0.13.0): what
+    /// deleting every reported artifact would actually return, with an inode
+    /// hard-linked into two artifacts counted ONCE. `total_bytes` keeps
+    /// meaning "sum of the rows" — an inode inside two artifacts is counted
+    /// in both, because each artifact's figure must stand alone (D6).
+    ///
+    /// `Some` only after a full scan, where the figure can be measured.
+    /// `None` whenever it can no longer be: a targeted rescan (one
+    /// provider's rows, not the whole set), a post-cleanup prune, or an
+    /// older scan cache. Absence is the honest default — no `CACHE_VERSION`
+    /// bump; an old cache loading `None` is correct rather than wrong. The
+    /// frontend carries the value and never recomputes it: the inode keys
+    /// that define it never leave the backend.
+    #[serde(default)]
+    pub unique_bytes: Option<u64>,
 }
 
 /// The last scan as the UI receives it from the cache: the summary plus the
@@ -456,6 +480,7 @@ mod tests {
             last_commit_unix: None,
             blocked_reason: None,
             blocked_detail: None,
+            inode_bytes: Default::default(),
         };
         let back: Resource = serde_json::from_str(&serde_json::to_string(&r).unwrap()).unwrap();
         assert_eq!(back.impact, r.impact);

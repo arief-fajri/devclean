@@ -189,6 +189,7 @@ impl OwnScanner for DockerProvider {
             // External figure (`docker system df`), not a tree walk: there is
             // no separate logical size to report.
             apparent_bytes: None,
+            inode_bytes: Default::default(),
             safety: SafetyLevel::Safe,
             detail: None,
             age_days: None,

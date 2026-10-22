@@ -181,6 +181,7 @@ mod tests {
             last_commit_unix: None,
             blocked_reason: None,
             blocked_detail: None,
+            inode_bytes: Default::default(),
         }
     }
 

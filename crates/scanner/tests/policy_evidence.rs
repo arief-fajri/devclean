@@ -43,6 +43,7 @@ fn resource(id: &str, provider: &str, age_days: Option<u64>) -> Resource {
         last_commit_unix: None,
         blocked_reason: None,
         blocked_detail: None,
+        inode_bytes: Default::default(),
     }
 }
 

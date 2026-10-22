@@ -46,7 +46,10 @@ export function mergeProviderSummary(
     ...partial.providers,
   ].sort((a, b) => b.reclaimable_bytes - a.reclaimable_bytes);
 
-  return { ...totals(resources), providers, resources };
+  // Wave D6: a targeted merge holds a subset of rows — the whole-scan dedup
+  // figure is no longer measurable, so it becomes null. The frontend never
+  // recomputes it: the inode keys that define it never leave the backend.
+  return { ...totals(resources), unique_bytes: null, providers, resources };
 }
 
 /**
@@ -66,7 +69,9 @@ export function pruneResources(summary: ScanSummary, removedIds: Iterable<string
 
   const names = new Map(summary.providers.map((p) => [p.provider, p.name]));
   const providers = summarize(resources, names);
-  return { ...totals(resources), providers, resources };
+  // Wave D6: rows were removed, so the whole-scan figure no longer holds —
+  // null until the next full scan measures it again.
+  return { ...totals(resources), unique_bytes: null, providers, resources };
 }
 
 /** Per-provider totals for a resource set, biggest reclaimable first. */
