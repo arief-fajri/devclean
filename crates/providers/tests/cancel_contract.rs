@@ -15,9 +15,9 @@
 use devclean_providers::{
     walk_tree_rules, AndroidProvider, BrowserTempProvider, CargoRegistryProvider, ClaudeProvider,
     DockerProvider, DockerPrunedProvider, FlutterProvider, GlobalCacheProvider, GoProvider,
-    GoVendorProvider, GradleCacheProvider, NodeModulesProvider, NpmCacheProvider,
-    OpencodeDbProvider, OpencodeFsProvider, OwnScanner, PodsProvider, PythonCacheProvider,
-    RustTargetProvider, TreeRule, XcodeDataProvider,
+    GoVendorProvider, GradleCacheProvider, LlmModelsProvider, NodeModulesProvider,
+    NpmCacheProvider, OpencodeDbProvider, OpencodeFsProvider, OwnScanner, PodsProvider,
+    PythonCacheProvider, RubyProvider, RustTargetProvider, TreeRule, XcodeDataProvider,
 };
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
@@ -178,6 +178,16 @@ fn xcode_data_stops_when_cancelled() {
 #[test]
 fn browser_temp_stops_when_cancelled() {
     assert!(cancelled_scan(&BrowserTempProvider::default()).is_empty());
+}
+
+#[test]
+fn llm_models_stops_when_cancelled() {
+    assert!(cancelled_scan(&LlmModelsProvider).is_empty());
+}
+
+#[test]
+fn ruby_stops_when_cancelled() {
+    assert!(cancelled_scan(&RubyProvider).is_empty());
 }
 
 #[test]

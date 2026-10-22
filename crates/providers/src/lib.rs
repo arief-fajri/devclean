@@ -15,6 +15,7 @@ pub mod global_cache;
 pub mod go;
 pub mod go_vendor;
 pub mod gradle_cache;
+pub mod llm_models;
 pub mod node;
 pub mod npm_cache;
 pub mod opencode_db;
@@ -23,6 +24,7 @@ pub mod pods;
 pub mod provider;
 pub mod python_cache;
 pub mod registry;
+pub mod ruby;
 pub mod rust_target;
 pub mod tree;
 pub mod xcode_data;
@@ -41,6 +43,7 @@ pub use global_cache::GlobalCacheProvider;
 pub use go::GoProvider;
 pub use go_vendor::GoVendorProvider;
 pub use gradle_cache::GradleCacheProvider;
+pub use llm_models::LlmModelsProvider;
 pub use node::NodeModulesProvider;
 pub use npm_cache::NpmCacheProvider;
 pub use opencode_db::OpencodeDbProvider;
@@ -53,6 +56,7 @@ pub use provider::{
 };
 pub use python_cache::PythonCacheProvider;
 pub use registry::ProviderRegistry;
+pub use ruby::RubyProvider;
 pub use rust_target::RustTargetProvider;
 pub use tree::{walk_tree_rules, Match, TreeRule, TreeRuleSpec};
 pub use xcode_data::XcodeDataProvider;
@@ -82,5 +86,8 @@ pub fn all_providers() -> Vec<Scannable> {
         Scannable::Tree(Arc::new(PodsProvider)),
         // Wave D4: the hazard.
         Scannable::Own(Arc::new(BrowserTempProvider::default())),
+        // Wave D5.
+        Scannable::Own(Arc::new(LlmModelsProvider)),
+        Scannable::Own(Arc::new(RubyProvider)),
     ]
 }

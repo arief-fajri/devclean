@@ -9,6 +9,7 @@ import {
   Archive,
   Bird,
   Boxes,
+  BrainCircuit,
   Coffee,
   Container,
   Database,
@@ -177,6 +178,20 @@ export const PROVIDER_META: Record<string, ProviderMeta> = {
     label: "Browser temp",
     accent: "text-fuchsia-600 dark:text-fuchsia-400",
     tile: "bg-fuchsia-100 dark:bg-fuchsia-950",
+  },
+  llm_models: {
+    icon: BrainCircuit,
+    tick: BrainCircuit,
+    label: "LLM models",
+    accent: "text-violet-600 dark:text-violet-400",
+    tile: "bg-violet-100 dark:bg-violet-950",
+  },
+  ruby: {
+    icon: Coffee,
+    tick: Coffee,
+    label: "Ruby caches",
+    accent: "text-red-700 dark:text-red-300",
+    tile: "bg-red-100 dark:bg-red-950",
   },
 };
 

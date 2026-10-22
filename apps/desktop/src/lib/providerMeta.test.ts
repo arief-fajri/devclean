@@ -27,6 +27,8 @@ const KNOWN = [
   "android",
   "pods",
   "browser_temp",
+  "llm_models",
+  "ruby",
 ];
 
 describe("providerMeta", () => {
