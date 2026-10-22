@@ -1,10 +1,12 @@
-//! Wave C characterization: the set of resources the three project-tree
+//! Wave C characterization: the set of resources the project-tree
 //! providers report over one fixture tree.
 //!
 //! This test is the refactor's safety net. `scan_tree_providers` below is
-//! the ONLY part that changes across Wave C (three independent walks → one
-//! shared walk); the fixture and every assertion are meant to stay
-//! byte-identical so the equivalence is reviewable as a diff of one function.
+//! the ONLY part that changed across Wave C (three independent walks → one
+//! shared walk); the fixture and assertions stayed byte-identical so the
+//! equivalence was reviewable as a diff of one function. Wave D grows the
+//! fixture and `expected_set` as the regression test for the expanded
+//! rules — every addition is marked.
 //!
 //! Sizes are filesystem-dependent (allocated blocks), so the assertions are
 //! structural (which paths, which quirks) plus size *invariants* that pin the
@@ -146,6 +148,27 @@ fn build_fixture(root: &Path) {
         &pseudo_random(500, 9),
     );
 
+    // Wave D2 — the node rule grew four framework build caches, each next
+    // to the same package.json. A stray .next WITHOUT package.json is
+    // ignored, like every other sibling-gated match.
+    write_file(&root.join("node-next/package.json"), b"{}");
+    write_file(&root.join("node-next/.next/server/app.js"), b"build");
+    write_file(&root.join("node-next/.turbo/cache/t.json"), b"cache");
+    write_file(&root.join("node-next/.svelte-kit/output/app.js"), b"build");
+    write_file(&root.join("node-next/.expo/.cache/e.json"), b"cache");
+    write_file(&root.join("node-stray-next/.next/x.js"), b"stray");
+
+    // Wave D2 — the python rule grew three more cache dirs. Empty ones are
+    // skipped like every other python artifact.
+    write_file(&root.join("py-proj/.ruff_cache/cache"), b"cache");
+    write_file(&root.join("py-proj/.tox/py3/cache"), b"env");
+    write_file(&root.join("py-proj/__pypackages__/pkg/mod.py"), b"code");
+    fs::create_dir_all(root.join("py-empty/.ruff_cache")).unwrap();
+
+    // A __pycache__ inside .tox IS reported: skip_nested stays false for
+    // python (characterized — its bytes land in both rows).
+    write_file(&root.join("py-tox/.tox/py3/lib/__pycache__/x.pyc"), b"pyc");
+
     // Depth boundaries (WalkDir depth: root=0, direct children=1, so the
     // `bound/` prefix itself is depth 1 and eats one level of budget).
     // node_modules at depth 6: matched. At depth 7: invisible.
@@ -226,6 +249,16 @@ fn expected_set() -> BTreeSet<(String, String)> {
         ("python_cache", "py-proj/.mypy_cache"),
         ("python_cache", "py-venv/.venv/lib/__pycache__"),
         ("python_cache", "bound/v/w/x/y/__pycache__"),
+        // Wave D2 additions.
+        ("node_modules", "node-next/.next"),
+        ("node_modules", "node-next/.turbo"),
+        ("node_modules", "node-next/.svelte-kit"),
+        ("node_modules", "node-next/.expo"),
+        ("python_cache", "py-proj/.ruff_cache"),
+        ("python_cache", "py-proj/.tox"),
+        ("python_cache", "py-proj/__pypackages__"),
+        ("python_cache", "py-tox/.tox"),
+        ("python_cache", "py-tox/.tox/py3/lib/__pycache__"),
     ]
     .into_iter()
     .map(|(p, r)| (p.to_string(), r.to_string()))

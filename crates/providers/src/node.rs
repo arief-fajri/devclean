@@ -1,8 +1,10 @@
 //! `node_modules` provider (MVP flagship).
 //!
-//! Finds `node_modules/` directories whose parent holds a `package.json`.
-//! Cleans by deleting the directory only — lockfiles are never touched.
-//! Matching happens in the shared project-tree walk ([`crate::tree`]).
+//! Finds `node_modules/` directories whose parent holds a `package.json`,
+//! plus the framework build caches that live by the same rule (`.next`,
+//! `.turbo`, `.svelte-kit`, `.expo`). Cleans by deleting the directory only
+//! — lockfiles and source are never touched. Matching happens in the
+//! shared project-tree walk ([`crate::tree`]).
 
 use super::provider::{
     age_days, impact, measure_dir, project_detail, CleanupAction, DirSize, Provider,
@@ -41,7 +43,10 @@ impl Provider for NodeModulesProvider {
 impl TreeRule for NodeModulesProvider {
     fn spec(&self) -> TreeRuleSpec {
         TreeRuleSpec {
-            dir_names: &["node_modules"],
+            // node_modules plus the framework build caches that sit next
+            // to the same package.json (Wave D2). All safe: regenerable
+            // from the lockfile or the next build.
+            dir_names: &["node_modules", ".next", ".turbo", ".svelte-kit", ".expo"],
             sibling_files: &["package.json"],
             max_depth: 6,
             // A node_modules inside a node_modules: not a second artifact —
@@ -58,10 +63,27 @@ impl TreeRule for NodeModulesProvider {
             .file_name()
             .map(|s| s.to_string_lossy().into_owned())
             .unwrap_or_else(|| "?".to_string());
+        let dir_name = dir
+            .file_name()
+            .map(|s| s.to_string_lossy().into_owned())
+            .unwrap_or_else(|| "?".to_string());
+        let impact = if dir_name == "node_modules" {
+            impact(
+                "Dependencies are reinstalled from the lockfile; source code is untouched.",
+                Some("Next install re-downloads packages"),
+                None,
+            )
+        } else {
+            impact(
+                "Build output only; the next build regenerates it and source code is untouched.",
+                Some("The next dev build starts from scratch"),
+                None,
+            )
+        };
         Some(Resource {
             id: String::new(),
             provider: self.id().to_string(),
-            name: format!("{project_name}/node_modules"),
+            name: format!("{project_name}/{dir_name}"),
             path: dir.to_path_buf(),
             size_bytes: size.allocated,
             reclaimable_bytes: size.allocated,
@@ -73,11 +95,7 @@ impl TreeRule for NodeModulesProvider {
             last_commit_unix: None,
             blocked_reason: None,
             blocked_detail: None,
-            impact: impact(
-                "Dependencies are reinstalled from the lockfile; source code is untouched.",
-                Some("Next install re-downloads packages"),
-                None,
-            ),
+            impact,
         })
     }
 }

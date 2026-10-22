@@ -92,6 +92,36 @@ const TARGETS: &[Target] = &[
         label: "opencode cache",
         regenerates: "opencode rebuilds it on the next start.",
     },
+    Target {
+        rel: "Library/Caches/CocoaPods",
+        label: "CocoaPods cache",
+        regenerates: "CocoaPods re-downloads pods on the next `pod install`.",
+    },
+    Target {
+        rel: "Library/Caches/Yarn",
+        label: "Yarn cache",
+        regenerates: "Yarn re-fetches packages on the next install.",
+    },
+    Target {
+        rel: "Library/Caches/pip",
+        label: "pip cache",
+        regenerates: "pip re-downloads wheels on the next install.",
+    },
+    Target {
+        rel: ".cache/deno",
+        label: "Deno cache",
+        regenerates: "Deno re-fetches modules on the next run.",
+    },
+    Target {
+        rel: ".pub-cache",
+        label: "Dart pub cache",
+        regenerates: "pub re-downloads packages on the next `pub get`.",
+    },
+    Target {
+        rel: ".dart-server",
+        label: "Dart analysis server cache",
+        regenerates: "The analysis server rebuilds it on the next session.",
+    },
 ];
 
 pub struct GlobalCacheProvider;

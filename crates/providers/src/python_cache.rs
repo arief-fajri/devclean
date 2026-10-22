@@ -1,10 +1,12 @@
 //! Python cache provider. Finds regenerable bytecode/test caches
-//! (`__pycache__/`, `.pytest_cache/`, `.mypy_cache/`) under scan roots and
-//! deletes the directory only.
+//! (`__pycache__/`, `.pytest_cache/`, `.mypy_cache/`, `.ruff_cache/`,
+//! `.tox/`, `__pypackages__/`) under scan roots and deletes the directory
+//! only.
 //!
 //! Virtualenvs (`.venv/`, `venv/`, …) are NEVER reported: they may hold
 //! non-reinstallable state and count as significant destructive scope
-//! (G-SAFE-03).
+//! (G-SAFE-03). `.tox` is not a user venv — it is tox's own environment
+//! cache, recreated by the next `tox` run (Wave D2).
 
 use super::provider::{
     age_days, impact, measure_dir, project_detail, CleanupAction, DirSize, Provider,
@@ -15,8 +17,15 @@ use std::path::{Path, PathBuf};
 
 pub struct PythonCacheProvider;
 
-/// Cache dir names we own. Anything else (notably venvs) is ignored.
-const CACHE_DIRS: &[&str] = &["__pycache__", ".pytest_cache", ".mypy_cache"];
+/// Cache dir names we own. Anything else (notably user venvs) is ignored.
+const CACHE_DIRS: &[&str] = &[
+    "__pycache__",
+    ".pytest_cache",
+    ".mypy_cache",
+    ".ruff_cache",
+    ".tox",
+    "__pypackages__",
+];
 
 impl Provider for PythonCacheProvider {
     fn id(&self) -> &'static str {
