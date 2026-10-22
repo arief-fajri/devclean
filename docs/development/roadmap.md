@@ -33,32 +33,75 @@ Rules that apply to every wave:
 
 ## Wave D — Coverage
 
-Depends on the shared walk Wave C shipped in 0.3.0. Without it this would add roughly eight full traversals.
+Depends on the shared walk Wave C shipped in 0.3.0. Without it this would add roughly eight full traversals. Staged D1–D7, one commit per stage; ships as **0.4.0** / contract **v0.13.0**. Providers 14 → 21.
 
-### New providers
+### Level B decisions (approved 2026-10-20, before implementation)
 
-- `browser_temp` — zombie Chromium code-sign clones (observed at 92 copies / 156 GB in the wild)
-- `llm_models` — LM Studio, Hugging Face, Ollama, llamafile
-- `ruby`, `flutter`, `android`
+- **browser_temp gate — design A.** A confirmed-running browser stamps a new `BlockReason::BrowserRunning` through `devclean_core::policy::block_reason_for` at scan time, and the cleanup path **re-probes** and refuses live through `CleanupEngine::refusal_for`, so a scan that went stale cannot delete the cache of a browser that started meanwhile. A failed probe (`ProcState::Unknown`) never blocks, but floors the safety to `caution` — never `safe`. `NotRunning` is the only state that yields `safe`. Enforced by the new G-SAFE-07 and tests that pin `Unknown` away from `safe`.
+- **Cross-artifact dedup — additive field.** `ScanSummary.unique_bytes: Option<u64>`: `Some` after a full scan, `None` whenever the figure can no longer be measured (targeted rescan, post-cleanup prune, an older cache). `total_bytes` keeps meaning "sum of the rows". No `CACHE_VERSION` bump: absence is the honest default, and an old cache loading `None` is correct rather than wrong.
+- **Nothing in this wave is deferred to E.** The Wave E carry-over bullet stays only as a contingency.
 
-### Expanded rules
+### The shape of the coverage
 
-- node: `.next`, `.turbo`, `.svelte-kit`, React Native
-- Python: `.ruff_cache`, `.tox`, `__pypackages__`
-- Go: `vendor/` as `caution`
-- system caches; Xcode `Archives`, DeviceSupport, CoreSimulator
+Seven new ids. Every path list is fixed server-side; exclusions are decisions, not omissions.
 
-### The browser_temp hazard
+| id | shape | what it finds | safety |
+|---|---|---|---|
+| `browser_temp` | own | zombie Chromium-family code-sign clones under `/var/folders/…/X/*.code_sign_clone` (one resource per browser, from a fixed bundle-prefix → `pgrep` pattern table: Chrome, Chromium, Edge, Brave, Arc, Vivaldi, Opera). Observed at 92 copies / 156 GB in the wild — though APFS copy-on-write means the real reclaim is often ~30× smaller than `du` claims; `freed_bytes` is measured, and `impact` says so. | `NotRunning` → `safe`; `Unknown` → `caution` (floor); `Running` → blocked |
+| `llm_models` | own | `~/.ollama/models` (never `~/.ollama` itself — keys and config live there), `~/.cache/huggingface/hub`, `~/.lmstudio/models`, `~/.cache/lm-studio/models` (legacy), `~/.cache/llamafile` | `caution` |
+| `ruby` | own | `~/.gem`, `~/.bundle/cache` (never the `~/.bundle` root — its config can hold credentials) | `caution` |
+| `flutter` | tree | `build/` and `.dart_tool/` next to a `pubspec.yaml` | `build` → `caution`, `.dart_tool` → `safe` |
+| `android` | tree | `build/`, `.gradle/`, `.cxx/` next to any gradle marker (`build.gradle(.kts)`, `settings.gradle(.kts)`) — covers plain Android projects and the Android half of React Native | `caution` |
+| `pods` | tree | `Pods/` next to a `Podfile` — CocoaPods, the iOS half of "React Native" | `caution` |
+| `go_vendor` | tree | `vendor/` next to a `go.mod` | `caution` |
 
-`pgrep` cannot see the process table from a sandboxed process. A failed probe must **raise** the safety level to `caution`, never lower it to `safe`. The inverse deletes the cache of a browser that is currently running.
+React Native coverage is therefore `.expo` under `node_modules` (D2), `android` (Gradle), and `pods` (CocoaPods). Shared caches that are not project artifacts — the Dart pub cache among them — ride `global_cache` rather than a tool-specific id.
 
-### Also here
+### D1 — rule enablers
 
-Cross-artifact deduplication for the *total*. Per-artifact figures already deduplicate hard links within one tree; the total does not.
+- `TreeRuleSpec.sibling_file` becomes `sibling_files` (any-of). The gradle markers and `Podfile` are one-of-many; the three existing rules change shape only, match semantics otherwise untouched.
+- Equivalence suite green, shared-walk bench re-run (no regression).
 
-Contract `v0.13.0`, additive: new provider ids in `get_providers` and in scan results.
+### D2 — expanded rules on existing ids
 
-**Level B** — new providers change what is offered for deletion, and `browser_temp` is destructive.
+- node `dir_names` `+ .next`, `.turbo`, `.svelte-kit`, `.expo` (sibling `package.json`) — `safe`.
+- Python `CACHE_DIRS` `+ .ruff_cache`, `.tox`, `__pypackages__` — `safe`.
+- `global_cache` targets `+` CocoaPods, Yarn, pip, deno, Dart pub cache (`~/.pub-cache`), Dart server cache — all `caution` (we do not own their internals).
+- `xcode_data` restructured into a target list: DerivedData (`caution`), **Archives (`dangerous` — the dSYMs of shipped builds die with them)**, iOS DeviceSupport (`caution`), `CoreSimulator/Caches` (`caution`). `CoreSimulator/Devices` is deliberately excluded: simulator data is not a cache, and no gate can make it one.
+- Caller-visible (new rows under existing ids): behaviour note in the contract changelog + the equivalence `expected_set` grows as the regression test.
+
+### D3 — the four tree providers
+
+- `go_vendor`, `flutter`, `android`, `pods`: spec, `materialize` with the per-resource safety above, prefixes `gv` / `fl` / `ad` / `pd` in `short_prefix`, `providerMeta` entries + `KNOWN` list, a row each in the cancel contract, and the shared tree fixture extended so those rows are not vacuous.
+
+### D4 — browser_temp (the hazard)
+
+- Discovery: `std::env::temp_dir().parent()` + `X`, then the fixed bundle-prefix table; one resource per browser app dir; the clone root goes through `extra_allowed_roots`, protected-path rules still apply.
+- `safety_for(ProcState)` as a pure function, plus G-SAFE-07 in `guardrails.md`: *a failed liveness probe fails toward more caution, never less* — with the pin test that `Unknown` never yields `safe` and the floor property that it never lowers.
+- `BlockReason::BrowserRunning` + `label()`, `PolicyInputs.browser_running`, gate placed with the other authorization gates (before retention), mirrored in `refusal_for`, badge/hint in `blocked.ts`, and the probe wired in `commands.rs` **twice** — when the scan policy is built and when the cleanup policy is built.
+- ADR: `docs/decisions/browser-temp-probe.md`.
+
+### D5 — llm_models + ruby
+
+- Fixed target lists in the `global_cache` style. A running Ollama daemon changes `detail`/`impact` text only (the precedent `claude` sets); it is not a new gate.
+- ADR: `docs/decisions/wave-d-coverage.md` — every path choice and exclusion in this wave: `vendor/bundle` (its marker is two levels up; matching the whole `vendor/` would offer committed code), AVD userdata and system images, the `~/.bundle` root, and env-var model dirs (`OLLAMA_MODELS`, `HF_HOME`) as a recorded non-goal.
+
+### D6 — cross-artifact deduplication
+
+- Inode keys ride `DirSize` into `Resource` behind `#[serde(skip)]` (internal only; no scanner-context refactor, no shared mutex — providers keep their own sets, `aggregate()` folds them first-wins into `unique_bytes`). Per-artifact figures are unchanged.
+- Invalidation rules: full scan → `Some`; targeted rescan, post-cleanup prune, unknown provenance → `None`. The frontend carries the value and never recomputes it (it cannot: the keys never leave the backend).
+- Tests: `unique_bytes <= total_bytes`, an old cache loads `None`, a targeted merge clears it, and a new guard that no two resources in one scan share a path. Bench: no walk regression.
+
+### D7 — release 0.4.0 / contract v0.13.0
+
+- Contract changelog entry: Providers 14 → 21, `+BrowserRunning`, `+ScanSummary.unique_bytes`, the browser-temp behaviour, the expanded-rules behaviour; each with a named regression test.
+- Fixture (`demo/make-fixture.sh`) gains small trees for every new rule, README screenshots refreshed per `docs/operations/screenshots.md` (G-PUB-04).
+- `CHANGELOG.md`, product bump (`Cargo.toml`, `tauri.conf.json`, README), ADR status lines, "Where we are" rewritten, and **this plan trimmed** — it is an executed plan document once it ships.
+- Full gate: `cargo fmt`, `cargo clippy -D warnings`, `cargo test --workspace`, frontend `check` / `test` / `build`.
+
+Contract `v0.13.0`, additive: new provider ids in `get_providers` and in scan results, `BlockReason::BrowserRunning`, `ScanSummary.unique_bytes`.
+
+**Level B** — new providers change what is offered for deletion, and `browser_temp` is destructive. Both halves approved above, before implementation.
 
 ---
 
