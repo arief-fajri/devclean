@@ -48,6 +48,20 @@ fn providers_map() -> HashMap<String, Arc<dyn Provider>> {
         .collect()
 }
 
+/// Wave D4: is a browser whose code-sign clones we report confirmed
+/// running? Runs the `pgrep` table on the blocking pool. `false` means
+/// "not confirmed" — including a failed probe, which never blocks
+/// (G-SAFE-07); the scan-time safety floor is the provider's own concern.
+async fn browsers_running_now() -> bool {
+    match tokio::task::spawn_blocking(devclean_providers::browsers_running).await {
+        Ok(state) => state.is_running(),
+        Err(e) => {
+            tracing::warn!("browser liveness probe task failed: {e}");
+            false
+        }
+    }
+}
+
 /// Scan every provider concurrently. Emits `scan_started` → N×
 /// `scan_progress` → `scan_completed`. The returned summary is also cached
 /// in state for `preview_cleanup` / `cleanup`.
@@ -63,6 +77,10 @@ pub async fn run_scan(app: &AppHandle, state: &AppState) -> Result<ScanSummary, 
     // restarts the app) must wait until it finishes.
     let _busy = crate::state::BusyGuard::new(&state.op_running);
     let mem_before = MemSample::capture();
+    // Wave D4: probe BEFORE the settings lock — a subprocess under a
+    // std Mutex held across an await is how deadlocks are born. The probe
+    // itself runs on the blocking pool (G-SCAN-04).
+    let browser_running = browsers_running_now().await;
     let (roots, excluded, disabled, policy) = {
         let s = state.settings.lock().unwrap();
         (
@@ -79,6 +97,7 @@ pub async fn run_scan(app: &AppHandle, state: &AppState) -> Result<ScanSummary, 
                 allow_privileged_operations: s.allow_privileged_operations,
                 ai_cleanup_enabled: s.ai_cleanup_enabled,
                 protected: false,
+                browser_running,
             },
         )
     };
@@ -193,6 +212,9 @@ pub async fn scan_provider(
     state: State<'_, AppState>,
     provider: String,
 ) -> Result<ScanSummary, String> {
+    // Wave D4: a targeted rescan stamps the same verdict a full scan
+    // would — the probe rides the same policy path (off-lock, off-thread).
+    let browser_running = browsers_running_now().await;
     let (roots, excluded, policy) = {
         let s = state.settings.lock().unwrap();
         (
@@ -206,6 +228,7 @@ pub async fn scan_provider(
                 allow_privileged_operations: s.allow_privileged_operations,
                 ai_cleanup_enabled: s.ai_cleanup_enabled,
                 protected: false,
+                browser_running,
             },
         )
     };
@@ -397,6 +420,12 @@ pub async fn cleanup(
         // Global cache dirs declared by providers (e.g. cargo registry)
         // widen the roots check only; protected-path rules still apply (I7).
         let providers = providers_map();
+        // Wave D4, the RE-PROBE: the scan-time stamp catches the browser
+        // that was running then; this catches one that started since —
+        // inside the blocking task, so the subprocess never touches the
+        // async runtime (G-SCAN-04). A failed probe never refuses
+        // (G-SAFE-07): only a confirmed Running does.
+        let browser_running = devclean_providers::browsers_running().is_running();
         let extra_roots: Vec<std::path::PathBuf> = providers
             .values()
             .flat_map(|p| p.extra_allowed_roots())
@@ -422,6 +451,7 @@ pub async fn cleanup(
                 trash_dir: None,
                 ai_cleanup_enabled,
                 retention_days,
+                browser_running,
             },
         )
     })

@@ -19,7 +19,8 @@ export type BlockReason =
   | "ai_read_only"
   | "privileged_required"
   | "docker_scope"
-  | "protected";
+  | "protected"
+  | "browser_running";
 
 /** Short badge text. Deliberately terse — it sits next to the resource name. */
 export const BLOCK_REASON_LABELS: Record<BlockReason, string> = {
@@ -28,6 +29,7 @@ export const BLOCK_REASON_LABELS: Record<BlockReason, string> = {
   privileged_required: "needs opt-in",
   docker_scope: "scope off",
   protected: "protected",
+  browser_running: "browser running",
 };
 
 /** What the user can do about it. Shown in the drawer. */
@@ -41,6 +43,8 @@ export const BLOCK_REASON_HINTS: Record<BlockReason, string> = {
   docker_scope: "Docker cleanup is off. Choose a scope in Settings > Cleanup.",
   protected:
     "Tracked file in a repository with uncommitted changes. Commit or stash first.",
+  browser_running:
+    "The browser is using these files right now. Quit it and rescan to make them selectable.",
 };
 
 export interface BlockedLike {

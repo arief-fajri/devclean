@@ -43,6 +43,13 @@ pub struct CleanupPolicy {
     /// `Settings.retention_days`, re-checked here so a setting changed after
     /// the scan cannot be bypassed by a stale resource.
     pub retention_days: Option<u32>,
+    /// A browser whose code-sign clones the browser-temp provider owns is
+    /// confirmed running (Wave D4). RE-PROBED at cleanup time in
+    /// `commands.rs`, so a scan that went stale cannot delete the live
+    /// clone of a browser that started meanwhile. A failed probe is
+    /// `false` — it never refuses (G-SAFE-07); it only floors the scan-time
+    /// safety.
+    pub browser_running: bool,
 }
 
 /// Why a resource was refused before any action ran: the machine-readable
@@ -62,6 +69,7 @@ const PERMANENT: CleanupPolicy = CleanupPolicy {
     trash_dir: None,
     ai_cleanup_enabled: true,
     retention_days: None,
+    browser_running: false,
 };
 
 #[derive(Clone)]
@@ -465,7 +473,20 @@ fn refusal_for(r: &Resource, p: &Arc<dyn Provider>, policy: &CleanupPolicy) -> O
         }
     }
 
-    // 3. Retention, when nothing else already blocked it.
+    // 3. A browser whose clones this provider owns is running (Wave D4).
+    //    The RE-PROBE half of design A: the scan-time stamp above catches
+    //    the browser that was running then; this catches one that started
+    //    since. Provider-driven (P1): the engine asks the declaration,
+    //    never the id. Only a confirmed `Running` reaches here.
+    if p.held_while_browsers_run() && policy.browser_running {
+        return Some(Refusal {
+            reason: BlockReason::BrowserRunning,
+            detail: "the browser is running — quit it and rescan to clean its temporary files"
+                .to_string(),
+        });
+    }
+
+    // 4. Retention, when nothing else already blocked it.
     if let Some(keep) = policy.retention_days {
         if r.age_days.is_none_or(|d| d <= u64::from(keep)) {
             return Some(Refusal {
@@ -1412,6 +1433,7 @@ mod tests {
                 trash_dir: None,
                 ai_cleanup_enabled: true,
                 retention_days: None,
+                browser_running: false,
             },
         );
         assert_eq!(out[0].status, CleanupStatus::Failed);
@@ -1450,6 +1472,121 @@ mod tests {
                 trash_dir: None,
                 ai_cleanup_enabled: true,
                 retention_days: None,
+                browser_running: false,
+            },
+        );
+        assert_eq!(out[0].status, CleanupStatus::Success, "{:?}", out[0].error);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// A provider that declares `held_while_browsers_run` — the shape of
+    /// `browser_temp` without probing a machine (G-CI-03).
+    struct BrowserTempStub;
+    impl Provider for BrowserTempStub {
+        fn id(&self) -> &'static str {
+            "browser_temp"
+        }
+        fn name(&self) -> &'static str {
+            "Browser-temp stub"
+        }
+        fn default_safety(&self) -> SafetyLevel {
+            SafetyLevel::Caution
+        }
+        fn cleanup_action(&self, path: &Path) -> CleanupAction {
+            CleanupAction::RemoveDir(path.to_path_buf())
+        }
+        fn measure(&self, path: &Path) -> Option<u64> {
+            devclean_providers::measure_dir(path)
+        }
+        fn held_while_browsers_run(&self) -> bool {
+            true
+        }
+    }
+
+    /// Wave D4, the re-probe half: a browser that started AFTER a clean
+    /// scan must still be refused at cleanup time, and the gate must never
+    /// touch a provider that does not declare the hold.
+    #[test]
+    fn a_running_browser_refuses_browser_temp_even_after_a_clean_scan() {
+        let (root, target) = fixture("gate-browser");
+        // The scan stamped NOTHING — the browser was not running then.
+        let r = gated_resource("bt:0001", &target, "browser_temp");
+        assert!(r.blocked_reason.is_none());
+        let mut resources = HashMap::new();
+        resources.insert(r.id.clone(), r);
+        let providers: HashMap<String, Arc<dyn Provider>> = HashMap::from([(
+            "browser_temp".to_string(),
+            Arc::new(BrowserTempStub) as Arc<dyn Provider>,
+        )]);
+        let validator = SafetyValidator::new(vec![root.clone()]);
+        let lookup = |id: &str| resources.get(id).map(|x| x.path.clone());
+
+        // The re-probe now says Running: refuse, and the clone survives.
+        let refused = CleanupEngine::default().execute_gated(
+            &["bt:0001".to_string()],
+            &resources,
+            &providers,
+            &validator,
+            lookup,
+            None,
+            &CleanupPolicy {
+                delete_mode: DeleteMode::Permanent,
+                browser_running: true,
+                ..CleanupPolicy::default()
+            },
+        );
+        assert_eq!(refused[0].status, CleanupStatus::Failed);
+        assert!(target.exists(), "a live browser's clones must survive");
+        let err = refused[0].error.as_deref().unwrap_or_default();
+        assert!(err.contains("quit"), "got: {err}");
+
+        // The browser has quit: the same id set now goes through.
+        let allowed = CleanupEngine::default().execute_gated(
+            &["bt:0001".to_string()],
+            &resources,
+            &providers,
+            &validator,
+            lookup,
+            None,
+            &CleanupPolicy {
+                delete_mode: DeleteMode::Permanent,
+                browser_running: false,
+                ..CleanupPolicy::default()
+            },
+        );
+        assert_eq!(
+            allowed[0].status,
+            CleanupStatus::Success,
+            "{:?}",
+            allowed[0].error
+        );
+        assert!(!target.exists());
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// The gate is provider-driven: `browser_running: true` must not stop
+    /// an ordinary node_modules cleanup.
+    #[test]
+    fn the_browser_gate_never_touches_other_providers() {
+        let (root, target) = fixture("gate-browser-other");
+        let r = gated_resource("nm:0120", &target, "node_modules");
+        let mut resources = HashMap::new();
+        resources.insert(r.id.clone(), r);
+        let providers = setup().1;
+        let validator = SafetyValidator::new(vec![root.clone()]);
+        let lookup = |id: &str| resources.get(id).map(|x| x.path.clone());
+
+        let out = CleanupEngine::default().execute_gated(
+            &["nm:0120".to_string()],
+            &resources,
+            &providers,
+            &validator,
+            lookup,
+            None,
+            &CleanupPolicy {
+                delete_mode: DeleteMode::Permanent,
+                browser_running: true,
+                ..CleanupPolicy::default()
             },
         );
         assert_eq!(out[0].status, CleanupStatus::Success, "{:?}", out[0].error);

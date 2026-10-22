@@ -112,6 +112,18 @@ pub trait Provider: Send + Sync {
         None
     }
 
+    /// True when this provider's resources are held while a Chromium-family
+    /// browser is confirmed running (Wave D4, G-SAFE-07).
+    ///
+    /// The engine asks the provider rather than matching an id (P1): the
+    /// scan-time gate ANDs this with the probe result before it reaches
+    /// `block_reason_for`, and `refusal_for` re-probes and re-checks it at
+    /// cleanup time. Only `browser_temp` answers true — its resources ARE
+    /// the live browser's code-sign clones.
+    fn held_while_browsers_run(&self) -> bool {
+        false
+    }
+
     /// Global cache directories this provider owns outside scan roots
     /// (e.g. `~/.cargo/registry`). The backend adds these to the validator's
     /// allowed roots; default is none. Only ever constant paths derived

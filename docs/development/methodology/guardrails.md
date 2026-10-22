@@ -30,6 +30,18 @@ G-SAFE-05  Configuration and credentials are never deleted by an age-based prune
            test — a_skip_list_beats_a_broad_pattern ✅
 G-SAFE-04  Protected paths are untouchable from any direction (==, inside, ancestor).
            Enforcement: code+test — SafetyValidator, 7 tests ✅
+G-SAFE-07  A failed liveness probe fails toward MORE caution, never less
+           (Wave D4). `ProcState::Unknown` from the browser probe never
+           reads as `NotRunning`: it floors the browser-temp row's safety
+           to `caution` — never `safe` — and `NotRunning` is the only
+           state that yields `safe`. A failed probe also never REFUSES
+           (only a confirmed `Running` does — an over-eager refusal would
+           make the feature useless); the caution half is the floor.
+           Enforcement: code — `browser_temp::safety_for` /
+           `floor_safety` (a pure function the scan stamps through) ·
+           test — unknown_never_yields_safe,
+           not_running_is_the_only_state_that_yields_safe,
+           the_floor_never_lowers_a_more_cautious_verdict ✅
 ```
 
 ## 2. Scan (G-SCAN)

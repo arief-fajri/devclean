@@ -226,6 +226,106 @@ async fn the_ai_gate_outranks_the_retention_gate() {
     );
 }
 
+/// Wave D4: the browser gate reaches the scan — but only for the provider
+/// that declares `held_while_browsers_run`. The scanner ANDs the raw probe
+/// with the declaration, so a running Chrome cannot block node_modules.
+struct BrowserHeldStub;
+
+impl Provider for BrowserHeldStub {
+    fn id(&self) -> &'static str {
+        "browser_held_stub"
+    }
+    fn name(&self) -> &'static str {
+        "Browser-held stub"
+    }
+    fn default_safety(&self) -> SafetyLevel {
+        SafetyLevel::Caution
+    }
+    fn cleanup_action(&self, path: &Path) -> CleanupAction {
+        CleanupAction::RemoveDir(path.to_path_buf())
+    }
+    fn measure(&self, _path: &Path) -> Option<u64> {
+        None
+    }
+    fn held_while_browsers_run(&self) -> bool {
+        true
+    }
+}
+
+impl OwnScanner for BrowserHeldStub {
+    fn scan(&self, _roots: &[PathBuf], _cancel: &AtomicBool) -> Vec<Resource> {
+        vec![resource("bt:0001", self.id(), Some(999))]
+    }
+}
+
+#[tokio::test]
+async fn the_browser_gate_reaches_the_scan() {
+    let mgr = manager(Arc::new(BrowserHeldStub));
+
+    // Confirmed running: stamped, explained, and counted in blocked_bytes.
+    let running = PolicyInputs {
+        browser_running: true,
+        ..PolicyInputs::default()
+    };
+    let s = mgr.scan_all(vec![], &[], &[], running, None, None).await;
+    assert_eq!(
+        s.resources[0].blocked_reason,
+        Some(BlockReason::BrowserRunning)
+    );
+    let detail = s.resources[0].blocked_detail.clone().unwrap_or_default();
+    assert!(detail.contains("quit"), "got: {detail}");
+    assert_eq!(s.blocked_bytes, 1024);
+
+    // Not confirmed running (including a failed probe): selectable.
+    let s = mgr
+        .scan_all(vec![], &[], &[], PolicyInputs::default(), None, None)
+        .await;
+    assert_eq!(s.resources[0].blocked_reason, None);
+    assert_eq!(s.blocked_bytes, 0);
+}
+
+/// The refinement is per-resource: a provider that does NOT declare the
+/// hold is untouched by the same probe result.
+struct PlainStub;
+
+impl Provider for PlainStub {
+    fn id(&self) -> &'static str {
+        "plain_stub"
+    }
+    fn name(&self) -> &'static str {
+        "Plain stub"
+    }
+    fn default_safety(&self) -> SafetyLevel {
+        SafetyLevel::Safe
+    }
+    fn cleanup_action(&self, path: &Path) -> CleanupAction {
+        CleanupAction::RemoveDir(path.to_path_buf())
+    }
+    fn measure(&self, _path: &Path) -> Option<u64> {
+        None
+    }
+}
+
+impl OwnScanner for PlainStub {
+    fn scan(&self, _roots: &[PathBuf], _cancel: &AtomicBool) -> Vec<Resource> {
+        vec![resource("pl:0001", self.id(), Some(999))]
+    }
+}
+
+#[tokio::test]
+async fn the_browser_gate_never_reaches_a_provider_without_the_declaration() {
+    let mgr = manager(Arc::new(PlainStub));
+    let running = PolicyInputs {
+        browser_running: true,
+        ..PolicyInputs::default()
+    };
+    let s = mgr.scan_all(vec![], &[], &[], running, None, None).await;
+    assert_eq!(
+        s.resources[0].blocked_reason, None,
+        "a running browser must not block a provider that does not hold for it"
+    );
+}
+
 impl OwnScanner for AgedStub {
     fn scan(&self, _roots: &[PathBuf], _cancel: &AtomicBool) -> Vec<Resource> {
         vec![resource("ag:0001", self.id(), self.age_days)]

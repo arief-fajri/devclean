@@ -155,6 +155,11 @@ pub enum BlockReason {
     DockerScope,
     /// Git-aware protection: the artifact is tracked and the repo is dirty.
     Protected,
+    /// A Chromium-family browser that owns these code-sign clones is
+    /// running (contract v0.13.0). Re-probed at cleanup time, so a stale
+    /// scan cannot delete the live clone of a browser that started
+    /// meanwhile.
+    BrowserRunning,
 }
 
 impl BlockReason {
@@ -166,6 +171,7 @@ impl BlockReason {
             Self::PrivilegedRequired => "needs opt-in",
             Self::DockerScope => "scope off",
             Self::Protected => "protected",
+            Self::BrowserRunning => "browser running",
         }
     }
 }

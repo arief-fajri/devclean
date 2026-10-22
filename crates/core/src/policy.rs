@@ -42,6 +42,13 @@ pub struct PolicyInputs {
     /// Set by the scanner after the git pass; `false` for anything that is
     /// not classified.
     pub protected: bool,
+    /// A browser whose code-sign clones this resource holds is confirmed
+    /// running (v0.13.0, Wave D4). The raw probe result, ANDed by the
+    /// scanner with the provider's `held_while_browsers_run` declaration so
+    /// only browser-temp rows are ever subject to it. `false` means "not
+    /// confirmed running" — a FAILED probe (`ProcState::Unknown`) never
+    /// blocks (G-SAFE-07); it floors the safety instead, at scan time.
+    pub browser_running: bool,
 }
 
 impl Default for PolicyInputs {
@@ -55,6 +62,7 @@ impl Default for PolicyInputs {
             allow_privileged_operations: true,
             ai_cleanup_enabled: true,
             protected: false,
+            browser_running: false,
         }
     }
 }
@@ -64,9 +72,9 @@ impl Default for PolicyInputs {
 /// Order matters and is deliberate: git protection outranks everything — a
 /// tracked file in a dirty repository is data loss whatever the other
 /// settings say. After it, an *authorisation* gate (AI report-only, Docker
-/// scope, privileged opt-in) outranks an *age* gate. Telling a user "kept by
-/// your 30-day policy" about history they have not enabled at all would hide
-/// the setting that actually matters.
+/// scope, privileged opt-in, a running browser) outranks an *age* gate.
+/// Telling a user "kept by your 30-day policy" about history they have not
+/// enabled at all would hide the setting that actually matters.
 pub fn block_reason_for(r: &Resource, p: PolicyInputs) -> Option<(BlockReason, String)> {
     // 0. Git-aware protection: deleting a tracked artifact from a dirty
     //    repository loses uncommitted work. This is data loss regardless of
@@ -107,7 +115,19 @@ pub fn block_reason_for(r: &Resource, p: PolicyInputs) -> Option<(BlockReason, S
         }
     }
 
-    // 3. Age policy. An unknown age is held back: when in doubt, keep the
+    // 3. A browser that owns these code-sign clones is running. An
+    //    authorisation gate, so it outranks the age gate below; only the
+    //    browser-temp provider is ever subject to it (the scanner ANDs the
+    //    probe with the provider's declaration). A FAILED probe never
+    //    reaches here — only a confirmed `Running` does (G-SAFE-07).
+    if p.browser_running {
+        return Some((
+            BlockReason::BrowserRunning,
+            "the browser is running — quit it and rescan to clean its temporary files".to_string(),
+        ));
+    }
+
+    // 4. Age policy. An unknown age is held back: when in doubt, keep the
     //    data. `is_none_or` reads as "no age, or too young".
     if let Some(keep) = p.retention_days {
         if r.age_days.is_none_or(|d| d <= u64::from(keep)) {
@@ -222,7 +242,8 @@ mod tests {
     }
 
     /// Git protection outranks everything: a tracked artifact in a dirty
-    /// repository is data loss regardless of the AI, Docker or age settings.
+    /// repository is data loss regardless of the AI, Docker, browser or age
+    /// settings.
     #[test]
     fn git_protection_outranks_every_other_gate() {
         let p = PolicyInputs {
@@ -230,11 +251,40 @@ mod tests {
             is_user_data: true,
             ai_cleanup_enabled: false,
             retention_days: Some(30),
+            browser_running: true,
             ..permissive()
         };
         let (reason, detail) = block_reason_for(&res(Some(1)), p).expect("must block");
         assert_eq!(reason, BlockReason::Protected);
         assert!(detail.contains("uncommitted"), "got: {detail}");
+    }
+
+    /// Wave D4: a confirmed-running browser blocks the browser-temp rows,
+    /// with a sentence naming the action the user must take.
+    #[test]
+    fn a_running_browser_blocks_the_resource() {
+        let p = PolicyInputs {
+            browser_running: true,
+            ..permissive()
+        };
+        let (reason, detail) = block_reason_for(&res(Some(999)), p).expect("must block");
+        assert_eq!(reason, BlockReason::BrowserRunning);
+        assert!(detail.contains("quit"), "got: {detail}");
+        // Not confirmed running: nothing blocked.
+        assert_eq!(block_reason_for(&res(Some(999)), permissive()), None);
+    }
+
+    /// The browser gate is an authorisation gate: it outranks the age gate,
+    /// like the AI and Docker gates do.
+    #[test]
+    fn browser_running_outranks_retention() {
+        let p = PolicyInputs {
+            browser_running: true,
+            retention_days: Some(30),
+            ..permissive()
+        };
+        let (reason, _) = block_reason_for(&res(Some(1)), p).expect("must block");
+        assert_eq!(reason, BlockReason::BrowserRunning);
     }
 
     #[test]
@@ -318,6 +368,7 @@ mod tests {
             BlockReason::PrivilegedRequired,
             BlockReason::DockerScope,
             BlockReason::Protected,
+            BlockReason::BrowserRunning,
         ] {
             assert!(!r.label().is_empty());
         }

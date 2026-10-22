@@ -26,6 +26,7 @@ const KNOWN = [
   "flutter",
   "android",
   "pods",
+  "browser_temp",
 ];
 
 describe("providerMeta", () => {

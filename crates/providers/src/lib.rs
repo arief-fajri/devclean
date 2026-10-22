@@ -3,6 +3,7 @@
 
 pub mod ai_guard;
 pub mod android;
+pub mod browser_temp;
 pub mod cargo_registry;
 pub mod claude;
 pub mod docker;
@@ -28,6 +29,7 @@ pub mod xcode_data;
 
 pub use ai_guard::{probe_process, sqlite_exclusive_available, ProcState};
 pub use android::AndroidProvider;
+pub use browser_temp::{browsers_running, floor_safety, safety_for, BrowserTempProvider};
 pub use cargo_registry::CargoRegistryProvider;
 pub use claude::ClaudeProvider;
 pub use docker::DockerProvider;
@@ -78,5 +80,7 @@ pub fn all_providers() -> Vec<Scannable> {
         Scannable::Tree(Arc::new(FlutterProvider)),
         Scannable::Tree(Arc::new(AndroidProvider)),
         Scannable::Tree(Arc::new(PodsProvider)),
+        // Wave D4: the hazard.
+        Scannable::Own(Arc::new(BrowserTempProvider::default())),
     ]
 }

@@ -14,6 +14,7 @@ import {
   Database,
   FileText,
   Gem,
+  Globe,
   HardDrive,
   MessageSquare,
   Package,
@@ -169,6 +170,13 @@ export const PROVIDER_META: Record<string, ProviderMeta> = {
     label: "CocoaPods",
     accent: "text-rose-600 dark:text-rose-400",
     tile: "bg-rose-100 dark:bg-rose-950",
+  },
+  browser_temp: {
+    icon: Globe,
+    tick: Globe,
+    label: "Browser temp",
+    accent: "text-fuchsia-600 dark:text-fuchsia-400",
+    tile: "bg-fuchsia-100 dark:bg-fuchsia-950",
   },
 };
 

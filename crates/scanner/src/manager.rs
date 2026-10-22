@@ -337,6 +337,12 @@ impl ScanManager {
                     is_user_data: provider.is_some_and(|p| p.is_user_data()),
                     required_docker_scope: provider.and_then(|p| p.required_docker_scope()),
                     protected: protected.contains(&r.id),
+                    // Wave D4: the raw probe only ever reaches
+                    // `block_reason_for` for providers that declare
+                    // `held_while_browsers_run` — otherwise a running
+                    // Chrome would block node_modules too.
+                    browser_running: policy.browser_running
+                        && provider.is_some_and(|p| p.held_while_browsers_run()),
                     ..policy
                 },
             );
@@ -506,6 +512,7 @@ mod tests {
             allow_privileged_operations: true,
             ai_cleanup_enabled: true,
             protected: false,
+            browser_running: false,
         }
     }
 

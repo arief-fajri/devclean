@@ -15,6 +15,7 @@ const ALL: BlockReason[] = [
   "privileged_required",
   "docker_scope",
   "protected",
+  "browser_running",
 ];
 
 describe("blocked reason display", () => {

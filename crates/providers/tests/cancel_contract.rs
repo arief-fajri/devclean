@@ -13,11 +13,11 @@
 //! a cancelled scan reports nothing.
 
 use devclean_providers::{
-    walk_tree_rules, AndroidProvider, CargoRegistryProvider, ClaudeProvider, DockerProvider,
-    DockerPrunedProvider, FlutterProvider, GlobalCacheProvider, GoProvider, GoVendorProvider,
-    GradleCacheProvider, NodeModulesProvider, NpmCacheProvider, OpencodeDbProvider,
-    OpencodeFsProvider, OwnScanner, PodsProvider, PythonCacheProvider, RustTargetProvider,
-    TreeRule, XcodeDataProvider,
+    walk_tree_rules, AndroidProvider, BrowserTempProvider, CargoRegistryProvider, ClaudeProvider,
+    DockerProvider, DockerPrunedProvider, FlutterProvider, GlobalCacheProvider, GoProvider,
+    GoVendorProvider, GradleCacheProvider, NodeModulesProvider, NpmCacheProvider,
+    OpencodeDbProvider, OpencodeFsProvider, OwnScanner, PodsProvider, PythonCacheProvider,
+    RustTargetProvider, TreeRule, XcodeDataProvider,
 };
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
@@ -171,6 +171,13 @@ fn gradle_cache_stops_when_cancelled() {
 #[test]
 fn xcode_data_stops_when_cancelled() {
     assert!(cancelled_scan(&XcodeDataProvider).is_empty());
+}
+
+/// A pre-set cancel must make browser_temp return empty WITHOUT probing the
+/// machine — the flag is checked before the first `pgrep`.
+#[test]
+fn browser_temp_stops_when_cancelled() {
+    assert!(cancelled_scan(&BrowserTempProvider::default()).is_empty());
 }
 
 #[test]
