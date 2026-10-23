@@ -29,35 +29,6 @@ Rules that apply to every wave:
 - Full gate before a version bump: `cargo fmt`, `cargo clippy -D warnings`, `cargo test --workspace`, and the frontend's `check`, `test` and `build`.
 - Changing what may be cleaned needs a human decision before implementation, not after.
 
----
-
-## Wave D — Coverage (SHIPPED — 0.4.0 / v0.13.0)
-
-Executed in seven commits, one per stage (D1–D7), on top of the Wave C shared
-walk it depended on. Providers **14 → 21**: `browser_temp`, `llm_models`,
-`ruby`, `go_vendor`, `flutter`, `android`, `pods`; existing `node_modules`,
-`python_cache`, `global_cache` and `xcode_data` rules widened. The two
-Level B decisions approved 2026-10-20 both shipped as designed:
-
-- **browser_temp gate — design A.** `BlockReason::BrowserRunning` stamped
-  through `block_reason_for` at scan time, re-probed and refused live through
-  `refusal_for` at cleanup; a failed probe never blocks but floors the safety
-  to `caution` (`NotRunning` is the only state that yields `safe`). Enforced
-  by **G-SAFE-07** and its pin tests.
-- **Cross-artifact dedup — additive field.** `ScanSummary.unique_bytes`:
-  `Some` after a full scan, `None` when the figure can no longer be measured;
-  no `CACHE_VERSION` bump, frontend never recomputes it.
-
-Nothing was deferred to E. The per-stage plan that drove the work is trimmed
-here on purpose (a plan is an ephemeral artifact); the decisions live in
-[wave-d-coverage.md](../decisions/wave-d-coverage.md) and
-[browser-temp-probe.md](../decisions/browser-temp-probe.md), the shipped
-behaviour in [CHANGELOG.md](../../CHANGELOG.md) and
-[tauri-contract.md](../reference/tauri-contract.md) (v0.13.0, with each
-behaviour's named regression test).
-
----
-
 ## Wave E — Stabilisation and documentation
 
 The gate for `1.0.0`. Two halves: close what is open, then make the documentation true.
