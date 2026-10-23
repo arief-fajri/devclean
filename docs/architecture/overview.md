@@ -25,8 +25,8 @@
 │                     ▼                          │
 │              SafetyValidator (core)            │
 │                     │                          │
-│                     ▼                          │
-│         OS filesystem / go / docker CLI        │
+│        ▼                                        │
+│         OS filesystem / go / docker CLI / pgrep │
 └─────────────────────────────────────────────────┘
 ```
 

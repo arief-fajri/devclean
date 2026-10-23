@@ -97,7 +97,8 @@ A tool that deletes files earns trust by what it refuses to do. DevClean:
 - **Moves to the Trash by default.** Permanent deletion is an explicit opt-out, and a trashed item is recoverable until you empty it. The summary says what moved rather than what was freed, because the space has not come back yet.
 - **Never touches your documents.** `/`, `~/Documents`, `~/Desktop`, `~/Downloads`, `~/Pictures`, `~/Videos`, `~/.ssh`, `~/.gnupg` and `~/.config` are refused from every direction — equal, inside, or ancestor.
 - **Never deletes outside your scan roots.** The roots widen where caches are *found*; they never widen what may be *deleted*.
-- **Refuses what it cannot explain.** Every resource that cannot be cleaned carries a reason (`retention`, `ai_read_only`, `privileged_required`, `docker_scope`, `protected`), stamped at scan time and enforced by the backend — not by a disabled checkbox.
+- **Refuses what it cannot explain.** Every resource that cannot be cleaned carries a reason (`retention`, `ai_read_only`, `privileged_required`, `docker_scope`, `protected`, `browser_running`), stamped at scan time and enforced by the backend — not by a disabled checkbox.
+- **Never touches a running browser's files.** Chromium-family browsers clone their whole app bundle into the system temp area; DevClean reports the leftovers but blocks them while the browser is confirmed running — the check re-runs at cleanup time, so a scan that went stale cannot slip past it. A probe that fails floors the rows to "review" instead of claiming they are safe.
 - **Leaves AI history alone unless asked.** Session transcripts and agent state are shown with their sizes but stay unselectable until you enable them in Settings.
 - **Never reports a number it did not measure.** `freed_bytes` is `before − after`; when the after-state cannot be measured, the result says `0` and why.
 - **Never runs a shell.** Cleanup subprocesses use fixed `(program, args)` pairs declared by a provider, never anything derived from input.
@@ -127,7 +128,7 @@ A `settings.json` written before this release with an empty `scan_roots` array i
 Not yet done, and worth knowing before you rely on it:
 
 - **Automatic updates are live from 0.3.0 on.** 0.3.0 already ships the updater, so a 0.3.0 install receives 0.3.1 in-app; anything older has no updater and must still be installed by hand. Updates are arm64 only. See [Updates](#updates).
-- **Broad ecosystem coverage.** Ruby, Flutter, Android and LLM model stores are not scanned yet.
+- **Not every ecosystem yet.** Ruby, Flutter, Android, CocoaPods, Go vendoring and the LLM model stores arrived in 0.4.0; Swift Package Manager (`.build`), Bazel caches and Gradle wrapper distributions are not scanned yet.
 - **A CLI.** There is no way to run this from cron or a script.
 - **Unsigned builds.** See [Install](#install).
 

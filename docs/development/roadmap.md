@@ -67,7 +67,7 @@ The gate for `1.0.0`. Two halves: close what is open, then make the documentatio
 - **Component tests for the shell** — Sidebar navigation, page switching, drawer focus, cleanup-dialog keyboard blocking. Needs a DOM environment.
 - **XDG Trash** — `trash.rs` currently states Linux is "deliberately not implemented". It becomes implemented but **not verified**: `default_trash_dir()` turns platform-conditional (`$XDG_DATA_HOME/Trash` on Linux, with `files/` and `info/` and one `.trashinfo` per artifact, percent-encoded `Path=` and a `DeletionDate=`), and the per-mount `.Trash-$UID` case is best-effort. CI can test the deterministic part — the bytes of the `.trashinfo` and the encoding — but not the file appearing in a real GNOME or KDE Trash. That is stated rather than hidden, and the platform table is not affected: Linux still builds and tests, and nothing is shipped for it.
 - **G-REL-05** — closed in Wave B; verify it did not regress.
-- **Cross-artifact deduplication** — if not finished in Wave D.
+- ~~**Cross-artifact deduplication**~~ — shipped in Wave D (0.4.0). The bullet stays struck through only long enough to say so; it goes with the next edit of this file.
 
 ### Documentation
 

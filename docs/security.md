@@ -105,6 +105,14 @@ $ pgrep -fl <own exact exe path> # exit 1, nothing — cannot see its own proces
 
 A probe that answers "nothing is running" when it simply cannot see anything is worse than no probe. DevClean uses the SQLite exclusive lock as the authoritative gate, which needs no process-table access at all, and keeps `pgrep` only as a secondary hint whose "unknown" answer is never read as "safe".
 
+### Why a running browser DOES block — the other direction of the same rule
+
+`browser_temp` (Wave D) deletes the code-sign clones Chromium-family browsers leave in `/var/folders/…/X/`. There is no exclusive lock to take on a directory tree, so the liveness probe IS the gate — which looks like it contradicts the section above. It does not: the two halves of a probe answer differently.
+
+- **A POSITIVE `pgrep` match is trustworthy.** Seeing the browser's process proves it is running, the same way a failed `BEGIN EXCLUSIVE` proves someone holds the database. So a confirmed `Running` stamps `blocked_reason: "browser_running"` at scan time (through `block_reason_for`, I11) and the cleanup path **re-probes and refuses live** — a stale scan cannot delete the clone of a browser that started meanwhile.
+- **A NEGATIVE match is not.** The sandbox case above — exit 1 because the process table is invisible — must never read as "safe to delete". So `ProcState::Unknown` (no `pgrep`, a timeout, an invisible table) never blocks, never unblocks, and floors the row's safety to `caution`. `NotRunning` is the only state that yields `safe` (**G-SAFE-07**).
+- **The gate asks the provider, never an id.** `Provider::held_while_browsers_run()` (true only for `browser_temp`) arms the gate, so a running Chrome cannot block `node_modules` — the same probe value reaching any other provider is inert, and a test pins that.
+
 ### Why there is no `PRAGMA quick_check`
 
 Measured: `quick_check(1)` on a multi-gigabyte `opencode.db` takes **minutes**. A multi-minute freeze before a confirmation dialog is not acceptable, and the check is not needed for safety — SQLite's `DELETE` and `VACUUM` are both transactional, so a damaged database fails the operation and leaves the original file untouched.

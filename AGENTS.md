@@ -74,7 +74,7 @@ cargo tauri dev                        # run from root (frontendDist ../dist)
 ## Code layout
 
 - `crates/core/` — types, `SafetyValidator`, settings, system helpers. Must not depend on any other crate.
-- `crates/providers/` — `Provider` trait + scan shapes (`OwnScanner`, `TreeRule`) + 14 providers (`node_modules`, `rust_target`, `go`, `docker`, `python_cache`, …). Depends only on `core`.
+- `crates/providers/` — `Provider` trait + scan shapes (`OwnScanner`, `TreeRule`) + 21 providers (`node_modules`, `rust_target`, `go`, `docker`, `python_cache`, …). Depends only on `core`.
 - `crates/scanner/` — concurrent `ScanManager` + last-scan cache.
 - `crates/cleanup/` — `preview` + safety-validated executor.
 - `apps/desktop/src-tauri/src/` — thin layer: `commands.rs` (19 commands), `events.rs`, `state.rs`. No filesystem logic beyond wiring.

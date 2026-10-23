@@ -18,7 +18,7 @@ src-tauri: commands + state (thin wiring, no filesystem logic)
      OS filesystem / `go` / `docker` CLI
 ```
 
-External dependencies are part of the model: the `go` and `docker` CLIs may be absent (providers return empty — absence is normal, not an error).
+External dependencies are part of the model: the `go` and `docker` CLIs may be absent (providers return empty — absence is normal, not an error), and so may `pgrep` (the liveness probe behind `browser_temp`; an unanswerable probe floors that provider's safety rather than blocking or clearing the gate — G-SAFE-07).
 
 ## 2. Desired outcomes
 
@@ -54,8 +54,9 @@ I9.  Age-based pruning applies ONLY to resources with a meaningful per-item age.
      A whole-tool cache (npm, cargo, go, Docker) has no age and is never held back.
 I10. AI configuration and credentials are never prune targets, at any depth, whatever
     the pattern matches.
-I11. Retention, the privileged opt-in and the Docker scope are enforced by the BACKEND.
-     Disabling a checkbox in the UI is a convenience; sending the id anyway is refused.
+I11. Retention, the privileged opt-in, the Docker scope and the
+     running-browser hold are enforced by the BACKEND. Disabling a
+     checkbox in the UI is a convenience; sending the id anyway is refused.
 I12. freed_bytes is MEASURED (before − after), never asserted. When the after-state
      cannot be measured, the result reports 0 with a reason.
 ```

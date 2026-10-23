@@ -26,6 +26,8 @@ Why things are the way they are, and what was rejected. Each record states a dec
 | [decisions/gitignore-aware-protection.md](decisions/gitignore-aware-protection.md) | A repository's uncommitted work protects its tracked artifacts; gitignored caches stay cleanable. |
 | [decisions/single-pass-walk.md](decisions/single-pass-walk.md) | Project-tree providers share one traversal instead of walking every scan root apiece. |
 | [decisions/in-app-updates.md](decisions/in-app-updates.md) | Updates are downloaded in-app, signed with minisign and verified by the backend, and opt-in. |
+| [decisions/wave-d-coverage.md](decisions/wave-d-coverage.md) | Every path Wave D reports — and every path it deliberately does not. |
+| [decisions/browser-temp-probe.md](decisions/browser-temp-probe.md) | A confirmed-running browser blocks its code-sign clones; a failed probe never reads as safe. |
 
 ## Development
 

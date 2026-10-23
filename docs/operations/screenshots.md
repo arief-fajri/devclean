@@ -47,6 +47,7 @@ The two images are already referenced. `G-PUB-04` asserts two things and will fa
 - **No real project names.** If you see one, the fixture leaked or the app read a path outside `$HOME`.
 - **The virtualenv is absent.** The Python project has a `.venv/` on purpose. If it appears in the Resources list, that is a bug worth fixing before the screenshot is committed.
 - **AI history shows a size but no checkbox.** It is report-only by default. A screenshot where it looks selectable would document behaviour that does not exist.
+- **The browser-temp row may or may not be present — never force it.** Its clone root lives in the system temp area (`/var/folders/…/X`), outside the fixture's `$HOME`, so the fixture cannot produce it. A screenshot that shows it is fine (the machine genuinely has leftovers); one that does not is equally fine.
 - **Consistent window size**, so the two images sit together in the README.
 
 ## Docker is the one exception

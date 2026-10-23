@@ -62,6 +62,7 @@ The resource is listed with a badge explaining why. Each reason has one fix:
 | `needs opt-in` | The action needs privileged operations. | **Settings → Cleanup → Privileged operations**. Read the consequence first — this is the one that removes images and volumes. |
 | `scope off` | Docker cleanup is off. | **Settings → Cleanup → Docker**: choose a scope. |
 | `protected` | A tracked file in a repository with uncommitted changes. | Commit or stash the changes, then rescan. |
+| `browser running` | A browser whose temp files these are is running. | Quit the browser, then rescan. A probe that could not answer also shows this class of caution, without the badge. |
 
 None of these are bypassable from the UI. The backend refuses the resource even if its id is sent directly to the cleanup command, so a badge is an explanation rather than a suggestion.
 

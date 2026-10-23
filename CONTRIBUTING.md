@@ -49,12 +49,14 @@ These exist because each one has already been violated once.
 ## Adding a provider
 
 1. Implement the `Provider` trait in `crates/providers/src/<name>.rs`. Declare `default_safety`, `cleanup_action`, `measure`, and — if the resources are irreplaceable user data rather than a regenerable cache — `is_user_data`.
-2. Register it in `all_providers()` in `crates/providers/src/lib.rs`.
-3. Add display metadata in `apps/desktop/src/lib/providerMeta.ts`. The test there asserts the list matches `all_providers()` exactly, so a missing entry fails CI rather than rendering a grey fallback.
-4. Write fixture tests with `t.TempDir()`-style scratch directories. Cover the false positives: a directory that looks like an artifact but is not one.
-5. **Run it against a real project on a real machine.** A wrong marker file passes unit tests and fails in the wild.
+2. Register it in `all_providers()` in `crates/providers/src/lib.rs`, and give it its own two-letter prefix in `short_prefix` (`crates/scanner/src/manager.rs`) — the `every_provider_prefix_is_unique` test fails on the `xx` fallback, and two providers on one prefix silently collide ids.
+3. Add display metadata in `apps/desktop/src/lib/providerMeta.ts` **and** its id to `KNOWN` in the test beside it. The test asserts the list matches `all_providers()` exactly, so a missing entry fails CI rather than rendering a grey fallback.
+4. Add a row to `crates/providers/tests/cancel_contract.rs` — one test per provider, so a broken cancellation fails one row rather than the whole contract.
+5. If it lives inside project trees, contribute a `TreeRule` instead of walking the roots yourself (see the note below); extend the shared fixture and `expected_set` in `crates/scanner/tests/equivalence.rs` so its rows are not vacuous, and keep every `max_depth` at 6 or below so the shared walk's prune depth does not grow.
+6. Write fixture tests with `t.TempDir()`-style scratch directories. Cover the false positives: a directory that looks like an artifact but is not one. A test must build everything it asserts on — never read `$HOME` or the machine's state (G-CI-03).
+7. **Run it against a real project on a real machine.** A wrong marker file passes unit tests and fails in the wild.
 
-If the provider lives inside project trees, it should contribute a rule to the shared walk (the `TreeRule` trait) rather than scan the root on its own — an independent walk costs another full traversal of every scan root for each ecosystem added, which is the cost the shared walk exists to remove.
+If the provider lives inside project trees, it should contribute a rule to the shared walk (the `TreeRule` trait) rather than scan the root on its own — an independent walk costs another full traversal of every scan root for each ecosystem added, which is the cost the shared walk exists to remove. `TreeRuleSpec.sibling_files` is an any-of list (an empty list matches on the directory name alone), so a marker that comes in dialects (`build.gradle` / `.kts`, `Podfile`) is one rule, not four.
 
 ## Changing something a user sees
 
