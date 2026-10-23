@@ -792,6 +792,7 @@ version = "0.4.0"
 dependencies = [
  "devclean-core",
  "devclean-providers",
+ "libc",
  "rusqlite",
  "serde",
  "serde_json",

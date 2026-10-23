@@ -1,5 +1,17 @@
 //! End-to-end proof that the default delete mode is recoverable: a real
-//! artifact moved to the REAL `~/.Trash`, then restored by hand.
+//! artifact moved to the REAL platform Trash, then restored by hand.
+//!
+//! Runs on **both** CI platforms:
+//!
+//! - macOS: `~/.Trash`, flat layout.
+//! - Linux: `$XDG_DATA_HOME/Trash` (or `~/.local/share/Trash`), freedesktop
+//!   layout — `files/<name>` plus the `info/<name>.trashinfo` sidecar. The
+//!   sidecar is removed after the restore so the runner's real Trash is left
+//!   clean.
+//!
+//! What this cannot prove is that a GNOME or KDE file manager *displays* the
+//! artifact; that remains "implemented, unverified" in the README support
+//! table.
 use devclean_cleanup::trash::{default_trash_dir, move_to_trash};
 
 #[test]
@@ -33,6 +45,12 @@ fn evidence_a_real_artifact_survives_in_the_real_trash() {
     std::fs::rename(&landed, &restored).expect("restore from Trash");
     assert!(restored.join("left-pad/index.js").is_file());
     println!("  restored by hand     : OK");
+
+    // Drop the XDG sidecar if this platform wrote one (Linux); a no-op on
+    // the flat layout, where there is no metadata to clean up.
+    let name = landed.file_name().unwrap().to_string_lossy().into_owned();
+    let info = trash.join("info").join(format!("{name}.trashinfo"));
+    let _ = std::fs::remove_file(&info);
 
     let _ = std::fs::remove_dir_all(&base);
 }

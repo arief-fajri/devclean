@@ -15,3 +15,7 @@ tracing.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
+# `localtime_r` for the `.trashinfo` DeletionDate on the XDG (Linux) path.
+# Already in the lockfile via tauri/src-tauri; declared here so the date
+# formatting is not hand-rolled FFI.
+libc.workspace = true

@@ -35,7 +35,7 @@ A delete that fails when Finder is busy is worse than no delete at all: the user
 - Collisions are handled by suffixing (`node_modules`, `node_modules.1`, …) so a second cleanup never clobbers a previous one.
 - Symlinks are recreated as links, never followed, in the cross-device copy.
 - `CleanupResult.moved_to_trash` and `HistoryEntry.moved_to_trash` are additive contract fields.
-- **Deferred: Linux/XDG Trash.** The freedesktop format needs `.trashinfo` files for the artifact to appear in a file manager's Trash. At v0.8.0 the shipped targets were macOS only, so implementing half of it would have been worse than not claiming it. The [roadmap](../development/roadmap.md) plans to implement it for 1.0 and mark it unverified until it runs on a real desktop.
+- **Linux/XDG Trash: implemented for 1.0, unverified in a desktop file manager.** The freedesktop format needs `.trashinfo` files for the artifact to appear in a file manager's Trash. At v0.8.0 the shipped targets were macOS only, so implementing half of it would have been worse than not claiming it. Wave E1 (1.0.0) implemented it: `move_to_trash` dispatches to a freedesktop layout on Linux (`files/<name>` plus `info/<name>.trashinfo`, metadata written **before** the move so a crash never leaves an untrashed file) and the flat `~/.Trash` layout elsewhere. CI pins the sidecar bytes and the encoding, but cannot prove the file shows up in a real GNOME or KDE Trash — that is stated as "implemented, unverified" in the README support table rather than hidden.
 
 ## Rejected alternatives
 

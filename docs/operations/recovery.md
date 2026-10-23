@@ -19,12 +19,25 @@ Nothing is lost. Cleanups move to the Trash unless you turned that off.
 ### From the terminal
 
 ```bash
-# Find it
+# macOS: find it
 ls ~/.Trash | grep node_modules
 
 # Move it back
 mv ~/.Trash/node_modules ~/Projects/storefront/node_modules
 ```
+
+```bash
+# Linux (XDG): DevClean writes files/ + info/<name>.trashinfo
+ls ~/.local/share/Trash/files | grep node_modules
+
+# Move it back
+mv ~/.local/share/Trash/files/node_modules ~/Projects/storefront/node_modules
+
+# Then drop the sidecar that pointed at it, so no metadata is left behind
+rm ~/.local/share/Trash/info/node_modules.trashinfo
+```
+
+> **On Linux the artifact lives in `files/`, not at the top of the Trash.** The sibling `info/<name>.trashinfo` is what makes a file manager show it as trash and restore it; deleting the artifact without deleting its sidecar leaves a ghost entry. `$XDG_DATA_HOME` is honoured when set, so the real path may be `$XDG_DATA_HOME/Trash` instead of `~/.local/share/Trash`.
 
 ### If the space has not come back
 
@@ -32,6 +45,8 @@ That is expected. A Trash move relocates the data; it does not free it. The spac
 
 ```bash
 # macOS: Finder → Empty Trash
+# Linux: empty the Trash in your file manager, or:
+rm -rf ~/.local/share/Trash/files/* ~/.local/share/Trash/info/*
 ```
 
 The cleanup summary says "moved to Trash — space returns when you empty it" for exactly this reason, and the run is recorded in History with `moved_to_trash`.

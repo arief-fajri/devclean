@@ -13,6 +13,10 @@ A contract bump therefore does not imply a product release, and vice versa.
 
 ## [Unreleased]
 
+### Added
+
+- **XDG Trash on Linux (Wave E1).** The default delete mode now follows the freedesktop Trash spec on Linux: the artifact lands in `$XDG_DATA_HOME/Trash/files/<name>` (fallback `~/.local/share/Trash`) with a sidecar `info/<name>.trashinfo` written **before** the move, so a crash never leaves a file in `files/` with no metadata to restore it. `Path=` is percent-encoded (slashes and the unreserved set kept literal), `DeletionDate=` is local time via `localtime_r`, and `files/`/`info/` are created `0700`. Name collisions claim the sidecar with `O_EXCL` and retry; a failed move rolls the sidecar back. Cross-device artifacts are copied into the home-volume Trash rather than half-implementing the per-mount `.Trash-$UID` case. Both layouts (`~/.Trash` flat on macOS, XDG on Linux) are always compiled and unit-tested on every CI host; what CI cannot prove — the artifact appearing in a real GNOME or KDE file-manager Trash — is stated as "implemented, unverified" in the README support table. No contract change: `moved_to_trash` was already a boolean.
+
 ## [0.4.0] — 2026-10-23
 
 ### Added

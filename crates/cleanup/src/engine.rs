@@ -33,7 +33,8 @@ pub struct CleanupPolicy {
     /// Command- and SQL-backed actions cannot be trashed — a vendor prune or
     /// a `DELETE FROM` has no undo — so this only governs path removal.
     pub delete_mode: DeleteMode,
-    /// Where Trash moves land. `None` uses the platform default (`~/.Trash`).
+    /// Where Trash moves land. `None` uses the platform default (`~/.Trash`
+    /// on macOS, `$XDG_DATA_HOME/Trash` on Linux).
     /// Overridable so tests never touch the user's real Trash, and so a user
     /// can redirect it.
     pub trash_dir: Option<PathBuf>,
@@ -1115,6 +1116,9 @@ mod tests {
             None,
             &CleanupPolicy {
                 delete_mode: DeleteMode::Trash,
+                // An explicit fixture directory keeps the test hermetic on
+                // both platforms — the real Trash is never touched.
+                trash_dir: Some(root.join("trash")),
                 ..CleanupPolicy::default()
             },
         );
@@ -1133,11 +1137,6 @@ mod tests {
             "the artifact must no longer be at its original path"
         );
 
-        // Clean up the Trash entry this test created.
-        if let Ok(home) = std::env::var("HOME") {
-            let name = target.file_name().unwrap().to_string_lossy().into_owned();
-            let _ = std::fs::remove_dir_all(std::path::Path::new(&home).join(".Trash").join(&name));
-        }
         let _ = std::fs::remove_dir_all(&root);
     }
 

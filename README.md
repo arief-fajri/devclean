@@ -64,7 +64,7 @@ Full details: [docs/development/developing.md](docs/development/developing.md), 
 | Platform | Status |
 |---|---|
 | **macOS** | **Tested.** The shipped build target (`app`, `dmg`), and where the full workspace runs in CI. |
-| Linux | **Builds and tests; not shipped.** CI compiles the whole workspace and runs the full test suite on Ubuntu, so the Unix-specific code — allocated-block sizing, `statvfs`, `rusage`, the Trash implementation — is exercised on a second OS. No bundle is built for it and it is not supported. |
+| Linux | **Builds and tests; not shipped.** CI compiles the whole workspace and runs the full test suite on Ubuntu, so the Unix-specific code — allocated-block sizing, `statvfs`, `rusage`, the Trash implementation — is exercised on a second OS. Trash: implemented (XDG `files/` + `info/` layout), unverified in a desktop file manager. No bundle is built for it and it is not supported. |
 | Windows | **Not tested.** Not a build target. Path handling, Trash and block sizing are all unverified there. |
 
 This table is enforced: `apps/desktop/src/lib/platform-claim.test.ts` fails if the README claims a platform that has no CI job, or if `tauri.conf.json` declares a bundle target for one. It exists because a support matrix drifts away from reality the moment nothing checks it.
