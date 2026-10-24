@@ -80,13 +80,16 @@ class SettingsStore {
       const beforeRoots = key(this.settings?.scan_roots ?? []);
       const beforeExcluded = key(this.settings?.excluded_paths ?? []);
       const beforeDisabled = key(this.settings?.disabled_providers ?? []);
+      // Captured BEFORE `updateSettings` overwrites `this.settings` —
+      // comparing the saved value against `next` would always be equal.
+      const beforeRetention = this.settings?.retention_days ?? null;
       this.settings = await updateSettings(next);
       this.providers = await getProviders();
       const changed =
         beforeRoots !== key(next.scan_roots) ||
         beforeExcluded !== key(next.excluded_paths) ||
         beforeDisabled !== key(next.disabled_providers) ||
-        this.settings.retention_days !== next.retention_days;
+        beforeRetention !== (next.retention_days ?? null);
       if (beforeRoots !== key(next.scan_roots)) await this.refreshCandidates();
       return changed;
     } catch (e) {
