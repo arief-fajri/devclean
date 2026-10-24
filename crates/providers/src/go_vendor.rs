@@ -46,7 +46,6 @@ impl TreeRule for GoVendorProvider {
             // tree in practice; nothing characterizes nesting, so keep the
             // match wherever it sits and size it in full.
             skip_nested: false,
-            extra_prune_dirs: &[],
         }
     }
 

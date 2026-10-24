@@ -46,7 +46,6 @@ impl TreeRule for RustTargetProvider {
             // The old walk matched Cargo.toml files and checked for a sibling
             // `target/`; it never special-cased nesting, so neither do we.
             skip_nested: false,
-            extra_prune_dirs: &[],
         }
     }
 

@@ -48,7 +48,6 @@ impl TreeRule for PodsProvider {
             sibling_files: &["Podfile"],
             max_depth: 6,
             skip_nested: false,
-            extra_prune_dirs: &[],
         }
     }
 

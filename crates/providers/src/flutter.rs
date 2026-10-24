@@ -48,7 +48,6 @@ impl TreeRule for FlutterProvider {
             sibling_files: &["pubspec.yaml"],
             max_depth: 6,
             skip_nested: false,
-            extra_prune_dirs: &[],
         }
     }
 

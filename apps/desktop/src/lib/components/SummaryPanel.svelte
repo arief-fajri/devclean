@@ -27,6 +27,11 @@
     reviewCategories: number;
     /** Bytes the backend will refuse to clean, for any reason. */
     blockedBytes: number;
+    /** v0.13.0: the deduplicated figure — a hard-linked inode counted once
+     *  across the whole scan. `null` whenever it can no longer be measured
+     *  (targeted rescan, post-cleanup prune, an older cache); the line is
+     *  then simply absent, never shown as a stale number. */
+    uniqueBytes: number | null;
     onScan: () => void;
     onCancelScan: () => void;
   }
@@ -49,6 +54,7 @@
     safeCategories,
     reviewCategories,
     blockedBytes,
+    uniqueBytes,
     onScan,
     onCancelScan,
   }: Props = $props();
@@ -101,6 +107,14 @@
           >
         {/if}
       </p>
+      {#if uniqueBytes !== null}
+        <p
+          class="tnum mt-1 text-xs text-zinc-500"
+          data-testid="unique-bytes"
+        >
+          {formatBytes(uniqueBytes)} if each hard-linked file is counted once
+        </p>
+      {/if}
     </div>
     <div
       aria-hidden="true"

@@ -174,25 +174,6 @@ fn size_of(path: &Path) -> u64 {
     }
 }
 
-/// Stamp `blocked_reason` on a resource using the active retention policy.
-/// policy. `provider_min_age` is the provider's own floor (usually `None`);
-/// when set, the resource needs BOTH to clear.
-pub fn apply_retention(r: &mut devclean_core::Resource, retention_days: Option<u32>) {
-    let Some(keep) = retention_days else {
-        return; // No policy: nothing is held back.
-    };
-    // `is_some_and`, not `is_none_or`: an UNKNOWN age must be held back.
-    // When in doubt, keep the data.
-    if r.age_days.is_some_and(|d| d > u64::from(keep)) {
-        return;
-    }
-    r.blocked_reason = Some(devclean_core::BlockReason::Retention);
-    r.blocked_detail = Some(match r.age_days {
-        Some(d) => format!("kept by your {keep}-day retention policy (this is {d}d old)"),
-        None => format!("kept by your {keep}-day retention policy (age unknown)"),
-    });
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -354,51 +335,5 @@ mod tests {
         assert_eq!(predicted, actual);
         assert_eq!(actual, 600);
         let _ = fs::remove_dir_all(&d);
-    }
-
-    #[test]
-    fn apply_retention_marks_recent_items_ineligible() {
-        use devclean_core::{Resource, SafetyLevel};
-        let mk = |age: Option<u64>| Resource {
-            id: "x".into(),
-            provider: "p".into(),
-            name: "n".into(),
-            path: PathBuf::from("/tmp/x"),
-            size_bytes: 1,
-            reclaimable_bytes: 1,
-            apparent_bytes: None,
-            safety: SafetyLevel::Safe,
-            detail: None,
-            impact: None,
-            age_days: age,
-            activity: None,
-            last_commit_unix: None,
-            blocked_reason: None,
-            blocked_detail: None,
-            inode_bytes: Default::default(),
-        };
-        let mut old = mk(Some(90));
-        apply_retention(&mut old, Some(30));
-        assert!(old.blocked_reason.is_none());
-
-        let mut young = mk(Some(3));
-        apply_retention(&mut young, Some(30));
-        assert_eq!(
-            young.blocked_reason,
-            Some(devclean_core::BlockReason::Retention)
-        );
-
-        // No policy → nothing held back.
-        let mut any = mk(Some(0));
-        apply_retention(&mut any, None);
-        assert!(any.blocked_reason.is_none());
-
-        // Age unknown → held back when a policy exists (when in doubt, keep).
-        let mut unknown = mk(None);
-        apply_retention(&mut unknown, Some(30));
-        assert_eq!(
-            unknown.blocked_reason,
-            Some(devclean_core::BlockReason::Retention)
-        );
     }
 }

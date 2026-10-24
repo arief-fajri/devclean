@@ -57,7 +57,6 @@ impl TreeRule for AndroidProvider {
             // A gradle module inside another (android/app/) is its own
             // artifact with its own marker — both are reported.
             skip_nested: false,
-            extra_prune_dirs: &[],
         }
     }
 

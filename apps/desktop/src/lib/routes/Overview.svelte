@@ -122,6 +122,7 @@
     safeCategories={categoryCounts.safe}
     reviewCategories={categoryCounts.review}
     blockedBytes={scanStore.summary.blocked_bytes}
+    uniqueBytes={scanStore.summary.unique_bytes ?? null}
     onScan={() => scanStore.start()}
     onCancelScan={() => scanStore.cancel()}
   />

@@ -61,7 +61,6 @@ impl TreeRule for PythonCacheProvider {
             // one inside another — characterized by the equivalence suite,
             // so the shared walk keeps it.
             skip_nested: false,
-            extra_prune_dirs: &[],
         }
     }
 

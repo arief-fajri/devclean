@@ -40,9 +40,6 @@ pub struct TreeRuleSpec {
     /// reported — its bytes still belong to the enclosing artifact
     /// (`node_modules` inside `node_modules`).
     pub skip_nested: bool,
-    /// Directories the walk must never descend into for this rule.
-    /// Empty today; reserved for rules Wave D adds.
-    pub extra_prune_dirs: &'static [&'static str],
 }
 
 /// One match the walk offers to a rule: a directory that satisfied the

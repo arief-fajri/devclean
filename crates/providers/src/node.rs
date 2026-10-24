@@ -52,7 +52,6 @@ impl TreeRule for NodeModulesProvider {
             // A node_modules inside a node_modules: not a second artifact —
             // its bytes already belong to the enclosing one.
             skip_nested: true,
-            extra_prune_dirs: &[],
         }
     }
 

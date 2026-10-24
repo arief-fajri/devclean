@@ -1,7 +1,10 @@
 /**
  * Typed Tauri bridge — the ONLY module allowed to call `invoke`/`listen`.
- * Mirrors `docs/reference/tauri-contract.md` v0.7.0. Contract change here
- * requires a contract doc update (G-API-01).
+ * Mirrors `docs/reference/tauri-contract.md` (the contract version lives in
+ * that document's banner; do not restate it here to rot). Contract change
+ * here requires a contract doc update (G-API-01) — enforced by
+ * `contract-sync.test.ts`, which diffs the document's type block against
+ * this file.
  */
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
@@ -122,8 +125,6 @@ export interface CleanupResult {
   error?: string;
 }
 
-/** How far Docker cleanup may go. Anything past `build-cache` also
- * requires `allow_privileged_operations`. */
 /** How a cleanup removes a whole artifact. */
 export type DeleteMode = "trash" | "permanent";
 
@@ -138,6 +139,8 @@ export const DELETE_MODE_CONSEQUENCE: Record<DeleteMode, string> = {
   permanent: "Not recoverable. Space is freed immediately, and there is no undo.",
 };
 
+/** How far Docker cleanup may go. Anything past `build-cache` also
+ * requires `allow_privileged_operations`. */
 export type DockerPruneScope =
   | "off"
   | "build-cache"

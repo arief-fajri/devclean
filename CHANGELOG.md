@@ -16,6 +16,17 @@ A contract bump therefore does not imply a product release, and vice versa.
 ### Added
 
 - **XDG Trash on Linux (Wave E1).** The default delete mode now follows the freedesktop Trash spec on Linux: the artifact lands in `$XDG_DATA_HOME/Trash/files/<name>` (fallback `~/.local/share/Trash`) with a sidecar `info/<name>.trashinfo` written **before** the move, so a crash never leaves a file in `files/` with no metadata to restore it. `Path=` is percent-encoded (slashes and the unreserved set kept literal), `DeletionDate=` is local time via `localtime_r`, and `files/`/`info/` are created `0700`. Name collisions claim the sidecar with `O_EXCL` and retry; a failed move rolls the sidecar back. Cross-device artifacts are copied into the home-volume Trash rather than half-implementing the per-mount `.Trash-$UID` case. Both layouts (`~/.Trash` flat on macOS, XDG on Linux) are always compiled and unit-tested on every CI host; what CI cannot prove — the artifact appearing in a real GNOME or KDE file-manager Trash — is stated as "implemented, unverified" in the README support table. No contract change: `moved_to_trash` was already a boolean.
+- **The deduplicated figure reaches the dashboard (Wave E3).** The Overview's summary panel now shows `unique_bytes` as its own line when the backend can still measure it, and says nothing when it cannot (a targeted rescan, a post-cleanup prune, an older cache) — never a stale number. The panel carries the value and never recomputes it.
+- **Store and component tests with a real DOM (Wave E2).** 120 new tests over the seven Svelte stores, `SelectionBar`, `Sidebar`, `ResourceDrawer`, `SummaryPanel` and the shell itself — including behavioural proof that the shell ignores every hotkey while the confirmation flow is open (G-UI-03), which until now was only a source scan. The rig is happy-dom + `@testing-library/*`; the suite runs on the Ubuntu CI runner unchanged.
+
+### Changed
+
+- **The contract document was brought back in sync with the bridge (Wave E3).** `tauri-contract.md`'s Types block had lost `Settings.delete_mode`, `Settings.ai_cleanup_enabled`, `Settings.check_updates_automatically`, `HistoryEntry.moved_to_trash`, `HistoryEntry.sizing` and `CleanupRun.pre_allocated_sizing` — every one shipped and present in `tauri.ts`, none in the document that calls itself the single source of truth. All six are restored, `type DeleteMode` is documented, the duplicated behavioural-note number is fixed (the list is now 1–17 with its cross-references updated), and `contract-sync.test.ts` diffs the document's type block against `tauri.ts` so the two cannot drift apart again (its honest scope: document ↔ bridge, not Rust).
+- **The menu bar colours all 21 providers (Wave E3, K-1).** The seven Wave D ids — `go_vendor`, `flutter`, `android`, `pods`, `browser_temp`, `llm_models`, `ruby` — had tray chips falling through to the grey fallback; they now carry their `providerMeta.ts` colours and ride the package/disc glyph families. `xcode_data` stays grey on both sides because zinc *is* its colour.
+
+### Removed
+
+- **Dead retention and tree-walk code.** `devclean_cleanup::apply_retention` duplicated what `core::policy::block_reason_for` already stamps at scan time and was called only by its own test; `TreeRuleSpec.extra_prune_dirs` was declared, set to `&[]` in all eight providers, and never read by the walk. Both are gone — retention still gates exactly as before, through the policy that both the scan and the engine share.
 
 ## [0.4.0] — 2026-10-23
 

@@ -440,8 +440,9 @@ fn chip(provider: &str) -> Image<'static> {
     Image::new_owned(px, SIZE, SIZE)
 }
 
-/// The accent colours mirror `providerMeta.ts` (Tailwind 600 steps). A drift
-/// between the two is cosmetic, not behavioural.
+/// The accent colours mirror `providerMeta.ts` (Tailwind 600 steps, plus the
+/// 700/500 steps the Wave D providers use to stay distinct from their
+/// neighbours). A drift between the two is cosmetic, not behavioural.
 fn accent(provider: &str) -> (u8, u8, u8) {
     match provider {
         "node_modules" => (0x84, 0xcc, 0x16),
@@ -455,6 +456,17 @@ fn accent(provider: &str) -> (u8, u8, u8) {
         "global_cache" => (0x0d, 0x94, 0x88),
         "opencode_fs" => (0x4f, 0x46, 0xe5),
         "opencode_db" => (0x93, 0x3c, 0xe8),
+        // Wave D (K-1): seven new providers, each keyed to its Tailwind
+        // step in providerMeta.ts.
+        "go_vendor" => (0x0f, 0x76, 0x6e),    // teal-700
+        "flutter" => (0x3b, 0x82, 0xf6),      // blue-500
+        "android" => (0x16, 0xa3, 0x4a),      // green-600
+        "pods" => (0xe1, 0x1d, 0x48),         // rose-600
+        "browser_temp" => (0xc0, 0x26, 0xd3), // fuchsia-600
+        "llm_models" => (0x7c, 0x3a, 0xed),   // violet-600
+        "ruby" => (0xb9, 0x1c, 0x1c),         // red-700
+        // `xcode_data` is zinc-500 in providerMeta — the grey fallback
+        // below IS that colour, so it is deliberately not listed.
         _ => (0x71, 0x71, 0x7a),
     }
 }
@@ -478,11 +490,12 @@ fn glyph_mask(provider: &str, x: f32, y: f32, c: f32) -> bool {
             box_shape(c * 0.6, c * 0.5, c * 0.1) || box_shape(c * 0.6, c * 0.12, -c * 0.52)
         }
         // package: a box with a lid band
-        "node_modules" | "npm_cache" | "python_cache" | "gradle_cache" => {
+        "node_modules" | "npm_cache" | "python_cache" | "gradle_cache" | "go_vendor"
+        | "flutter" | "android" | "pods" | "ruby" => {
             box_shape(c * 0.58, c * 0.55, c * 0.05) || box_shape(c * 0.58, c * 0.1, -c * 0.42)
         }
-        // disc (docker prune / caches)
-        "go_cache" | "docker_pruned" | "global_cache" => {
+        // disc (docker prune / caches / large blobs)
+        "go_cache" | "docker_pruned" | "global_cache" | "browser_temp" | "llm_models" => {
             (x * x + y * y) <= (c * 0.55).powi(2) && (x * x + y * y) >= (c * 0.28).powi(2)
         }
         // page with lines (AI history / documents)
@@ -683,6 +696,14 @@ mod tests {
             "opencode_db",
             "claude",
             "xcode_data",
+            // Wave D (K-1): the seven new providers must paint too.
+            "go_vendor",
+            "flutter",
+            "android",
+            "pods",
+            "browser_temp",
+            "llm_models",
+            "ruby",
             "something_new",
         ] {
             let img = chip(provider);
@@ -697,5 +718,45 @@ mod tests {
             );
             assert_eq!(px[3], 0, "{provider} corner must stay transparent");
         }
+    }
+
+    /// K-1: every provider with a distinct colour in `providerMeta.ts` must
+    /// have one in the tray too — the seven Wave D ids used to fall through
+    /// to the grey fallback, so the menu could not tell them apart.
+    /// `xcode_data` is zinc on both sides (grey IS its colour) and
+    /// `something_new` is an unknown id, so both are allowed to be grey.
+    #[test]
+    fn every_known_provider_except_xcode_has_a_distinct_tray_accent() {
+        const GREY: (u8, u8, u8) = (0x71, 0x71, 0x7a);
+        for provider in [
+            "node_modules",
+            "rust_target",
+            "go_cache",
+            "docker",
+            "docker_pruned",
+            "npm_cache",
+            "python_cache",
+            "cargo_registry",
+            "gradle_cache",
+            "global_cache",
+            "opencode_fs",
+            "opencode_db",
+            "claude",
+            "go_vendor",
+            "flutter",
+            "android",
+            "pods",
+            "browser_temp",
+            "llm_models",
+            "ruby",
+        ] {
+            assert_ne!(
+                accent(provider),
+                GREY,
+                "{provider} still falls back to grey — providerMeta gives it a colour"
+            );
+        }
+        assert_eq!(accent("xcode_data"), GREY, "xcode_data IS zinc");
+        assert_eq!(accent("something_new"), GREY, "unknown ids stay grey");
     }
 }

@@ -117,7 +117,7 @@ Closing the window does not quit. DevClean stays in the **menu bar**, where one 
 
 ## Scan roots are detected, not typed
 
-Default roots cover the usual folders (`~/Projects`, `~/Code`, `~/Workspace`, `~/Dev`, `~/Repos`, `~/Src`, `~/Work`), filtered to those that exist. **Settings → Scan → Detect folders** discovers the rest — it walks `$HOME` at most two levels deep, never descends into a cache, and reports an estimated size per candidate so you can pick without opening anything.
+Default roots cover the usual folders (`~/Projects`, `~/Code`, `~/Workspace`, `~/Dev`, `~/Repos`, `~/Src`, `~/Work`), filtered to those that exist. **Settings → Appearance → Scan roots → Detect folders** discovers the rest — it walks `$HOME` at most two levels deep, never descends into a cache, and reports an estimated size per candidate so you can pick without opening anything.
 
 A `settings.json` written before this release with an empty `scan_roots` array is re-seeded from the defaults on load; otherwise the app would stay permanently blind to `node_modules` on a machine whose work lives outside the well-known folder names.
 
