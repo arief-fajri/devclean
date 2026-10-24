@@ -123,7 +123,7 @@ A `settings.json` written before this release with an empty `scan_roots` array i
 
 ## Status
 
-**`0.4.0` — public alpha, macOS only.** The product works end to end: it scans 21 providers, reports sizes that match `du`, cleans up recoverably, classifies project activity from git history, scans every project tree in a single pass, and can update itself in-app. What is still missing is listed in the [roadmap](docs/development/roadmap.md); what has shipped is in the [changelog](CHANGELOG.md).
+**`1.0.0` — macOS, universal (Apple Silicon + Intel).** The product works end to end: it scans 21 providers, reports sizes that match `du`, cleans up recoverably, classifies project activity from git history, scans every project tree in a single pass, and can update itself in-app. 1.0 is the stabilisation release: the freedesktop Trash on Linux, behavioural tests for the whole shell, a contract document that matches the code, and one source of truth for every cleanup gate. What is still missing is listed in the [roadmap](docs/development/roadmap.md); what has shipped is in the [changelog](CHANGELOG.md).
 
 Not yet done, and worth knowing before you rely on it:
 

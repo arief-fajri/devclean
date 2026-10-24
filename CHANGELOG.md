@@ -11,7 +11,7 @@ Two version numbers move independently:
 
 A contract bump therefore does not imply a product release, and vice versa.
 
-## [Unreleased]
+## [1.0.0] — 2026-10-24
 
 ### Added
 
@@ -176,6 +176,7 @@ Four controls were found claiming enforcement they did not have. All four are fi
 - No known vulnerabilities at release.
 - Report suspected ones privately: see [SECURITY.md](SECURITY.md).
 
+[1.0.0]: https://github.com/arief-fajri/devclean/releases/tag/v1.0.0
 [0.4.0]: https://github.com/arief-fajri/devclean/releases/tag/v0.4.0
 [0.3.2]: https://github.com/arief-fajri/devclean/releases/tag/v0.3.2
 [0.3.1]: https://github.com/arief-fajri/devclean/releases/tag/v0.3.1
