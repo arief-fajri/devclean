@@ -430,9 +430,14 @@ fn remove_path(path: &Path, mode: DeleteMode, trash_dir: Option<&Path>) -> Resul
 /// Deliberately provider-driven: the engine asks what the action WOULD do
 /// rather than pattern-matching provider ids, so a new provider is gated
 /// automatically instead of needing an `if` here (P1).
+///
+/// The live re-derivation runs through the ONE policy function
+/// (`devclean_core::block_reason_for`) — the same one the scan stamps with —
+/// so the engine and the scan cannot drift into two sources of truth for the
+/// same gate (I11). The engine's only additions are the two things the core
+/// function cannot know: the reason stamped at scan time (step 1) and that
+/// `protected` is a scan-time git classification rather than a live setting.
 fn refusal_for(r: &Resource, p: &Arc<dyn Provider>, policy: &CleanupPolicy) -> Option<Refusal> {
-    use devclean_core::BlockReason;
-
     // 1. A reason stamped at scan time. This is the SAME value the UI shows,
     //    so the explanation the user read is the explanation the engine
     //    enforces (I11) — they cannot drift apart.
@@ -448,60 +453,25 @@ fn refusal_for(r: &Resource, p: &Arc<dyn Provider>, policy: &CleanupPolicy) -> O
 
     // 2. Re-derive from the LIVE policy. Settings can change between the scan
     //    that stamped nothing and this call, and a stale "allowed" must not
-    //    become a way past the gate.
-    if p.is_user_data() && !policy.ai_cleanup_enabled {
-        return Some(Refusal {
-            reason: BlockReason::AiReadOnly,
-            detail: "AI history is report-only until you enable it in Settings > Cleanup"
-                .to_string(),
-        });
-    }
-    if let Some(required) = p.required_docker_scope() {
-        if policy.docker_prune_scope == DockerPruneScope::Off {
-            return Some(Refusal {
-                reason: BlockReason::DockerScope,
-                detail: "Docker cleanup is off in Settings > Cleanup".to_string(),
-            });
-        }
-        if required.requires_privileged() && !policy.allow_privileged_operations {
-            return Some(Refusal {
-                reason: BlockReason::PrivilegedRequired,
-                detail: format!(
-                    "needs Privileged operations in Settings > Cleanup ({})",
-                    required.consequence()
-                ),
-            });
-        }
-    }
-
-    // 3. A browser whose clones this provider owns is running (Wave D4).
-    //    The RE-PROBE half of design A: the scan-time stamp above catches
-    //    the browser that was running then; this catches one that started
-    //    since. Provider-driven (P1): the engine asks the declaration,
-    //    never the id. Only a confirmed `Running` reaches here.
-    if p.held_while_browsers_run() && policy.browser_running {
-        return Some(Refusal {
-            reason: BlockReason::BrowserRunning,
-            detail: "the browser is running — quit it and rescan to clean its temporary files"
-                .to_string(),
-        });
-    }
-
-    // 4. Retention, when nothing else already blocked it.
-    if let Some(keep) = policy.retention_days {
-        if r.age_days.is_none_or(|d| d <= u64::from(keep)) {
-            return Some(Refusal {
-                reason: BlockReason::Retention,
-                detail: match r.age_days {
-                    Some(d) => {
-                        format!("kept by your {keep}-day retention policy (this is {d}d old)")
-                    }
-                    None => format!("kept by your {keep}-day retention policy (age unknown)"),
-                },
-            });
-        }
-    }
-    None
+    //    become a way past the gate. Order, messages and precedence are
+    //    `block_reason_for`'s; this only assembles its inputs.
+    let inputs = devclean_core::PolicyInputs {
+        is_user_data: p.is_user_data(),
+        required_docker_scope: p.required_docker_scope(),
+        retention_days: policy.retention_days,
+        docker_prune_scope: policy.docker_prune_scope,
+        allow_privileged_operations: policy.allow_privileged_operations,
+        ai_cleanup_enabled: policy.ai_cleanup_enabled,
+        // Git state is classified at scan time and carried by the stamp in
+        // step 1; the engine does not re-run the git pass on the cleanup
+        // path, so there is nothing live to report here.
+        protected: false,
+        // The probe result only counts for providers that declare the gate,
+        // exactly as the scanner ANDs it before stamping.
+        browser_running: p.held_while_browsers_run() && policy.browser_running,
+    };
+    let (reason, detail) = devclean_core::block_reason_for(r, inputs)?;
+    Some(Refusal { reason, detail })
 }
 
 fn refused_result(id: &str, r: &Resource, reason: Refusal) -> CleanupResult {
