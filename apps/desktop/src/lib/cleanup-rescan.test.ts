@@ -10,8 +10,9 @@ import { describe, expect, it } from "vitest";
  *
  * It used to call `scanStore.start()` on every `cleanup_completed`: a full
  * sweep of all providers that set `scanning`, dimmed the cards and disabled
- * selection — the app felt frozen right after a delete. There is no DOM/runes
- * rig in this project, so these rules pin the source, like `startup.test.ts`.
+ * selection — the app felt frozen right after a delete. The behaviour is now
+ * covered by the store tests (`stores/scan.test.ts`); these rules pin the
+ * *wiring* between the two stores, like `startup.test.ts`.
  */
 const here = dirname(fileURLToPath(import.meta.url));
 const scan = readFileSync(join(here, "stores", "scan.svelte.ts"), "utf8");

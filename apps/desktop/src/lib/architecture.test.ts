@@ -6,9 +6,11 @@ import { describe, expect, it } from "vitest";
 
 /**
  * Architectural guardrails (G-UI-02 / G-UI-03), enforced against the source
- * tree because there is no component-test rig in this project: the rules
- * below are about *which module may reach for a destructive call*, which is
- * exactly the thing a rendering test cannot see.
+ * tree. The DOM rig (Wave E2) tests behaviour — hotkeys really are blocked
+ * while the flow is open (`app-shell.test.ts`) — but the rules below are
+ * about *which module may reach for a destructive call*, which a rendering
+ * test cannot see: a page calling `runCleanup` directly would delete
+ * without ever mounting the confirmation the test renders.
  *
  * The app has one cleanup path — preview → confirm → execute — and it lives
  * in the shell, where the confirmation dialog is mounted. A page that could
@@ -87,8 +89,10 @@ describe("G-UI-02 — the menu bar never starts a cleanup", () => {
  * classes — which means the failure mode is not "someone forgot a button",
  * it is "someone deleted or mistyped the rule".
  *
- * These tests guard the *source*. Whether the selector actually matches is a
- * rendering question, and there is still no DOM in this project (M5).
+ * These tests guard the *source* of the rule and the classes; whether a
+ * selector actually matches is a CSS cascade question that still has no
+ * rendering harness, and the DOM rig added in Wave E2 does not evaluate
+ * styles.
  */
 const css = readFileSync(join(here, "..", "app.css"), "utf8");
 

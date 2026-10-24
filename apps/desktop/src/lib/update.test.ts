@@ -5,9 +5,10 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
 /**
- * In-app update guardrails (G-UPD-01/03/04), enforced against the source tree
- * because this project has no DOM/runes rig — the rules below are about which
- * module may reach for the updater, which a rendering test cannot see.
+ * In-app update guardrails (G-UPD-01/03/04), enforced against the source tree.
+ * The DOM rig (Wave E2) can render the controls, but the rules below are about
+ * which *module* may reach for the updater — a link-order question no
+ * rendering test can see.
  *
  * The updater is a network capability whose payload is signature-verified in
  * Rust before install. The frontend must never touch it directly: it goes

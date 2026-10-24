@@ -8,9 +8,9 @@ import { describe, expect, it } from "vitest";
  * Cache-first startup. The app used to run a full scan on every launch,
  * unconditionally, so `scan_automatically` (default OFF) was a dead control
  * and the window opened onto a loader nobody asked for. These rules are about
- * the *source*, because there is no DOM rig in this project (M5): they pin
- * the two things a rendering test could not see — that the launch scan is
- * gated, and that a cached paint reports the scan's real age.
+ * the *source*: they pin the two things a rendering test could not see — that
+ * the launch scan is gated by the setting in the shell, and that a cached
+ * paint reports the scan's real age.
  */
 const here = dirname(fileURLToPath(import.meta.url));
 const shell = readFileSync(join(here, "..", "App.svelte"), "utf8");

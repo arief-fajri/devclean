@@ -10,7 +10,8 @@ import { describe, expect, it } from "vitest";
  * Vite transforms the module graph on the first navigation. The splash must be
  * inline in `index.html` so it paints before the bundle; a `.svelte`
  * component would load with the bundle and arrive too late. These rules are
- * about the *source*, because there is no DOM rig in this project (M5).
+ * about the *source*: the splash lives in HTML the DOM rig never mounts — it
+ * is gone by the time a component test could look for it.
  */
 const here = dirname(fileURLToPath(import.meta.url));
 const desktop = join(here, "..", "..");
