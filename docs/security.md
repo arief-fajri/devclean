@@ -11,6 +11,22 @@ Provider = controlled capability → declares HOW to delete, not WHAT may be del
 Safety layer = gatekeeper  → decides allow/deny, always default-deny
 ```
 
+## Webview hardening (defense in depth)
+
+The threat model says the frontend is untrusted. The backend enforces every destructive gate for that reason — but the webview itself is also locked down, so a hypothetical injection has nowhere to go:
+
+```text
+default-src 'self'; connect-src ipc: http://ipc.localhost; style-src 'self' 'unsafe-inline'
+```
+
+- **No remote code, no network.** `default-src 'self'` means the page may load only its own bundled script, style and assets; `connect-src` is narrowed to the Tauri IPC channel (`ipc:` on macOS, `http://ipc.localhost` elsewhere), so an injected script cannot exfiltrate anything over the network — it can only call the commands the app already exposes.
+- **The one relaxation is styles.** `style-src 'unsafe-inline'` is required by the progress bars that set `style="width: …%"` inline. Script has **no** inline or `eval` allowance; the production bundle is a single `'self'` script.
+- **Dev is deliberately not locked.** `devCsp` is `null`, because Vite's HMR needs to connect to the dev server and inject modules. The policy above is therefore verified against a **production** build, not the dev server.
+
+Honest scope: this is hardening, not the security boundary. A compromised webview can still invoke the IPC surface — which is exactly why the boundary lives in Rust (`SafetyValidator`, `block_reason_for`, the preview token) and not in the page. The residual gap is recorded as G-SAFE-06 in the [guardrails](development/methodology/guardrails.md).
+
+The same bundle config pins the webview floor: **macOS 12.0 (Monterey)**, `bundle.macOS.minimumSystemVersion`.
+
 ## Deletion pipeline
 
 ```text

@@ -23,7 +23,8 @@
       }
     ],
     "security": {
-      "csp": null
+      "csp": "default-src 'self'; connect-src ipc: http://ipc.localhost; style-src 'self' 'unsafe-inline'",
+      "devCsp": null
     }
   },
   "bundle": {
@@ -39,6 +40,9 @@
       "icons/icon.icns",
       "icons/icon.ico"
     ],
+    "macOS": {
+      "minimumSystemVersion": "12.0"
+    },
     "android": {
       "debugApplicationIdSuffix": ".debug"
     }
