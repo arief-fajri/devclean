@@ -61,7 +61,7 @@ cargo fmt --all                         # format (check: append -- --check)
 
 npm --prefix apps/desktop run check     # svelte-check + tsc
 npm --prefix apps/desktop run build     # build frontend (output ../dist)
-npm --prefix apps/desktop test          # vitest (view/filter/sort, format, safety meta)
+npm --prefix apps/desktop test          # vitest (stores, components, guardrails)
 
 cargo tauri dev                         # dev mode (from the repo root)
 cargo tauri build                       # native bundle (DMG/MSI/deb)

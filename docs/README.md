@@ -28,6 +28,9 @@ Why things are the way they are, and what was rejected. Each record states a dec
 | [decisions/in-app-updates.md](decisions/in-app-updates.md) | Updates are downloaded in-app, signed with minisign and verified by the backend, and opt-in. |
 | [decisions/wave-d-coverage.md](decisions/wave-d-coverage.md) | Every path Wave D reports — and every path it deliberately does not. |
 | [decisions/browser-temp-probe.md](decisions/browser-temp-probe.md) | A confirmed-running browser blocks its code-sign clones; a failed probe never reads as safe. |
+| [decisions/unsigned-for-1.0.md](decisions/unsigned-for-1.0.md) | 1.0.0 ships unsigned; notarization is next, not a gate for the release. |
+| [decisions/one-point-oh.md](decisions/one-point-oh.md) | From contract v1.0.0 a breaking IPC change requires 2.0; the document is diffed against the bridge in CI. |
+| [decisions/windows-deferred.md](decisions/windows-deferred.md) | Windows is deferred, not rejected — the support row changes only after a Windows CI runner exists. |
 
 ## Development
 
