@@ -19,7 +19,7 @@ Add the Tauri updater, driven from Rust, surfaced as a **"Updates" tab in Settin
 
 1. **Distribution.** The endpoint is the repository's own release channel:
    `https://github.com/arief-fajri/devclean/releases/latest/download/latest.json`.
-   The release workflow generates `latest.json` from the built `.app.tar.gz` and its `.sig`, pointing at the tag's own asset so the manifest and the binary cannot drift. `arm64` only, matching what CI builds.
+   The release workflow generates `latest.json` from the built `.app.tar.gz` and its `.sig`, pointing at the tag's own asset so the manifest and the binary cannot drift. Releases up to 0.4.0 were `arm64` only; **since 1.0.0 the build is universal** (one `.app` containing both architectures), so the manifest lists the same tarball under `darwin-aarch64` and `darwin-x86_64` — the updater looks up its own `std::env::consts::ARCH`, and an Intel Mac must find a key too.
 
 2. **Signing.** The public key is committed (`plugins.updater.pubkey`); the private key and its password are repo secrets (`TAURI_SIGNING_PRIVATE_KEY`, `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`). `createUpdaterArtifacts` is turned on **only in the release workflow** (`--config` override), never in `tauri.conf.json`, so a local `cargo tauri build` never needs the key. `dangerousInsecureTransportProtocol` is never set — TLS is enforced.
 
@@ -42,6 +42,7 @@ Add the Tauri updater, driven from Rust, surfaced as a **"Updates" tab in Settin
 - Updates are cryptographically verified even though the app is unsigned. The swap is performed by the app process, so no quarantine attribute is applied and Gatekeeper does not re-prompt; first-install friction is unchanged.
 - Losing the minisign private key permanently strands every installed copy: they can never verify a new release. The key must be backed up outside CI.
 - The app now has a routine outbound capability, so it is **opt-in**. A user who never enables it makes no request.
+- **Universal builds since 1.0.0** (decided at Wave E instead of the arm64-only plan this ADR originally deferred): CI cross-compiles the Intel half on the Apple Silicon runner and `lipo` merges it, so one dmg and one updater tarball serve both architectures. The cost is roughly double build time and a cross-compile step nobody runs locally — accepted because "Intel users cannot install it at all" is a worse cost than a slower release job.
 - Contract v0.12.0: four commands, one event, one type, one settings field. Cache format unchanged.
 
 ## Rejected alternatives
@@ -50,5 +51,5 @@ Add the Tauri updater, driven from Rust, surfaced as a **"Updates" tab in Settin
 - **The JavaScript updater plugin.** Rejected: it adds a second bridge outside `lib/tauri.ts`, needs `updater:*` capabilities, and cannot express "refuse while a cleanup is running" as cleanly as the Rust side.
 - **Auto-check on by default.** Rejected: DevClean's stance elsewhere is restraint (`scan_automatically` is off, nothing spawns on the boot path), and a silent request to GitHub on every launch is not the user's choice to make for them.
 - **Auto-restart after install.** Rejected: a window that vanishes without warning is a worse experience than one button.
-- **Universal (arm64 + x86_64) builds.** Deferred: CI builds on Apple Silicon; Intel users would need a second target and a `darwin-x86_64` manifest entry.
+- **arm64-only releases beyond 1.0.** Rejected at Wave E: deferring the Intel build meant an Intel Mac could not install DevClean at all. The universal target (above) costs a slower release job instead of a whole audience.
 - **`includeUpdaterJson` from tauri-action.** Rejected: it attaches the manifest to a release the action creates, and this workflow deliberately keeps release creation in a separate reviewed `publish` job.

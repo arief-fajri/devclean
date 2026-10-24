@@ -70,7 +70,7 @@ jobs:
         working-directory: apps/desktop
 
   build:
-    name: build ${{ inputs.tag }} — .app + .dmg
+    name: build ${{ inputs.tag }} — .app + .dmg (universal)
     needs: verify
     runs-on: macos-latest
     steps:
@@ -80,6 +80,10 @@ jobs:
       - uses: dtolnay/rust-toolchain@master
         with:
           toolchain: "1.90"
+          # Universal (arm64 + x86_64) since 1.0.0: the runner is Apple
+          # Silicon, so the Intel half is cross-compiled against the same
+          # SDK. Both targets must be installed for `lipo` to have input.
+          targets: aarch64-apple-darwin,x86_64-apple-darwin
       - uses: Swatinem/rust-cache@v2
       - uses: actions/setup-node@v4
         with:
@@ -111,10 +115,15 @@ jobs:
           # quarantine is applied. The README documents the one-time Gatekeeper
           # step a first install needs.
           projectPath: apps/desktop
-          # createUpdaterArtifacts is turned on HERE, not in tauri.conf.json:
-          # that keeps a local `cargo tauri build` working without the signing
-          # key, while a release build always signs its updater artifacts.
-          args: --bundles app,dmg --config '{"bundle":{"createUpdaterArtifacts":true}}'
+          # One bundle for both architectures since 1.0.0 (see the ADR
+          # `in-app-updates.md`): `lipo` merges the two targets, the dmg and
+          # the updater tarball each contain one universal .app, and
+          # latest.json lists it under both `darwin-aarch64` and
+          # `darwin-x86_64`. createUpdaterArtifacts is turned on HERE, not in
+          # tauri.conf.json: that keeps a local `cargo tauri build` working
+          # without the signing key, while a release build always signs its
+          # updater artifacts.
+          args: --target universal-apple-darwin --bundles app,dmg --config '{"bundle":{"createUpdaterArtifacts":true}}'
           # Packaging a .dmg on CI is the flakiest step in this pipeline, and a
           # failure costs the whole ~10 minute build. The action retries the
           # build (and the upload) rather than the job.
@@ -130,9 +139,12 @@ jobs:
           set -euo pipefail
           # The bundle lands in the Cargo workspace's target dir, which is the
           # repo root because `apps/desktop/src-tauri` is a workspace member.
-          # Fall back to the crate-local path in case that ever stops being
-          # true, and fail loudly rather than publish an empty release.
-          BUNDLE=target/release/bundle
+          # `--target universal-apple-darwin` writes under
+          # target/universal-apple-darwin/… (since 1.0.0); a native build
+          # still lands in target/release/…. Fall back through both, and fail
+          # loudly rather than publish an empty release.
+          BUNDLE=target/universal-apple-darwin/release/bundle
+          test -d "$BUNDLE" || BUNDLE=target/release/bundle
           test -d "$BUNDLE" || BUNDLE=apps/desktop/src-tauri/target/release/bundle
           test -d "$BUNDLE" || { echo "no bundle directory found"; exit 1; }
           mkdir -p dist-artifacts
@@ -170,16 +182,21 @@ jobs:
           import json, sys
 
           version, pub_date, url, signature = sys.argv[1:5]
+          # One universal tarball (arm64 + x86_64) since 1.0.0, advertised
+          # under BOTH darwin keys: the updater looks up its own
+          # `std::env::consts::ARCH`, so an Intel Mac must find
+          # `darwin-x86_64` and an Apple Silicon Mac `darwin-aarch64` —
+          # both resolve to the same signed bundle.
+          platforms = {
+              "darwin-aarch64": {"signature": signature, "url": url},
+              "darwin-x86_64": {"signature": signature, "url": url},
+          }
           print(
               json.dumps(
                   {
                       "version": version,
                       "pub_date": pub_date,
-                      # arm64 only: the release builds on macos-latest, which is
-                      # Apple Silicon. An Intel build would add "darwin-x86_64".
-                      "platforms": {
-                          "darwin-aarch64": {"signature": signature, "url": url}
-                      },
+                      "platforms": platforms,
                   },
                   indent=2,
               )

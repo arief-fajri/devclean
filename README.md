@@ -41,7 +41,7 @@ cargo tauri build
 
 DevClean can update itself: **Settings → Updates** checks the release channel, and a newer version can be downloaded and installed without leaving the app. Every update bundle is signed with a minisign key and verified before it is installed, over HTTPS — even though the app itself is not Apple-signed. Nothing is downloaded until you press **Check for updates**; an optional "check at startup" toggle is off by default. A restart is a separate button, and installing is refused while a scan or cleanup is running.
 
-> 0.3.0 is the first updater-enabled release: a build older than it has no updater to receive an update and must be installed by hand. From 0.3.0 on, each release arrives in-app. Updates are arm64 only.
+> 0.3.0 is the first updater-enabled release: a build older than it has no updater to receive an update and must be installed by hand. From 0.3.0 on, each release arrives in-app. Releases through 0.4.0 were arm64-only; **1.0.0 and later are universal** (Apple Silicon + Intel).
 
 ## Development
 
@@ -63,7 +63,7 @@ Full details: [docs/development/developing.md](docs/development/developing.md), 
 
 | Platform | Status |
 |---|---|
-| **macOS** | **Tested.** The shipped build target (`app`, `dmg`), and where the full workspace runs in CI. |
+| **macOS** | **Tested.** The shipped build target (`app`, `dmg`) — universal (Apple Silicon + Intel) since 1.0.0 — and where the full workspace runs in CI. |
 | Linux | **Builds and tests; not shipped.** CI compiles the whole workspace and runs the full test suite on Ubuntu, so the Unix-specific code — allocated-block sizing, `statvfs`, `rusage`, the Trash implementation — is exercised on a second OS. Trash: implemented (XDG `files/` + `info/` layout), unverified in a desktop file manager. No bundle is built for it and it is not supported. |
 | Windows | **Not tested.** Not a build target. Path handling, Trash and block sizing are all unverified there. |
 
@@ -127,7 +127,7 @@ A `settings.json` written before this release with an empty `scan_roots` array i
 
 Not yet done, and worth knowing before you rely on it:
 
-- **Automatic updates are live from 0.3.0 on.** 0.3.0 already ships the updater, so a 0.3.0 install receives 0.3.1 in-app; anything older has no updater and must still be installed by hand. Updates are arm64 only. See [Updates](#updates).
+- **Automatic updates are live from 0.3.0 on.** 0.3.0 already ships the updater, so a 0.3.0 install receives 0.3.1 in-app; anything older has no updater and must still be installed by hand. Releases through 0.4.0 were arm64-only; 1.0.0 and later are universal. See [Updates](#updates).
 - **Not every ecosystem yet.** Ruby, Flutter, Android, CocoaPods, Go vendoring and the LLM model stores arrived in 0.4.0; Swift Package Manager (`.build`), Bazel caches and Gradle wrapper distributions are not scanned yet.
 - **A CLI.** There is no way to run this from cron or a script.
 - **Unsigned builds.** See [Install](#install).
