@@ -399,21 +399,6 @@
           cache has no meaningful age.
         </p>
 
-        <h3 class="mt-6 text-sm font-semibold text-zinc-900 dark:text-zinc-100">
-          When something is cleaned
-        </h3>
-        <p class="mt-1 text-xs text-zinc-500">
-          Every cleanup is permanent since 1.0.0 — deleted files reclaim space
-          immediately and cannot be undone. Review the re-measured preview and
-          confirm before cleaning.
-        </p>
-        <p
-          class="mt-2 rounded-lg bg-amber-50 px-2.5 py-2 text-xs text-amber-800 dark:bg-amber-950/40 dark:text-amber-200"
-          data-testid="permanent-warning"
-        >
-          Permanent deletion has no undo.
-        </p>
-
         <h3 class="mt-6 text-sm font-semibold text-zinc-900 dark:text-zinc-100">Docker</h3>
         <label class="mt-2 block text-sm">
           <span class="sr-only">Docker cleanup scope</span>
