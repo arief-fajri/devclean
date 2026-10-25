@@ -224,9 +224,9 @@ G-CI-03  A test may not depend on the machine's state: the contents of $HOME,
            whether an external tool is installed, the user's git configuration,
            or filesystem case-sensitivity. A fixture states everything it needs
            rather than reading it from the machine.
-           Enforcement: test — test-hygiene.test.ts scans crates/*/tests and
-           fails on `default_scan_roots()`, `app_data_dir()`, `home_dir()` or
-           `default_trash_dir()` outside a named exception ✅ ·
+            Enforcement: test — test-hygiene.test.ts scans crates/*/tests and
+            fails on `default_scan_roots()`, `app_data_dir()` or `home_dir()`
+            outside a named exception ✅ ·
            test — disk::the_app_data_directory_really_is_on_the_home_volume
            resolves to the nearest EXISTING ancestor instead of assuming the
            directory exists ✅ · test — policy_evidence.rs uses stub providers

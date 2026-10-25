@@ -25,23 +25,17 @@ import { describe, expect, it } from "vitest";
 const ROOT = resolve(__dirname, "../../../..");
 
 /** Calls that read the machine and must not appear in an integration test. */
-const FORBIDDEN = [
-  "default_scan_roots(",
-  "app_data_dir(",
-  "home_dir(",
-  "default_trash_dir(",
-];
+const FORBIDDEN = ["default_scan_roots(", "app_data_dir(", "home_dir("];
 
 /**
  * The only integration tests allowed to read the machine, and why.
  *
  * Keep this list short. An entry is a claim that the machine dependency is the
- * point of the test, not an accident of how it was written.
+ * point of the test, not an accident of how it was written. Since 1.0.0 every
+ * cleanup is permanent and the Trash implementation is gone, so no exception
+ * remains.
  */
-const ALLOWED: Record<string, string> = {
-  "crates/cleanup/tests/trash_evidence.rs":
-    "the point is a move into the REAL Trash; it creates its own fixture and restores it, so nothing pre-existing is asserted about",
-};
+const ALLOWED: Record<string, string> = {};
 
 /** `crates/<pkg>/tests/*.rs` — integration tests, which get their own binary. */
 function integrationTests(): string[] {

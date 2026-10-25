@@ -50,6 +50,7 @@ A contract bump therefore does not imply a product release, and vice versa.
 ### Removed
 
 - **Dead retention and tree-walk code.** `devclean_cleanup::apply_retention` duplicated what `core::policy::block_reason_for` already stamps at scan time and was called only by its own test; `TreeRuleSpec.extra_prune_dirs` was declared, set to `&[]` in all eight providers, and never read by the walk. Both are gone — retention still gates exactly as before, through the policy that both the scan and the engine share.
+- **Trash / delete-mode choice (pre-1.0 amendment, permanent-only).** `Settings.delete_mode`, `type DeleteMode`, `CleanupResult.moved_to_trash`, `crates/cleanup/src/trash.rs` (macOS flat + freedesktop XDG), the Settings radiogroup and every `pending in Trash` summary are gone. Every cleanup deletes outright and `freed_bytes` always reports the measured reclaim. `HistoryEntry.moved_to_trash?` stays as a legacy pre-1.0 read-only flag so old runs render as `archived in Trash (pre-1.0)`. Old `settings.json` files with `"delete_mode"` still load. See [permanent-only-cleanup](docs/decisions/permanent-only-cleanup.md).
 
 ## [0.4.0] — 2026-10-23
 

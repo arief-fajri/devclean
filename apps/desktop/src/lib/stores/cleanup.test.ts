@@ -45,7 +45,6 @@ function okResult(id: string): CleanupResult {
     resource_id: id,
     requested_bytes: 100,
     freed_bytes: 100,
-    moved_to_trash: false,
     duration_ms: 5,
     status: "success",
   };

@@ -1,55 +1,26 @@
 # Recovering from a cleanup
 
-DevClean moves things to the Trash by default, so a wrong click is recoverable. This page is the procedure for each way a cleanup can go wrong.
+Since 1.0.0 every cleanup is permanent: deleted files reclaim space
+immediately and cannot be undone. The re-measured preview and the
+confirmation checkbox are the safety net — read them before confirming.
+
+Runs recorded before 1.0.0 may still carry `archived in Trash (pre-1.0)`
+labels. Those artifacts live in the OS Trash (`~/.Trash` on macOS,
+`$XDG_DATA_HOME/Trash/files` on Linux) and can be dragged back by hand;
+everything cleaned since 1.0.0 has no Trash copy.
 
 ## "I cleaned something I did not mean to"
 
-Nothing is lost. Cleanups move to the Trash unless you turned that off.
-
-### From Finder
-
-1. Open the Trash.
-2. Find the folder by name — DevClean puts it in under its own name, so `node_modules` from `~/Projects/storefront` is simply `node_modules`.
-3. Drag it back to where it came from.
-
-> **If two items shared a name**, the second is stored as `node_modules.1`, the third as `node_modules.2`, and so on. DevClean never overwrites something already in the Trash, so the first one you moved is still the un-suffixed name. Check which is which by size or by opening it.
-
-> **macOS "Put Back" is not available.** DevClean does not write the Finder metadata that enables it. The item is still there and still recoverable — the one-click undo is what is missing, not the file.
-
-### From the terminal
-
-```bash
-# macOS: find it
-ls ~/.Trash | grep node_modules
-
-# Move it back
-mv ~/.Trash/node_modules ~/Projects/storefront/node_modules
-```
-
-```bash
-# Linux (XDG): DevClean writes files/ + info/<name>.trashinfo
-ls ~/.local/share/Trash/files | grep node_modules
-
-# Move it back
-mv ~/.local/share/Trash/files/node_modules ~/Projects/storefront/node_modules
-
-# Then drop the sidecar that pointed at it, so no metadata is left behind
-rm ~/.local/share/Trash/info/node_modules.trashinfo
-```
-
-> **On Linux the artifact lives in `files/`, not at the top of the Trash.** The sibling `info/<name>.trashinfo` is what makes a file manager show it as trash and restore it; deleting the artifact without deleting its sidecar leaves a ghost entry. `$XDG_DATA_HOME` is honoured when set, so the real path may be `$XDG_DATA_HOME/Trash` instead of `~/.local/share/Trash`.
+Regenerate it with the toolchain: `npm install`, `cargo build`, `go build`,
+or rebuild the Docker layer. There is no Trash copy to restore for cleanups
+done since 1.0.0.
 
 ### If the space has not come back
 
-That is expected. A Trash move relocates the data; it does not free it. The space returns when you empty the Trash:
-
-```bash
-# macOS: Finder → Empty Trash
-# Linux: empty the Trash in your file manager, or:
-rm -rf ~/.local/share/Trash/files/* ~/.local/share/Trash/info/*
-```
-
-The cleanup summary says "moved to Trash — space returns when you empty it" for exactly this reason, and the run is recorded in History with `moved_to_trash`.
+Rescan first — the dashboard re-measures free space after every cleanup, so
+a stale number means the scan is old, not that the delete failed. Open
+**History** and check the run's `requested → freed` figures: `freed` is
+measured `before − after`, never assumed.
 
 ## "A cleanup failed partway"
 

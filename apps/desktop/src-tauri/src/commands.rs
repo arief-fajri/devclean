@@ -411,7 +411,6 @@ pub async fn cleanup(
     let roots = settings.scan_roots.clone();
     let privileged = settings.allow_privileged_operations;
     let scope = settings.docker_prune_scope;
-    let delete_mode = settings.delete_mode;
     let ai_cleanup_enabled = settings.ai_cleanup_enabled;
     let retention_days = settings.retention_days;
     let progress_app = app.clone();
@@ -446,9 +445,6 @@ pub async fn cleanup(
             &devclean_cleanup::CleanupPolicy {
                 allow_privileged_operations: privileged,
                 docker_prune_scope: scope,
-                delete_mode,
-                // The app always uses the platform Trash (~/.Trash).
-                trash_dir: None,
                 ai_cleanup_enabled,
                 retention_days,
                 browser_running,
@@ -473,7 +469,9 @@ pub async fn cleanup(
                 name: src.as_ref().map(|s| s.name.clone()).unwrap_or_default(),
                 requested_bytes: r.requested_bytes,
                 freed_bytes: r.freed_bytes,
-                moved_to_trash: r.moved_to_trash,
+                // New cleanups are always permanent; the legacy flag stays
+                // `false` here and is skipped on write (pre-1.0 read-only).
+                moved_to_trash: false,
                 sizing: devclean_core::Sizing::Allocated,
                 status: r.status,
                 error: r.error.clone(),

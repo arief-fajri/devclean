@@ -1,10 +1,10 @@
 use devclean_core::{
-    CleanupPreview, CleanupPreviewItem, CleanupResult, CleanupStatus, DeleteMode, DockerPruneScope,
-    Resource, SafetyValidator, CLEANUP_COMMAND_TIMEOUT,
+    CleanupPreview, CleanupPreviewItem, CleanupResult, CleanupStatus, DockerPruneScope, Resource,
+    SafetyValidator, CLEANUP_COMMAND_TIMEOUT,
 };
 use devclean_providers::{CleanupAction, Provider};
 use std::collections::HashMap;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::sync::{
     atomic::{AtomicBool, Ordering},
     Arc,
@@ -29,15 +29,6 @@ pub struct CleanupPolicy {
     pub allow_privileged_operations: bool,
     /// How far Docker pruning may go.
     pub docker_prune_scope: DockerPruneScope,
-    /// Trash or permanent for whole-artifact removal (`RemoveDir`).
-    /// Command- and SQL-backed actions cannot be trashed — a vendor prune or
-    /// a `DELETE FROM` has no undo — so this only governs path removal.
-    pub delete_mode: DeleteMode,
-    /// Where Trash moves land. `None` uses the platform default (`~/.Trash`
-    /// on macOS, `$XDG_DATA_HOME/Trash` on Linux).
-    /// Overridable so tests never touch the user's real Trash, and so a user
-    /// can redirect it.
-    pub trash_dir: Option<PathBuf>,
     /// `Settings.ai_cleanup_enabled`. Off by default: AI conversation history
     /// is reported but not cleanable until the user opts in.
     pub ai_cleanup_enabled: bool,
@@ -60,18 +51,6 @@ pub struct Refusal {
     pub reason: devclean_core::BlockReason,
     pub detail: String,
 }
-
-/// The ungated [`CleanupEngine::execute`] path removes outright. Kept as a
-/// named constant so the reason is visible at the call site.
-const PERMANENT: CleanupPolicy = CleanupPolicy {
-    allow_privileged_operations: false,
-    docker_prune_scope: DockerPruneScope::Off,
-    delete_mode: DeleteMode::Permanent,
-    trash_dir: None,
-    ai_cleanup_enabled: true,
-    retention_days: None,
-    browser_running: false,
-};
 
 #[derive(Clone)]
 pub struct CleanupEngine {
@@ -157,7 +136,7 @@ impl CleanupEngine {
                 // Gates run BEFORE any measurement or filesystem access.
                 match refusal_for(r, p, policy) {
                     Some(reason) => refused_result(id, r, reason),
-                    None => self.clean_one(id, r, p, validator, &lookup, policy),
+                    None => self.clean_one(id, r, p, validator, &lookup),
                 }
             };
             done += 1;
@@ -200,7 +179,7 @@ impl CleanupEngine {
                 };
                 // The ungated primitive removes outright: it exists for unit
                 // tests that exercise measurement, not for user-facing runs.
-                self.clean_one(id, r, p, validator, &lookup, &PERMANENT)
+                self.clean_one(id, r, p, validator, &lookup)
             };
             done += 1;
             if let Some(cb) = &on_progress {
@@ -218,7 +197,6 @@ impl CleanupEngine {
         provider: &Arc<dyn Provider>,
         validator: &SafetyValidator,
         lookup: &dyn Fn(&str) -> Option<std::path::PathBuf>,
-        policy: &CleanupPolicy,
     ) -> CleanupResult {
         let start = Instant::now();
         // Resolve the authoritative path server-side (I1).
@@ -230,27 +208,18 @@ impl CleanupEngine {
         let action = provider.cleanup_action(&path);
         let outcome: Result<Outcome, String> = match &action {
             CleanupAction::RemoveDir(path) => {
-                // I2: validate before touching anything.
+                // I2: validate before touching anything. Every cleanup is
+                // permanent since 1.0.0: the artifact is removed outright
+                // and the reclaimed space is measured immediately.
                 if let Err(e) = validator.validate_path(path) {
                     return failed(id, before, provider, path, start, e.to_string());
                 }
-                match remove_path(path, policy.delete_mode, policy.trash_dir.as_deref()) {
+                match std::fs::remove_dir_all(path) {
                     Ok(()) => {
-                        let moved = !policy.delete_mode.frees_space_immediately();
-                        // Under Trash the bytes are still on disk, so `freed`
-                        // must be 0: the space returns when the user empties
-                        // the Trash, and claiming it now would be a lie.
-                        let freed = if moved {
-                            0
-                        } else {
-                            provider.measure(path).map_or(before.unwrap_or(0), |after| {
-                                before.unwrap_or(0).saturating_sub(after)
-                            })
-                        };
-                        Ok(Outcome {
-                            freed,
-                            moved_to_trash: moved,
-                        })
+                        let freed = provider.measure(path).map_or(before.unwrap_or(0), |after| {
+                            before.unwrap_or(0).saturating_sub(after)
+                        });
+                        Ok(Outcome::freed(freed))
                     }
                     Err(e) => Err(format!("could not remove {}: {e}", path.display())),
                 }
@@ -329,18 +298,14 @@ impl CleanupEngine {
             }
         };
 
-        let (status, freed, moved_to_trash, error) = match outcome {
-            Ok(o) => (CleanupStatus::Success, o.freed, o.moved_to_trash, None),
-            Err(error) => {
-                let (status, freed, error) = Self::failed_outcome(before, provider, &path, error);
-                (status, freed, false, error)
-            }
+        let (status, freed, error) = match outcome {
+            Ok(o) => (CleanupStatus::Success, o.freed, None),
+            Err(error) => Self::failed_outcome(before, provider, &path, error),
         };
         CleanupResult {
             resource_id: id.to_string(),
             requested_bytes: r.reclaimable_bytes,
             freed_bytes: freed,
-            moved_to_trash,
             duration_ms: start.elapsed().as_millis() as u64,
             status,
             error,
@@ -379,49 +344,22 @@ fn failed(
         resource_id: id.to_string(),
         requested_bytes: 0,
         freed_bytes: freed,
-        moved_to_trash: false,
         duration_ms: start.elapsed().as_millis() as u64,
         status,
         error,
     }
 }
 
-/// What a successful action produced.
+/// What a successful action produced: bytes returned to the filesystem
+/// right now. Every cleanup is permanent since 1.0.0.
 #[derive(Debug, Clone, Copy)]
 struct Outcome {
-    /// Bytes returned to the filesystem right now.
     freed: u64,
-    /// True when the artifact went to the Trash instead of being removed, so
-    /// `freed` is 0 and the space is pending.
-    moved_to_trash: bool,
 }
 
 impl Outcome {
     fn freed(freed: u64) -> Self {
-        Self {
-            freed,
-            moved_to_trash: false,
-        }
-    }
-}
-
-/// Remove a validated path, honouring the delete mode.
-///
-/// `Trash` goes through the OS Trash (macOS) / freedesktop trash (Linux), so
-/// the artifact is recoverable. `Permanent` removes it outright. A failure
-/// from `trash` is NOT silently downgraded to a permanent delete — losing the
-/// undo is exactly what the user asked to avoid.
-fn remove_path(path: &Path, mode: DeleteMode, trash_dir: Option<&Path>) -> Result<(), String> {
-    match mode {
-        DeleteMode::Trash => {
-            let dir = match trash_dir {
-                Some(d) => d.to_path_buf(),
-                None => crate::trash::default_trash_dir()
-                    .ok_or_else(|| "no HOME, so there is no Trash to move into".to_string())?,
-            };
-            crate::trash::move_to_trash(path, &dir).map(|_| ())
-        }
-        DeleteMode::Permanent => std::fs::remove_dir_all(path).map_err(|e| e.to_string()),
+        Self { freed }
     }
 }
 
@@ -479,7 +417,6 @@ fn refused_result(id: &str, r: &Resource, reason: Refusal) -> CleanupResult {
         resource_id: id.to_string(),
         requested_bytes: r.reclaimable_bytes,
         freed_bytes: 0,
-        moved_to_trash: false,
         duration_ms: 0,
         status: CleanupStatus::Failed,
         error: Some(reason.detail),
@@ -499,7 +436,6 @@ fn cancelled_result(id: &str, r: Option<&Resource>) -> CleanupResult {
         resource_id: id.to_string(),
         requested_bytes: r.map(|r| r.reclaimable_bytes).unwrap_or(0),
         freed_bytes: 0,
-        moved_to_trash: false,
         duration_ms: 0,
         status: CleanupStatus::Cancelled,
         error: None,
@@ -1063,57 +999,12 @@ mod tests {
         let _ = std::fs::remove_dir_all(&root);
     }
 
-    // ------------------------------------------------------------- trash
+    // ----------------------------------------------- permanent removal
 
-    /// `Trash` must move the artifact aside, not remove it, and must NOT
-    /// claim the space back: the bytes are still on disk until the user
-    /// empties the Trash. Reporting `freed > 0` here would be a lie, and it
-    /// is exactly the class of bug G-REL-03 exists to prevent.
+    /// Every cleanup is permanent since 1.0.0: path removal deletes outright
+    /// and reports the measured space back, because the space really is back.
     #[test]
-    fn trash_mode_moves_aside_and_reports_pending_not_freed() {
-        let (root, target) = fixture("trash");
-        let (mut resources, providers) = setup();
-        resources.insert("nm:0200".to_string(), resource("nm:0200", &target));
-        let validator = SafetyValidator::new(vec![root.clone()]);
-        let lookup = |id: &str| resources.get(id).map(|x| x.path.clone());
-
-        let out = CleanupEngine::default().execute_gated(
-            &["nm:0200".to_string()],
-            &resources,
-            &providers,
-            &validator,
-            lookup,
-            None,
-            &CleanupPolicy {
-                delete_mode: DeleteMode::Trash,
-                // An explicit fixture directory keeps the test hermetic on
-                // both platforms — the real Trash is never touched.
-                trash_dir: Some(root.join("trash")),
-                ..CleanupPolicy::default()
-            },
-        );
-
-        assert_eq!(out[0].status, CleanupStatus::Success, "{:?}", out[0].error);
-        assert!(
-            out[0].moved_to_trash,
-            "the result must say it went to Trash"
-        );
-        assert_eq!(
-            out[0].freed_bytes, 0,
-            "space held by the Trash has not been returned yet"
-        );
-        assert!(
-            !target.exists(),
-            "the artifact must no longer be at its original path"
-        );
-
-        let _ = std::fs::remove_dir_all(&root);
-    }
-
-    /// `Permanent` is the explicit opt-out: it removes outright and may claim
-    /// the space back, because the space really is back.
-    #[test]
-    fn permanent_mode_removes_and_reports_freed() {
+    fn removal_deletes_outright_and_reports_freed() {
         let (root, target) = fixture("perm");
         let (mut resources, providers) = setup();
         resources.insert("nm:0201".to_string(), resource("nm:0201", &target));
@@ -1127,24 +1018,17 @@ mod tests {
             &validator,
             lookup,
             None,
-            &CleanupPolicy {
-                delete_mode: DeleteMode::Permanent,
-                ..CleanupPolicy::default()
-            },
+            &CleanupPolicy::default(),
         );
 
         assert_eq!(out[0].status, CleanupStatus::Success, "{:?}", out[0].error);
-        assert!(!out[0].moved_to_trash);
         assert!(out[0].freed_bytes > 0, "permanent removal frees space now");
         assert!(!target.exists());
         let _ = std::fs::remove_dir_all(&root);
     }
 
-    /// A vendor command or a SQL DELETE has no undo, so the delete mode must
-    /// not be read as applying to them — otherwise a user who chose Trash
-    /// would believe `docker builder prune` was recoverable.
     #[test]
-    fn command_backed_actions_are_never_marked_as_trashed() {
+    fn command_backed_actions_report_measured_freed() {
         let id = "sn:trash".to_string();
         let r = Resource {
             id: id.clone(),
@@ -1180,14 +1064,7 @@ mod tests {
             &validator,
             lookup,
             None,
-            &CleanupPolicy {
-                delete_mode: DeleteMode::Trash,
-                ..CleanupPolicy::default()
-            },
-        );
-        assert!(
-            !out[0].moved_to_trash,
-            "a subprocess cannot be trashed, so the mode must not claim it was"
+            &CleanupPolicy::default(),
         );
         assert_eq!(out[0].freed_bytes, 600);
     }
@@ -1407,8 +1284,6 @@ mod tests {
             &CleanupPolicy {
                 allow_privileged_operations: true,
                 docker_prune_scope: devclean_core::DockerPruneScope::Off,
-                delete_mode: DeleteMode::Permanent,
-                trash_dir: None,
                 ai_cleanup_enabled: true,
                 retention_days: None,
                 browser_running: false,
@@ -1446,8 +1321,6 @@ mod tests {
             &CleanupPolicy {
                 allow_privileged_operations: false,
                 docker_prune_scope: devclean_core::DockerPruneScope::All,
-                delete_mode: DeleteMode::Permanent,
-                trash_dir: None,
                 ai_cleanup_enabled: true,
                 retention_days: None,
                 browser_running: false,
@@ -1508,7 +1381,6 @@ mod tests {
             lookup,
             None,
             &CleanupPolicy {
-                delete_mode: DeleteMode::Permanent,
                 browser_running: true,
                 ..CleanupPolicy::default()
             },
@@ -1527,7 +1399,6 @@ mod tests {
             lookup,
             None,
             &CleanupPolicy {
-                delete_mode: DeleteMode::Permanent,
                 browser_running: false,
                 ..CleanupPolicy::default()
             },
@@ -1562,8 +1433,7 @@ mod tests {
             lookup,
             None,
             &CleanupPolicy {
-                delete_mode: DeleteMode::Permanent,
-                browser_running: true,
+                browser_running: false,
                 ..CleanupPolicy::default()
             },
         );

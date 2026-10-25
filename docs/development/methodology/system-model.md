@@ -28,7 +28,7 @@ Every non-trivial change must trace to at least one outcome:
 2. **Safe** — the Clean button never deletes what it shouldn't.
 3. **Fast** — startup <2s, progress updates every 100–500ms, cancel <1s.
 4. **Transparent** — partial failure is reported per resource, never as a generic "failed".
-5. **Recoverable** — everything deleted is regenerable (`npm install`, `cargo build`, `go build`, Docker layer rebuild).
+5. **Regenerable** — everything deleted is regenerable via the toolchain (`npm install`, `cargo build`, `go build`, Docker layer rebuild). Since 1.0.0 there is no Trash undo; the safety net is the re-measured preview plus confirmation.
 
 ## 3. Architecture principles
 

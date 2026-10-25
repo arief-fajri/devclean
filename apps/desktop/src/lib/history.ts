@@ -125,6 +125,23 @@ export function entryCountLabel(n: number): string {
   return `${n} ${n === 1 ? "resource" : "resources"}`;
 }
 
+/**
+ * Bytes in a run that were archived in the Trash before the 1.0.0
+ * permanent-only switch. New cleanups never set `moved_to_trash`; old
+ * history lines may still carry it. Frozen for display only — never counted
+ * as reclaimed or pending space.
+ */
+export function runArchivedTrashBytes(run: CleanupRun): number {
+  return run.entries
+    .filter((e) => e.moved_to_trash ?? false)
+    .reduce((a, e) => a + e.requested_bytes, 0);
+}
+
+/** Bytes across runs archived in the Trash before 1.0.0. */
+export function archivedTrashBytes(runs: CleanupRun[]): number {
+  return runs.reduce((acc, r) => acc + runArchivedTrashBytes(r), 0);
+}
+
 /** `all` / `clean` / `problems` chip counts for the toolbar. */
 export function filterCounts(runs: CleanupRun[]): Record<RunFilter, number> {
   return {

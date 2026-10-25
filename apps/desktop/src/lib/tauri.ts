@@ -115,29 +115,13 @@ export interface CleanupPreview {
 export interface CleanupResult {
   resource_id: string;
   requested_bytes: number;
-  /** Bytes returned to the filesystem NOW. Zero when the artifact went to
-   * the Trash — the space comes back when you empty it. */
+  /** Bytes returned to the filesystem by this cleanup. Every cleanup is
+   * permanent since 1.0.0, so this is always the space actually reclaimed. */
   freed_bytes: number;
-  /** True when the artifact was moved to the Trash rather than removed. */
-  moved_to_trash: boolean;
   duration_ms: number;
   status: CleanupStatus;
   error?: string;
 }
-
-/** How a cleanup removes a whole artifact. */
-export type DeleteMode = "trash" | "permanent";
-
-export const DELETE_MODE_LABELS: Record<DeleteMode, string> = {
-  trash: "Move to Trash",
-  permanent: "Delete permanently",
-};
-
-export const DELETE_MODE_CONSEQUENCE: Record<DeleteMode, string> = {
-  trash:
-    "Recoverable. The space comes back when you empty the Trash, so the summary reports what was moved rather than what was freed.",
-  permanent: "Not recoverable. Space is freed immediately, and there is no undo.",
-};
 
 /** How far Docker cleanup may go. Anything past `build-cache` also
  * requires `allow_privileged_operations`. */
@@ -185,8 +169,6 @@ export interface Settings {
   /** Copy the AI database aside before a destructive SQL cleanup. Needs
    * roughly the database size in free space. Default off. */
   sqlite_backup: boolean;
-  /** How a cleanup removes a whole artifact. Defaults to `trash`. */
-  delete_mode: DeleteMode;
   /** Allow cleanup of AI conversation history. Default false. */
   ai_cleanup_enabled: boolean;
   /** Check GitHub Releases for a newer version at startup. Default false —
@@ -232,7 +214,9 @@ export interface HistoryEntry {
   name: string;
   requested_bytes: number;
   freed_bytes: number;
-  /** True when this entry's artifact was moved to the Trash. */
+  /** Legacy pre-1.0 read-only flag: `true` when the artifact was moved to
+   * the Trash. Never set by new cleanups; kept so old history lines can be
+   * labelled as archived. Not part of the contract. */
   moved_to_trash?: boolean;
   /** Which sizing convention produced these figures. Absent = "apparent"
    * (every line written before v0.8.0). */

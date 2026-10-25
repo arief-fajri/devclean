@@ -8,11 +8,13 @@
   import { formatBytes } from "$lib/format";
   import { historyStore } from "$lib/stores/history.svelte";
   import {
+    archivedTrashBytes,
     countRunsByFilter,
     entryCountLabel,
     filterRuns,
     groupRunsByDay,
     isLegacyRun,
+    runArchivedTrashBytes,
     runHasProblems,
     runTotals,
     statusBadge,
@@ -52,6 +54,8 @@
   const visible = $derived(filterRuns(runs, filter));
   const days = $derived(groupRunsByDay(visible));
   const totals = $derived(runTotals(visible));
+  /** Frozen pre-1.0 Trash total: display-only, never reclaimed space. */
+  const archived = $derived(archivedTrashBytes(visible));
 
   const chip = (active: boolean) =>
     `rounded-full border px-2.5 py-1 text-xs font-medium ${
@@ -109,6 +113,11 @@
             {totals.problems} need attention
           </span>
         {/if}
+        {#if archived > 0}
+          <span class="text-xs text-zinc-500">
+            · {formatBytes(archived)} archived in Trash (pre-1.0)
+          </span>
+        {/if}
       </div>
       <div class="mt-2 flex flex-wrap gap-1.5" role="group" aria-label="Filter cleanups">
         <button class={chip(filter === "all")} onclick={() => (filter = "all")} aria-pressed={filter === "all"}>
@@ -155,6 +164,7 @@
           <ul class="mt-1.5 space-y-1.5">
             {#each day.runs as run (runKey(run))}
               {@const open = openRuns.includes(runKey(run))}
+              {@const archivedBytes = runArchivedTrashBytes(run)}
               <li class="rounded-lg border border-zinc-100 dark:border-zinc-800">
                 <button
                   class="flex w-full items-center gap-2 px-2.5 py-2 text-left hover:bg-zinc-50 dark:hover:bg-zinc-800/50"
@@ -200,6 +210,9 @@
                       {/if}
                       {#if run.providers.length > 0}
                         · {run.providers.join(", ")}
+                      {/if}
+                      {#if archivedBytes > 0}
+                        · {formatBytes(archivedBytes)} archived in Trash (pre-1.0)
                       {/if}
                       {#if isLegacyRun(run)}
                         · recorded before run tracking
@@ -247,6 +260,14 @@
                             >
                               {e.status}
                             </span>
+                            {#if e.moved_to_trash}
+                              <span
+                                class="shrink-0 rounded bg-zinc-200 px-1.5 py-0.5 text-[10px] font-semibold uppercase text-zinc-600 dark:bg-zinc-700 dark:text-zinc-300"
+                                title="Moved to the Trash before 1.0.0 — archived, not reclaimed space."
+                              >
+                                archived Trash
+                              </span>
+                            {/if}
                           </span>
                           {#if e.error}
                             <span class="mt-0.5 block text-[11px] text-red-700 dark:text-red-300">

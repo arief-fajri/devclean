@@ -64,8 +64,8 @@ Full details: [docs/development/developing.md](docs/development/developing.md), 
 | Platform | Status |
 |---|---|
 | **macOS** | **Tested.** The shipped build target (`app`, `dmg`) — universal (Apple Silicon + Intel) since 1.0.0, minimum macOS 12 (Monterey) — and where the full workspace runs in CI. |
-| Linux | **Builds and tests; not shipped.** CI compiles the whole workspace and runs the full test suite on Ubuntu, so the Unix-specific code — allocated-block sizing, `statvfs`, `rusage`, the Trash implementation — is exercised on a second OS. Trash: implemented (XDG `files/` + `info/` layout), unverified in a desktop file manager. No bundle is built for it and it is not supported. |
-| Windows | **Not tested.** Not a build target. Path handling, Trash and block sizing are all unverified there. |
+| Linux | **Builds and tests; not shipped.** CI compiles the whole workspace and runs the full test suite on Ubuntu, so the Unix-specific code — allocated-block sizing, `statvfs`, `rusage` — is exercised on a second OS. No bundle is built for it and it is not supported. |
+| Windows | **Not tested.** Not a build target. Path handling and block sizing are all unverified there. |
 
 This table is enforced: `apps/desktop/src/lib/platform-claim.test.ts` fails if the README claims a platform that has no CI job, or if `tauri.conf.json` declares a bundle target for one. It exists because a support matrix drifts away from reality the moment nothing checks it.
 
@@ -94,7 +94,7 @@ One-way dependencies: `core ← providers ← scanner/cleanup ← src-tauri ← 
 
 A tool that deletes files earns trust by what it refuses to do. DevClean:
 
-- **Moves to the Trash by default.** Permanent deletion is an explicit opt-out, and a trashed item is recoverable until you empty it. The summary says what moved rather than what was freed, because the space has not come back yet.
+- **Deletes permanently, and says so.** Every cleanup removes outright and reclaims space immediately — there is no Trash copy. The confirmation shows a re-measured preview and requires explicit acknowledgement.
 - **Never touches your documents.** `/`, `~/Documents`, `~/Desktop`, `~/Downloads`, `~/Pictures`, `~/Videos`, `~/.ssh`, `~/.gnupg` and `~/.config` are refused from every direction — equal, inside, or ancestor.
 - **Never deletes outside your scan roots.** The roots widen where caches are *found*; they never widen what may be *deleted*.
 - **Refuses what it cannot explain.** Every resource that cannot be cleaned carries a reason (`retention`, `ai_read_only`, `privileged_required`, `docker_scope`, `protected`, `browser_running`), stamped at scan time and enforced by the backend — not by a disabled checkbox.
@@ -123,7 +123,7 @@ A `settings.json` written before this release with an empty `scan_roots` array i
 
 ## Status
 
-**`1.0.0` — macOS, universal (Apple Silicon + Intel).** The product works end to end: it scans 21 providers, reports sizes that match `du`, cleans up recoverably, classifies project activity from git history, scans every project tree in a single pass, and can update itself in-app. 1.0 is the stabilisation release: the freedesktop Trash on Linux, behavioural tests for the whole shell, a contract document that matches the code, and one source of truth for every cleanup gate. What is still missing is listed in the [roadmap](docs/development/roadmap.md); what has shipped is in the [changelog](CHANGELOG.md).
+**`1.0.0` — macOS, universal (Apple Silicon + Intel).** The product works end to end: it scans 21 providers, reports sizes that match `du`, cleans up permanently with measured reclaim, classifies project activity from git history, scans every project tree in a single pass, and can update itself in-app. 1.0 is the stabilisation release: permanent-only cleanup, behavioural tests for the whole shell, a contract document that matches the code, and one source of truth for every cleanup gate. What is still missing is listed in the [roadmap](docs/development/roadmap.md); what has shipped is in the [changelog](CHANGELOG.md).
 
 Not yet done, and worth knowing before you rely on it:
 

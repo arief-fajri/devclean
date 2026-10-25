@@ -15,11 +15,8 @@
   import { addableCandidates, alreadyAddedCount } from "$lib/view";
   import {
     DOCKER_SCOPE_CONSEQUENCE,
-    DELETE_MODE_CONSEQUENCE,
-  DELETE_MODE_LABELS,
   DOCKER_SCOPE_LABELS,
     DOCKER_SCOPE_NEEDS_PRIVILEGED,
-    type DeleteMode,
   type DockerPruneScope,
     type ProviderInfo,
     type ScanRootCandidate,
@@ -74,7 +71,6 @@
   let retentionDays = $state<number | null>(null);
   let dockerScope = $state<DockerPruneScope>("build-cache");
   let sqliteBackup = $state(false);
-  let deleteMode = $state<DeleteMode>("trash");
   let aiCleanup = $state(false);
   let scanAutomatically = $state(false);
   let checkUpdatesAutomatically = $state(false);
@@ -92,7 +88,6 @@
     retentionDays = settings.retention_days ?? null;
     dockerScope = settings.docker_prune_scope ?? "build-cache";
     sqliteBackup = settings.sqlite_backup ?? false;
-    deleteMode = settings.delete_mode ?? "trash";
     aiCleanup = settings.ai_cleanup_enabled ?? false;
     scanAutomatically = settings.scan_automatically ?? false;
     checkUpdatesAutomatically = settings.check_updates_automatically ?? false;
@@ -132,7 +127,6 @@
       retentionDays !== (settings.retention_days ?? null) ||
       dockerScope !== (settings.docker_prune_scope ?? "build-cache") ||
       sqliteBackup !== (settings.sqlite_backup ?? false) ||
-      deleteMode !== (settings.delete_mode ?? "trash") ||
       aiCleanup !== (settings.ai_cleanup_enabled ?? false) ||
       scanAutomatically !== (settings.scan_automatically ?? false) ||
       checkUpdatesAutomatically !== (settings.check_updates_automatically ?? false)
@@ -177,7 +171,6 @@
     retentionDays = null;
     dockerScope = "build-cache";
     sqliteBackup = false;
-    deleteMode = "trash";
     aiCleanup = false;
     scanAutomatically = false;
     checkUpdatesAutomatically = false;
@@ -234,7 +227,6 @@
       retention_days: retentionDays,
       docker_prune_scope: dockerScope,
       sqlite_backup: sqliteBackup,
-      delete_mode: deleteMode,
       ai_cleanup_enabled: aiCleanup,
     });
   }
@@ -411,34 +403,16 @@
           When something is cleaned
         </h3>
         <p class="mt-1 text-xs text-zinc-500">
-          Applies to whole artifacts that are deleted by path. Vendor commands and database
-          cleanups cannot be undone either way, and always say so.
+          Every cleanup is permanent since 1.0.0 — deleted files reclaim space
+          immediately and cannot be undone. Review the re-measured preview and
+          confirm before cleaning.
         </p>
-        <div class="mt-2 flex flex-wrap gap-2" role="radiogroup" aria-label="Delete mode">
-          {#each Object.entries(DELETE_MODE_LABELS) as [value, label] (value)}
-            <button
-              role="radio"
-              aria-checked={deleteMode === value}
-              data-testid="delete-mode-{value}"
-              class="rounded-lg border px-3 py-1.5 text-sm {deleteMode === value
-                ? 'border-emerald-600 bg-emerald-50 font-medium text-emerald-800 dark:bg-emerald-950 dark:text-emerald-200'
-                : 'border-zinc-200 hover:bg-zinc-100 dark:border-zinc-700 dark:hover:bg-zinc-800'}"
-              onclick={() => (deleteMode = value as DeleteMode)}
-            >
-              {label}
-            </button>
-          {/each}
-        </div>
-        <p class="mt-1.5 text-xs text-zinc-500">{DELETE_MODE_CONSEQUENCE[deleteMode]}</p>
-        {#if deleteMode === "permanent"}
-          <p
-            class="mt-2 rounded-lg bg-amber-50 px-2.5 py-2 text-xs text-amber-800 dark:bg-amber-950/40 dark:text-amber-200"
-            data-testid="permanent-warning"
-          >
-            Permanent deletion has no undo. Reclaiming disk space immediately is the only reason
-            to choose it.
-          </p>
-        {/if}
+        <p
+          class="mt-2 rounded-lg bg-amber-50 px-2.5 py-2 text-xs text-amber-800 dark:bg-amber-950/40 dark:text-amber-200"
+          data-testid="permanent-warning"
+        >
+          Permanent deletion has no undo.
+        </p>
 
         <h3 class="mt-6 text-sm font-semibold text-zinc-900 dark:text-zinc-100">Docker</h3>
         <label class="mt-2 block text-sm">

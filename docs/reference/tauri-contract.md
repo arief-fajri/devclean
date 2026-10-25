@@ -46,8 +46,6 @@
 type SafetyLevel = "safe" | "caution" | "dangerous";
 type CleanupStatus = "success" | "partial" | "failed" | "cancelled";
 type DockerPruneScope = "off" | "build-cache" | "build-cache+images" | "all";
-/** How a cleanup removes a whole artifact (v0.8.0). */
-type DeleteMode = "trash" | "permanent";
 type ThemeMode = "system" | "dark" | "light";
 
 /** v0.12.0: phase of the in-app updater. */
@@ -130,7 +128,7 @@ interface CleanupPreview { items: CleanupPreviewItem[]; total_bytes: number;
   preview_token: string; expires_at_unix: number }
 
 interface CleanupResult { resource_id: string; requested_bytes: number;
-  freed_bytes: number; moved_to_trash: boolean; duration_ms: number;
+  freed_bytes: number; duration_ms: number;
   status: CleanupStatus; error?: string }
 
 interface Settings {
@@ -142,8 +140,6 @@ interface Settings {
   retention_days?: number | null;
   docker_prune_scope: DockerPruneScope;
   sqlite_backup: boolean;
-  /** How a cleanup removes a whole artifact (v0.8.0, default "trash"). */
-  delete_mode: DeleteMode;
   /** Allow cleanup of AI conversation history (v0.8.0, default false). */
   ai_cleanup_enabled: boolean;
   /** Check GitHub Releases at startup (v0.12.0, default false). */
@@ -160,7 +156,11 @@ interface DiskFree { available_bytes: number; total_bytes: number; known: boolea
 
 interface HistoryEntry { run_id?: string; finished_at_unix: number;
   resource_id: string; provider: string; name: string; requested_bytes: number;
-  freed_bytes: number; moved_to_trash?: boolean;
+  freed_bytes: number;
+  /** Legacy pre-1.0: true when the artifact went to the Trash. New entries
+   *  never set it (every cleanup is permanent since 1.0.0); kept so old
+   *  history lines can be labelled as archived. */
+  moved_to_trash?: boolean;
   sizing?: "apparent" | "allocated";
   status: CleanupStatus; error?: string }
 interface CleanupRun { pre_allocated_sizing: boolean;
@@ -221,12 +221,12 @@ One click of either button opens the menu (`show_menu_on_left_click`); the info 
 
 Contract versions are their own sequence, independent of the product version in `Cargo.toml` — the frontend and backend always ship together, so the contract changes on its own schedule. The two are aligned at 1.0.
 
-- `v1.0.0` — the 1.0 gate (Wave E). **No command, event or type changed**: every Wave E change was internal, and the product and contract numbers align here for the first time.
+- `v1.0.0` — the 1.0 gate (Wave E). Product and contract numbers align here for the first time.
   - **Commitment:** from v1.0.0, a caller-visible breaking change — removing or renaming a command, event or field, or changing what one means — requires contract 2.0.0. Additive changes stay on the v1.x ladder. Decision record: [one-point-oh.md](../decisions/one-point-oh.md).
-  - **Behaviour:** the default delete mode follows the freedesktop Trash spec on Linux (`$XDG_DATA_HOME/Trash/files/<name>` + `info/<name>.trashinfo`, metadata written before the move; percent-encoded `Path=`, local-time `DeletionDate=`, `files/`/`info/` at `0700`). macOS keeps the flat `~/.Trash` move. `CleanupResult.moved_to_trash` and `HistoryEntry.moved_to_trash` are unchanged — the layout is invisible to the contract.
-  - **Doc accuracy (no type change):** the Types block regained six fields that had shipped but were missing from the document — `Settings.delete_mode`, `Settings.ai_cleanup_enabled`, `Settings.check_updates_automatically`, `HistoryEntry.moved_to_trash`, `HistoryEntry.sizing`, `CleanupRun.pre_allocated_sizing` — plus `type DeleteMode`; the behavioural-note list was renumbered to 1–17. `contract-sync.test.ts` now diffs this block against `apps/desktop/src/lib/tauri.ts`, so the two cannot drift apart again.
+  - **Behaviour (pre-release amendment):** every cleanup is permanent. `Settings.delete_mode`, `type DeleteMode` and `CleanupResult.moved_to_trash` were removed from the Types block; path removal deletes outright via `remove_dir_all` and `freed_bytes` always reports the measured space back. `HistoryEntry.moved_to_trash?` stays as a legacy pre-1.0 read-only flag so old history lines can be labelled as archived — new entries never set it. The Trash layout, sidecar format and `move_to_trash` implementation were removed (`crates/cleanup/src/trash.rs`, `trash_evidence` test).
+  - **Doc accuracy:** the Types block carries `Settings.ai_cleanup_enabled`, `Settings.check_updates_automatically`, `HistoryEntry.sizing`, `CleanupRun.pre_allocated_sizing` plus the legacy `HistoryEntry.moved_to_trash?`; the behavioural-note list was renumbered to 1–17. `contract-sync.test.ts` now diffs this block against `apps/desktop/src/lib/tauri.ts`, so the two cannot drift apart again.
   - **Behaviour (internal):** the cleanup engine's refusal path now calls the same `devclean_core::policy::block_reason_for` the scan stamps with — one implementation per gate (I11) — so no refusal string or precedence changed. `devclean_cleanup::apply_retention` and `TreeRuleSpec.extra_prune_dirs` were dead and removed.
-  - Regression tests: the `trash` suite (`freedesktop_sidecar_bytes_are_pinned`, `percent_encoding_keeps_slashes_and_unreserved_but_encodes_the_rest`, `freedesktop_a_preexisting_files_entry_rolls_back_the_sidecar_and_retries`, `freedesktop_a_broken_info_entry_is_a_refusal_not_a_move`, `local_deletion_date_matches_the_xdg_format`), the engine refusal tests (unchanged and still green after the C-4 refactor), and `contract-sync.test.ts` (frontend).
+  - Regression tests: `removal_deletes_outright_and_reports_freed`, `command_backed_actions_report_measured_freed`, the engine refusal tests, and `contract-sync.test.ts` (frontend).
 - `v0.13.0` — Wave D coverage. **No command or event added, removed or re-typed.** **Types (additive):** `+BlockReason: "browser_running"`; `+ScanSummary.unique_bytes?: number | null` (`#[serde(default)]` → absent is `null`, no `CACHE_VERSION` bump). **Providers 14 → 21:** `+browser_temp`, `+llm_models`, `+ruby`, `+go_vendor`, `+flutter`, `+android`, `+pods`.
   - **Behaviour:** the four new tree rules ride the shared walk, so their rows appear without any command or event change; the new own-scanners surface through `get_providers` and scan results as every provider does. Every path choice and exclusion in the wave is recorded in [docs/decisions/wave-d-coverage.md](../decisions/wave-d-coverage.md).
   - **Behaviour:** expanded rules on existing ids — node matches `.next`/`.turbo`/`.svelte-kit`/`.expo` beside `package.json`; python matches `.ruff_cache`/`.tox`/`__pypackages__`; `global_cache` grows CocoaPods, Yarn, pip, deno, the Dart pub cache and the Dart analysis server cache; `xcode_data` becomes a target list whose **Archives row is the first `dangerous`** in the product (`CoreSimulator/Devices` is deliberately excluded — simulator data is not a cache).
@@ -270,11 +270,9 @@ Contract versions are their own sequence, independent of the product version in 
   - The on-disk scan cache is versioned `1 → 2`: a v1 cache holds logical sizes and is rejected rather than displayed.
   - Decision record: [docs/decisions/allocated-vs-apparent.md](../decisions/allocated-vs-apparent.md).
 
-**2. Recoverable deletes.**
-  - `+Settings.delete_mode: "trash" | "permanent"` (additive, `#[serde(default)]` → `trash`). Path removal moves the artifact to `~/.Trash` by default instead of deleting it.
-  - `+CleanupResult.moved_to_trash: boolean`, `+HistoryEntry.moved_to_trash` (additive). **Under `trash`, `freed_bytes` is 0**: the space is still on disk and returns only when the user empties the Trash.
-  - The mode governs path removal only — `RunCommand` and `RunSql` have no undo and are never reported as trashed.
-  - Decision record: [docs/decisions/trash-by-default.md](../decisions/trash-by-default.md).
+**2. Permanent deletes (superseded pre-1.0: Trash removed).**
+  - v0.8.0 added `Settings.delete_mode`, `CleanupResult.moved_to_trash` and Trash-mode `freed_bytes == 0`. Pre-1.0 this was removed again: every cleanup is permanent, those fields are gone except legacy `HistoryEntry.moved_to_trash?` for archived runs.
+  - Decision record: [docs/decisions/trash-by-default.md](../decisions/trash-by-default.md) (superseded) + [docs/decisions/permanent-only-cleanup.md](../decisions/permanent-only-cleanup.md).
 
 **3. Blocked reasons — a control that never ran, fixed.**
   - `Resource.retention_eligible: boolean` is **replaced** by `blocked_reason?: BlockReason | null` + `blocked_detail?: string | null` (breaking to the type; nothing else consumed the old field).
@@ -284,7 +282,7 @@ Contract versions are their own sequence, independent of the product version in 
   - The scan stamps the reason; the engine refuses what is stamped. Both call the same `devclean_core::policy::block_reason_for`, so the explanation the user reads is the one that is enforced (I11).
   - Decision record: [docs/decisions/blocked-reason.md](../decisions/blocked-reason.md).
 
-**Regression tests:** `allocated_counts_blocks_not_payload`, `an_empty_directory_measures_zero`, `a_hardlinked_file_is_counted_once_within_an_artifact`, `apparent_is_reported_only_when_materially_larger`, `a_v1_cache_with_logical_sizes_is_rejected`, `trash_mode_moves_aside_and_reports_pending_not_freed`, `permanent_mode_removes_and_reports_freed`, `command_backed_actions_are_never_marked_as_trashed`, the `devclean_core::policy` suite, `retention_and_ai_gates_now_reach_the_scan`, `blocked_ids_are_collected_for_the_engine` (Rust); `cleanupOutcome` and `blocked` suites (frontend).
+**Regression tests:** `allocated_counts_blocks_not_payload`, `an_empty_directory_measures_zero`, `a_hardlinked_file_is_counted_once_within_an_artifact`, `apparent_is_reported_only_when_materially_larger`, `a_v1_cache_with_logical_sizes_is_rejected`, `removal_deletes_outright_and_reports_freed`, the `devclean_core::policy` suite, `retention_and_ai_gates_now_reach_the_scan`, `blocked_ids_are_collected_for_the_engine` (Rust); `cleanupOutcome` and `blocked` suites (frontend).
 - `v0.7.2` — bounded cleanup preview. **No command added, removed or re-typed.**
   - `preview_cleanup` now fails with an explanation after `PREVIEW_TIMEOUT` (120s) rather than blocking indefinitely; `PREVIEW_TIMEOUT` is a new `devclean_core::limits` constant.
   - `get_cached_scan` seeds the id registry from the cache, so the launch window between the cached paint and the first scan can no longer produce an empty preview.

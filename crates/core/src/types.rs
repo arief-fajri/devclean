@@ -317,13 +317,10 @@ pub struct CleanupPreview {
 pub struct CleanupResult {
     pub resource_id: String,
     pub requested_bytes: u64,
-    /// Bytes returned to the filesystem NOW. Under `DeleteMode::Trash` this
-    /// is 0 — the artifact is recoverable and the space returns only when the
-    /// user empties the Trash. Claiming it earlier would be a lie.
+    /// Bytes returned to the filesystem by this cleanup, measured as
+    /// `before - after`. Every cleanup is permanent, so this is always the
+    /// space actually reclaimed right now.
     pub freed_bytes: u64,
-    /// True when the artifact was moved to the Trash rather than removed.
-    #[serde(default)]
-    pub moved_to_trash: bool,
     pub duration_ms: u64,
     pub status: CleanupStatus,
     pub error: Option<String>,
@@ -536,7 +533,10 @@ pub struct HistoryEntry {
     pub name: String,
     pub requested_bytes: u64,
     pub freed_bytes: u64,
-    /// Mirrors [`CleanupResult::moved_to_trash`] for the durable log.
+    /// Legacy pre-1.0 flag: `true` when the artifact was moved to the Trash.
+    /// New cleanups always write `false` (every cleanup is permanent since
+    /// 1.0.0); the field is kept so old history lines still parse and the
+    /// UI can label them as archived.
     #[serde(default)]
     pub moved_to_trash: bool,
     /// Which sizing convention produced these byte figures.

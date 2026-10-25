@@ -9,8 +9,8 @@ import { describe, expect, it } from "vitest";
  * `tauri-contract.md` calls itself the single document defining what the
  * frontend may see, and `tauri.ts` claims to mirror it. Nothing checked
  * that claim: the document's Types block had silently lost
- * `Settings.delete_mode`, `Settings.ai_cleanup_enabled`,
- * `Settings.check_updates_automatically`, `HistoryEntry.moved_to_trash`,
+ * `Settings.ai_cleanup_enabled`,
+ * `Settings.check_updates_automatically`,
  * `HistoryEntry.sizing` and `CleanupRun.pre_allocated_sizing` — every one
  * shipped, every one in `tauri.ts`, none in the document the contract
  * points at.
@@ -99,9 +99,9 @@ describe("G-API-01 — the contract document matches the typed bridge", () => {
     expect(docDecls.size, "too few declarations parsed from the document").toBeGreaterThanOrEqual(15);
     expect(bridgeDecls.size, "too few declarations parsed from tauri.ts").toBeGreaterThanOrEqual(15);
     expect(docDecls.get("Settings")?.kind).toBe("interface");
-    expect(docDecls.get("DeleteMode")?.kind).toBe("type");
     expect(bridgeDecls.get("Settings")?.kind).toBe("interface");
-    expect(bridgeDecls.get("DeleteMode")?.kind).toBe("type");
+    expect(docDecls.get("DeleteMode")).toBeUndefined();
+    expect(bridgeDecls.get("DeleteMode")).toBeUndefined();
   });
 
   it("declares every interface in the document in tauri.ts, with the same fields", () => {

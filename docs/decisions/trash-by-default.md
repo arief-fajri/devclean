@@ -1,6 +1,6 @@
 # ADR: cleanups move to the Trash by default
 
-**Status:** accepted (v0.8.0)
+**Status:** superseded pre-1.0 by [permanent-only-cleanup.md](./permanent-only-cleanup.md) — every cleanup is permanent since 1.0.0.
 
 ## Context
 

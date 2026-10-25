@@ -35,7 +35,6 @@ function settings(over: Partial<Settings> = {}): Settings {
     retention_days: null,
     docker_prune_scope: "off",
     sqlite_backup: false,
-    delete_mode: "trash",
     ai_cleanup_enabled: false,
     check_updates_automatically: false,
     ...over,

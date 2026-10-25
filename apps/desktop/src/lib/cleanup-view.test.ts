@@ -96,57 +96,50 @@ describe("previewCoverage", () => {
 function coverageNoteFor(c: ReturnType<typeof previewCoverage>): string | null {
   return coverageNote(c);
 }
-describe("cleanupOutcome — Trash is pending, not freed", () => {
-  const r = (
-    freed: number,
-    requested: number,
-    trashed: boolean,
-    status = "success",
-  ) => ({ freed_bytes: freed, requested_bytes: requested, moved_to_trash: trashed, status });
-
-  it("reports a fully-trashed run as pending, never as freed", () => {
-    // The trap: freed_bytes is 0 under Trash mode by design, so a summary
-    // that only reads it would say "0 B freed" after moving 12 GB aside.
-    const o = cleanupOutcome([r(0, 6_000, true), r(0, 6_000, true)]);
-    expect(o.headline).toBe("trashed");
-    expect(o.pending).toBe(12_000);
-    expect(o.freed).toBe(0);
-    expect(o.trashed).toBe(2);
+describe("cleanupOutcome — permanent cleanup reports measured freed bytes", () => {
+  const r = (freed: number, requested: number, status = "success") => ({
+    freed_bytes: freed,
+    requested_bytes: requested,
+    status,
   });
 
-  it("reports a permanent run as freed", () => {
-    const o = cleanupOutcome([r(6_000, 6_000, false)]);
+  it("reports a successful run as freed", () => {
+    const o = cleanupOutcome([r(6_000, 6_000), r(6_000, 6_000)]);
+    expect(o.headline).toBe("freed");
+    expect(o.freed).toBe(12_000);
+    expect(o.requested).toBe(12_000);
+  });
+
+  it("reports a single permanent item as freed", () => {
+    const o = cleanupOutcome([r(6_000, 6_000)]);
     expect(o.headline).toBe("freed");
     expect(o.freed).toBe(6_000);
-    expect(o.pending).toBe(0);
-    expect(o.trashed).toBe(0);
   });
 
-  it("reports a mixed run as both", () => {
-    const o = cleanupOutcome([r(6_000, 6_000, false), r(0, 4_000, true)]);
-    expect(o.headline).toBe("mixed");
+  it("ignores legacy trash flags and sums measured bytes", () => {
+    const o = cleanupOutcome([
+      { freed_bytes: 6_000, requested_bytes: 6_000, status: "success", moved_to_trash: true } as never,
+      r(0, 4_000),
+    ]);
+    expect(o.headline).toBe("freed");
     expect(o.freed).toBe(6_000);
-    expect(o.pending).toBe(4_000);
-    expect(o.trashed).toBe(1);
   });
 
   it("counts nothing when every item failed", () => {
-    const o = cleanupOutcome([r(0, 100, false, "failed"), r(0, 100, false, "cancelled")]);
+    const o = cleanupOutcome([r(0, 100, "failed"), r(0, 100, "cancelled")]);
     expect(o.headline).toBe("nothing");
     expect(o.freed).toBe(0);
-    expect(o.pending).toBe(0);
   });
 
   it("counts a partial item as succeeded but only its measured freed bytes", () => {
-    const o = cleanupOutcome([r(2_000, 6_000, false, "partial")]);
+    const o = cleanupOutcome([r(2_000, 6_000, "partial")]);
     expect(o.headline).toBe("freed");
     expect(o.freed).toBe(2_000);
     expect(o.requested).toBe(6_000);
   });
 
   it("keeps requested independent of what succeeded", () => {
-    const o = cleanupOutcome([r(0, 1_000, true), r(0, 1_000, false, "failed")]);
+    const o = cleanupOutcome([r(0, 1_000), r(0, 1_000, "failed")]);
     expect(o.requested).toBe(2_000);
-    expect(o.pending).toBe(1_000);
   });
 });

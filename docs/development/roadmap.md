@@ -6,7 +6,7 @@ What is left, not what happened. Shipped work is in [CHANGELOG.md](../../CHANGEL
 
 Product **1.0.0**, contract **v1.0.0** — aligned, as the Wave E ladder promised. The contract now breaks only at 2.0 ([one-point-oh.md](../decisions/one-point-oh.md)), and the document that defines it is diffed against the bridge by `contract-sync.test.ts`.
 
-1.0 was the stabilisation release: the freedesktop Trash on Linux (implemented, honestly unverified in a real file manager), behavioural tests for the seven stores and the shell itself (a real DOM, G-UI-03 proved by firing keystrokes rather than matching strings), the contract document reconciled with the code that ships it, and dead gates removed so retention and Docker refusal each have exactly one source of truth. The record is in [CHANGELOG.md](../../CHANGELOG.md).
+1.0 was the stabilisation release: permanent-only cleanup (Trash removed pre-release so reclaimed space returns immediately), behavioural tests for the seven stores and the shell itself (a real DOM, G-UI-03 proved by firing keystrokes rather than matching strings), the contract document reconciled with the code that ships it, and dead gates removed so retention and Docker refusal each have exactly one source of truth. The record is in [CHANGELOG.md](../../CHANGELOG.md).
 
 Two version numbers still move independently — the product version a user installs and the contract version of the IPC surface. They always ship together; the contract just cannot break before 2.0.
 
@@ -27,8 +27,8 @@ Ordered by what unlocks the most users first.
 
 ### Platforms
 
-- **Linux bundle (deb / AppImage).** CI already builds and tests the whole workspace on Ubuntu and the XDG trash path is implemented — but nothing is shipped, so the support table says "not shipped" and stays honest. Before Linux can be called supported: build the bundle, and manually verify the artifact appears in a real GNOME or KDE Trash, which is the one claim CI structurally cannot make.
-- **Windows — deferred, not rejected.** [windows-deferred.md](../decisions/windows-deferred.md) records the decision and the entry cost (cfg-gate the Unix-only trash/disk paths, a Recycle Bin equivalent, an `msi`/`nsis` target, a `windows-latest` runner). The support row changes only after the runner exists — `platform-claim.test.ts` enforces that order.
+- **Linux bundle (deb / AppImage).** CI already builds and tests the whole workspace on Ubuntu — but nothing is shipped, so the support table says "not shipped" and stays honest. Before Linux can be called supported: build the bundle and verify it end to end on a real machine.
+- **Windows — deferred, not rejected.** [windows-deferred.md](../decisions/windows-deferred.md) records the decision and the entry cost (cfg-gate the Unix-only disk paths, an `msi`/`nsis` target, a `windows-latest` runner). The support row changes only after the runner exists — `platform-claim.test.ts` enforces that order.
 - **Intel builds are already done**: releases are universal (arm64 + x86_64) since 1.0.0 ([in-app-updates.md](../decisions/in-app-updates.md)).
 
 ### Security horizon

@@ -21,7 +21,7 @@ Why things are the way they are, and what was rejected. Each record states a dec
 | Record | Decision |
 |---|---|
 | [decisions/allocated-vs-apparent.md](decisions/allocated-vs-apparent.md) | `size_bytes` is allocated blocks, not a sum of file lengths. |
-| [decisions/trash-by-default.md](decisions/trash-by-default.md) | Cleanups move to the Trash by default, and `freed_bytes` is 0 when they do. |
+| [decisions/trash-by-default.md](decisions/trash-by-default.md) | Superseded pre-1.0: Trash removed. See [decisions/permanent-only-cleanup.md](decisions/permanent-only-cleanup.md) — every cleanup is permanent. |
 | [decisions/blocked-reason.md](decisions/blocked-reason.md) | One `blocked_reason`, stamped at scan time, enforced by the engine. |
 | [decisions/gitignore-aware-protection.md](decisions/gitignore-aware-protection.md) | A repository's uncommitted work protects its tracked artifacts; gitignored caches stay cleanable. |
 | [decisions/single-pass-walk.md](decisions/single-pass-walk.md) | Project-tree providers share one traversal instead of walking every scan root apiece. |
@@ -54,7 +54,7 @@ These describe **how the project is built**, not how to use it or contribute to 
 
 | Document | What it is |
 |---|---|
-| [operations/recovery.md](operations/recovery.md) | Restoring something from the Trash, reading a partial failure, and what each blocked badge means. |
+| [operations/recovery.md](operations/recovery.md) | Permanent cleanup has no undo; reading a partial failure and what each blocked badge means. |
 | [operations/screenshots.md](operations/screenshots.md) | Regenerating the README screenshots from the fixture. |
 
 ## Security

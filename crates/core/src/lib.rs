@@ -25,7 +25,7 @@ pub use policy::{block_reason_for, stamp_blocked_reason, PolicyInputs};
 pub use preview_token::{authorize, GateError, PreviewToken, PREVIEW_TTL_SECS};
 
 pub use safety::{SafetyError, SafetyValidator};
-pub use settings::{DeleteMode, DockerPruneScope, Settings, ThemeMode};
+pub use settings::{DockerPruneScope, Settings, ThemeMode};
 pub use system::{
     app_data_dir, default_scan_roots, detect_scan_roots, home_dir, platform_name, ScanRootCandidate,
 };

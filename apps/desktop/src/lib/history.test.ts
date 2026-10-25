@@ -1,10 +1,12 @@
 import { describe, expect, it } from "vitest";
 import {
+  archivedTrashBytes,
   countRunsByFilter,
   entryCountLabel,
   filterRuns,
   groupRunsByDay,
   isLegacyRun,
+  runArchivedTrashBytes,
   runHasProblems,
   runTotals,
   when,
@@ -120,6 +122,20 @@ describe("groupRunsByDay", () => {
 
   it("returns nothing for an empty history", () => {
     expect(groupRunsByDay([])).toEqual([]);
+  });
+});
+
+describe("archivedTrashBytes — pre-1.0 Trash is frozen, never reclaimed", () => {
+  it("sums requested bytes of legacy trashed entries only", () => {
+    const trashed = { ...entry("t"), moved_to_trash: true, requested_bytes: 4_000 };
+    const r = run({ entries: [trashed, entry("p")] });
+    expect(runArchivedTrashBytes(r)).toBe(4_000);
+    expect(archivedTrashBytes([r, run()])).toBe(4_000);
+  });
+
+  it("is zero when nothing was ever trashed", () => {
+    expect(runArchivedTrashBytes(run())).toBe(0);
+    expect(archivedTrashBytes([])).toBe(0);
   });
 });
 
