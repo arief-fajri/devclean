@@ -32,13 +32,13 @@ Anything that lets DevClean delete, move, or corrupt data it should not have. Co
 ## What is **not** a security bug
 
 - An unsigned build triggering Gatekeeper. That is expected; see the README
-- A file you selected being moved to the Trash. That is the default and is recoverable; it is not data loss
+- A file you selected being permanently deleted. Since 1.0.0 every cleanup is permanent by design and says so before you confirm; it is not data loss unless a gate below was bypassed
 - Docker images or volumes being removed when you enabled the wider Docker scope and privileged operations. That is the documented consequence of a deliberate opt-in
 - A provider reporting a cache that turns out to be smaller than expected. Open a regular issue
 
 ## Supported versions
 
-The latest release only. This project is pre-1.0 and does not backport.
+The latest release only. This project does not backport.
 
 ## What to expect
 

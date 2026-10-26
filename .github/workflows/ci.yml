@@ -14,7 +14,7 @@ jobs:
   # Formatting, lints and tests on BOTH runners.
   #
   # macOS is the shipped platform. Ubuntu exists because the platform-specific
-  # code — `st_blocks` sizing, `statvfs`, `rusage`, the Trash implementation —
+  # code — `st_blocks` sizing, `statvfs`, `rusage` —
   # is Unix-shaped and was previously only ever compiled on one OS. The Linux
   # branch of `metrics::peak` had no coverage at all before this.
   rust:

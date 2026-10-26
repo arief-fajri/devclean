@@ -277,7 +277,6 @@ build_settings() {
   "retention_days": null,
   "docker_prune_scope": "build-cache",
   "sqlite_backup": false,
-  "delete_mode": "trash",
   "ai_cleanup_enabled": false
 }
 JSON

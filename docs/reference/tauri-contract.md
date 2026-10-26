@@ -262,7 +262,7 @@ Contract versions are their own sequence, independent of the product version in 
   - **Behaviour:** a scan runs on launch only when `Settings.scan_automatically` is on. The shell paints the cache and rests; with no cache it shows a "You haven't scanned yet" warning. Previously the launch scan was unconditional and `scan_automatically` was a control with no effect.
   - **Behaviour:** the summary reports the cached scan's age (from `saved_at_unix`) and flags a cache older than 7 days, instead of stamping the paint with the launch time.
   - Regression tests: `the_cache_carries_the_time_it_was_saved` (Rust), `the_cached_summary_seeds_the_id_registry` (now asserts `saved_at_unix`), and `cache-first startup` (frontend: the launch scan is gated, the cached paint derives its age).
-- `v0.8.0` — honest sizes, recoverable deletes, and gates that actually run. **No command added, removed or re-typed.** Three coupled changes; the third fixes a control that had never worked.
+- `v0.8.0` — honest sizes, permanent deletes, and gates that actually run. **No command added, removed or re-typed.** Three coupled changes; the third fixes a control that had never worked. (The Trash delete-mode then introduced was removed again pre-1.0; every cleanup is permanent.)
 
 **1. Sizes that match `du`.**
   - `Resource.size_bytes` now means **allocated blocks** (`st_blocks * 512`), i.e. what deleting the resource frees — it was a sum of file *lengths*, which read up to 19% low on trees full of small files and up to 145% high on trees full of hard links (measured: this repo's own `target/` reported 26.6 GB against `du`'s 10.8 GB). Hard-linked inodes are counted once per artifact via `(dev, ino)`.
