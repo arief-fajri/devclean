@@ -19,6 +19,7 @@ export type BlockReason =
   | "ai_read_only"
   | "privileged_required"
   | "docker_scope"
+  | "docker_scope_required"
   | "protected"
   | "browser_running";
 
@@ -28,6 +29,7 @@ export const BLOCK_REASON_LABELS: Record<BlockReason, string> = {
   ai_read_only: "report only",
   privileged_required: "needs opt-in",
   docker_scope: "scope off",
+  docker_scope_required: "wider scope",
   protected: "protected",
   browser_running: "browser running",
 };
@@ -41,6 +43,8 @@ export const BLOCK_REASON_HINTS: Record<BlockReason, string> = {
   privileged_required:
     "This needs Privileged operations. Turn it on in Settings > Cleanup.",
   docker_scope: "Docker cleanup is off. Choose a scope in Settings > Cleanup.",
+  docker_scope_required:
+    "This needs a wider Docker scope. Raise it in Settings > Cleanup.",
   protected:
     "Tracked file in a repository with uncommitted changes. Commit or stash first.",
   browser_running:

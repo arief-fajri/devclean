@@ -14,6 +14,7 @@ const ALL: BlockReason[] = [
   "ai_read_only",
   "privileged_required",
   "docker_scope",
+  "docker_scope_required",
   "protected",
   "browser_running",
 ];

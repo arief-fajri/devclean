@@ -1301,11 +1301,49 @@ mod tests {
             None,
             &CleanupPolicy {
                 allow_privileged_operations: true,
+                // The opt-in alone is not enough: the stub declares `all`,
+                // and the selected scope must actually reach it (v1.1.0).
+                docker_prune_scope: devclean_core::DockerPruneScope::All,
                 ..CleanupPolicy::default()
             },
         );
         assert_eq!(unlocked[0].status, CleanupStatus::Success);
         assert!(!target.exists());
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// The other half of G-SAFE-03: the privileged opt-in alone must not let
+    /// a provider run at a scope narrower than it declared.
+    #[test]
+    fn a_narrower_docker_scope_is_refused_even_when_privileged() {
+        let (root, target) = fixture("gate-docker-narrow");
+        let r = gated_resource("pv:0002", &target, "privileged_stub");
+        let mut resources = HashMap::new();
+        resources.insert(r.id.clone(), r);
+        let providers: HashMap<String, Arc<dyn Provider>> = HashMap::from([(
+            "privileged_stub".to_string(),
+            Arc::new(PrivilegedStub) as Arc<dyn Provider>,
+        )]);
+        let validator = SafetyValidator::new(vec![root.clone()]);
+        let lookup = |id: &str| resources.get(id).map(|x| x.path.clone());
+
+        let out = CleanupEngine::default().execute_gated(
+            &["pv:0002".to_string()],
+            &resources,
+            &providers,
+            &validator,
+            lookup,
+            None,
+            &CleanupPolicy {
+                allow_privileged_operations: true,
+                docker_prune_scope: devclean_core::DockerPruneScope::BuildCache,
+                ..CleanupPolicy::default()
+            },
+        );
+        assert_eq!(out[0].status, CleanupStatus::Failed);
+        assert!(target.exists(), "a too-narrow scope must not delete");
+        let err = out[0].error.as_deref().unwrap_or_default();
+        assert!(err.contains("Docker scope"), "got: {err}");
         let _ = std::fs::remove_dir_all(&root);
     }
 

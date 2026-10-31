@@ -94,9 +94,10 @@ pub fn block_reason_for(r: &Resource, p: PolicyInputs) -> Option<(BlockReason, S
         ));
     }
 
-    // 2. Docker: scope off, or the scope needs an opt-in the user has not
-    //    given. Only providers that declare a Docker scope are subject to
-    //    this; everything else passes straight through.
+    // 2. Docker: scope off, a missing privileged opt-in, or a scope
+    //    narrower than the provider declared. Only providers that declare a
+    //    Docker scope are subject to this; everything else passes straight
+    //    through.
     if let Some(required) = p.required_docker_scope {
         if p.docker_prune_scope == DockerPruneScope::Off {
             return Some((
@@ -110,6 +111,19 @@ pub fn block_reason_for(r: &Resource, p: PolicyInputs) -> Option<(BlockReason, S
                 format!(
                     "needs Privileged operations in Settings > Cleanup ({})",
                     required.consequence()
+                ),
+            ));
+        }
+        // The scope must also BE wide enough. Before v1.1.0 only `Off` and
+        // the privileged flag were checked, so a `build-cache` selection
+        // with the privileged opt-in on still let the image/volume prune
+        // run — a narrower scope silently did nothing.
+        if p.docker_prune_scope < required {
+            return Some((
+                BlockReason::DockerScopeRequired,
+                format!(
+                    "needs Docker scope '{}' in Settings > Cleanup",
+                    required.label()
                 ),
             ));
         }
@@ -334,6 +348,40 @@ mod tests {
         assert_eq!(block_reason_for(&res(Some(999)), allowed), None);
     }
 
+    /// The gap this closes: with the privileged opt-in on, a `build-cache`
+    /// scope still let `docker_pruned` (which needs `all`) run. Turning the
+    /// opt-in on is not the same as choosing a wide enough scope.
+    #[test]
+    fn a_scope_narrower_than_the_provider_needs_is_refused() {
+        let p = PolicyInputs {
+            required_docker_scope: Some(DockerPruneScope::All),
+            docker_prune_scope: DockerPruneScope::BuildCache,
+            allow_privileged_operations: true,
+            ..permissive()
+        };
+        let (reason, detail) = block_reason_for(&res(Some(999)), p).expect("must block");
+        assert_eq!(reason, BlockReason::DockerScopeRequired);
+        assert!(
+            detail.contains("'all'"),
+            "the detail must name the scope to choose, got: {detail}"
+        );
+
+        // The same provider at its required scope passes.
+        let wide = PolicyInputs {
+            docker_prune_scope: DockerPruneScope::All,
+            ..p
+        };
+        assert_eq!(block_reason_for(&res(Some(999)), wide), None);
+
+        // And a WIDER scope than required is not punished.
+        let wider = PolicyInputs {
+            docker_prune_scope: DockerPruneScope::All,
+            required_docker_scope: Some(DockerPruneScope::BuildCache),
+            ..p
+        };
+        assert_eq!(block_reason_for(&res(Some(999)), wider), None);
+    }
+
     #[test]
     fn stamping_is_idempotent_and_preserves_a_provider_set_reason() {
         let p = PolicyInputs {
@@ -368,6 +416,7 @@ mod tests {
             BlockReason::AiReadOnly,
             BlockReason::PrivilegedRequired,
             BlockReason::DockerScope,
+            BlockReason::DockerScopeRequired,
             BlockReason::Protected,
             BlockReason::BrowserRunning,
         ] {

@@ -1,6 +1,6 @@
 # Tauri Contract (public behavior contract)
 
-> The single document defining what the frontend may see. Changing this file = changing the contract → requires a deliberate review and a regression test. Version: **v1.0.0 (stabilisation)**. From v1.0.0 a caller-visible breaking change requires contract **2.0.0** — see [one-point-oh.md](../decisions/one-point-oh.md).
+> The single document defining what the frontend may see. Changing this file = changing the contract → requires a deliberate review and a regression test. Version: **v1.1.0 (tool discovery)**. From v1.0.0 a caller-visible breaking change requires contract **2.0.0** — see [one-point-oh.md](../decisions/one-point-oh.md).
 
 ## Commands (19)
 
@@ -98,7 +98,7 @@ type Activity = "active" | "recent" | "stale" | "dormant";
 // < 7d      7–30      30–90     90+
 
 type BlockReason = "retention" | "ai_read_only" | "privileged_required"
-  | "docker_scope" | "protected" | "browser_running";   // +browser_running (v0.13.0)
+  | "docker_scope" | "docker_scope_required" | "protected" | "browser_running";   // +docker_scope_required (v1.1.0)
 
 interface ProviderSummary { provider: string; name: string; total_bytes: number;
   reclaimable_bytes: number; resource_count: number }
@@ -222,6 +222,11 @@ One click of either button opens the menu (`show_menu_on_left_click`); the info 
 
 Contract versions are their own sequence, independent of the product version in `Cargo.toml` — the frontend and backend always ship together, so the contract changes on its own schedule. The two are aligned at 1.0.
 
+- `v1.1.0` — tool discovery + Docker scope enforcement. **No command or event added, removed or re-typed.** **Types (additive):** `+BlockReason: "docker_scope_required"`. **Providers 21 → 22:** `+wails`.
+  - **Behaviour:** `Settings.docker_prune_scope` is now enforced as a *minimum*: a provider whose `required_docker_scope` is `all` is refused (`docker_scope_required`, detail names the scope) when the user selected `build-cache`, even with the privileged opt-in on. `docker_scope` keeps its existing meaning — the scope is `off`. The scan stamps the new reason; the cleanup engine refuses it through the same `block_reason_for`.
+  - **Behaviour:** the app widens its own `PATH` at startup so CLI-backed providers work when launched from Finder (see behavioural note 18). No wire shape changed.
+  - **Fixed:** `DockerPruneScope::BuildCacheImages` serializes as `"build-cache+images"` (the documented value) and still accepts the legacy `"build-cache-images"` alias.
+  - Regression tests: `a_scope_narrower_than_the_provider_needs_is_refused`, `a_narrower_docker_scope_is_refused_even_when_privileged`, `docker_scope_uses_the_contract_spelling`, `legacy_build_cache_images_spelling_still_loads`, `wails_rows_*`, `docker_stops_when_cancelled` (unchanged id set).
 - `v1.0.0` — the 1.0 gate (Wave E). Product and contract numbers align here for the first time.
   - **Commitment:** from v1.0.0, a caller-visible breaking change — removing or renaming a command, event or field, or changing what one means — requires contract 2.0.0. Additive changes stay on the v1.x ladder. Decision record: [one-point-oh.md](../decisions/one-point-oh.md).
   - **Behaviour (pre-release amendment):** every cleanup is permanent. `Settings.delete_mode`, `type DeleteMode` and `CleanupResult.moved_to_trash` were removed from the Types block; path removal deletes outright via `remove_dir_all` and `freed_bytes` always reports the measured space back. `HistoryEntry.moved_to_trash?` stays as a legacy pre-1.0 read-only flag so old history lines can be labelled as archived — new entries never set it. The Trash layout, sidecar format and `move_to_trash` implementation were removed (`crates/cleanup/src/trash.rs`, `trash_evidence` test).

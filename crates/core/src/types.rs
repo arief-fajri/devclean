@@ -160,8 +160,14 @@ pub enum BlockReason {
     AiReadOnly,
     /// The action needs `Settings.allow_privileged_operations`.
     PrivilegedRequired,
-    /// `Settings.docker_prune_scope` does not cover this action.
+    /// `Settings.docker_prune_scope` is `off` — Docker cleanup is disabled
+    /// entirely.
     DockerScope,
+    /// `Settings.docker_prune_scope` is ON but narrower than this action
+    /// needs (v1.1.0). Distinct from [`BlockReason::DockerScope`]: the fix
+    /// is to raise the scope, not to turn it on. The detail names the
+    /// required scope, so the UI can say which one.
+    DockerScopeRequired,
     /// Git-aware protection: the artifact is tracked and the repo is dirty.
     Protected,
     /// A Chromium-family browser that owns these code-sign clones is
@@ -179,6 +185,7 @@ impl BlockReason {
             Self::AiReadOnly => "report only",
             Self::PrivilegedRequired => "needs opt-in",
             Self::DockerScope => "scope off",
+            Self::DockerScopeRequired => "wider scope",
             Self::Protected => "protected",
             Self::BrowserRunning => "browser running",
         }

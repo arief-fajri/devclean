@@ -20,7 +20,7 @@ pub enum ThemeMode {
 /// additionally require `allow_privileged_operations` (G-SAFE-03), which is
 /// now actually READ by the cleanup engine instead of being a stored flag
 /// nobody consults.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Default, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum DockerPruneScope {
     /// Never touch Docker.
