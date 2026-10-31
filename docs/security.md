@@ -64,6 +64,21 @@ The correct pattern for official-tool commands (Go example):
 Command::new("go").args(["clean", "-cache"]).output()
 ```
 
+## Tool discovery (PATH)
+
+A GUI app launched from Finder inherits launchd's `PATH`
+(`/usr/bin:/bin:/usr/sbin:/sbin`), which contains neither `/usr/local/bin`
+(Docker Desktop) nor `/opt/homebrew/bin` (Homebrew's `go`, `node`). Before any
+provider can spawn a process, `devclean_core::system::augment_process_path()`
+appends the directories declared by `/etc/paths` + `/etc/paths.d/*`, a fixed
+list of well-known locations (`/usr/local/bin`, `/opt/homebrew/bin`,
+`~/.cargo/bin`, `~/.bun/bin`, …), and the highest installed nvm Node.
+
+This is discovery, not privilege: the list is fixed server-side and never
+comes from the frontend (G-SAFE-01), no shell or startup file is executed, and
+directories that do not exist are skipped — a missing tool still reports
+nothing (I-absence-is-normal).
+
 ## Protected paths (minimal set, `crates/core/src/safety.rs`)
 
 ```text

@@ -17,9 +17,15 @@ use tauri::Manager;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // A Finder-launched app inherits launchd's minimal PATH — no
+    // `/usr/local/bin`, no Homebrew — so `docker`, `go` and the rest were
+    // invisible to every provider, which then reported "nothing found"
+    // without saying why. Widen it before the builder can spawn anything;
+    // the log line lands below, once the log plugin exists.
+    let added_to_path = devclean_core::system::augment_process_path();
     let app = tauri::Builder::default()
         .manage(AppState::default())
-        .setup(|app| {
+        .setup(move |app| {
             // Paint the native window background (title bar) from the
             // persisted theme before the first frame, so no unpainted
             // transparent strip is ever visible.
@@ -31,6 +37,16 @@ pub fn run() {
                         .level(log::LevelFilter::Info)
                         .build(),
                 )?;
+            }
+            if !added_to_path.is_empty() {
+                log::info!(
+                    "PATH widened for tool discovery: {}",
+                    added_to_path
+                        .iter()
+                        .map(|p| p.display().to_string())
+                        .collect::<Vec<_>>()
+                        .join(" ")
+                );
             }
             // Restrained notifications only (scan/cleanup completion while
             // the window is unfocused — see commands::notify_if_background).

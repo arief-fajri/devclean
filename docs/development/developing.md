@@ -78,6 +78,7 @@ See [CONTRIBUTING.md](../../CONTRIBUTING.md#adding-a-provider) — the steps liv
 | `cargo tauri dev` blank window | Vite not ready / port conflict | Wait 5s, make sure port 1420 is free |
 | Scan finds 0 bytes everywhere | `~/Projects\|Code\|Workspace` don't exist | Add a scan root under Settings |
 | Empty Docker provider | Docker daemon is down | `docker info` must succeed |
+| Docker **and** Go empty in the installed app | Finder launch inherits launchd's minimal `PATH` | Run `/Applications/DevClean.app/Contents/MacOS/devclean` from a terminal, or install 1.1.0+, which widens `PATH` at startup (`system::augment_process_path`) |
 | `svelte-check` event errors | event payload changed | Align with `tauri-contract.md` |
 | `no such command: tauri` | CLI not installed / Rust too old | Update Rust (`rustup update`), then install the CLI |
 

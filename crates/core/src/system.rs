@@ -274,6 +274,164 @@ pub fn app_data_dir() -> std::path::PathBuf {
     base.unwrap_or_else(std::env::temp_dir).join("devclean")
 }
 
+/// Directories that hold the tools the providers shell out to and that a
+/// GUI app launched from Finder never inherits. launchd starts the process
+/// with `/usr/bin:/bin:/usr/sbin:/sbin`, while `docker` lives in
+/// `/usr/local/bin`, `go` under Homebrew's `/opt/homebrew/bin`, and so on.
+/// Every CLI-backed provider treats a missing tool as "nothing to report"
+/// (I-absence-is-normal), so without this they all silently returned empty
+/// and Settings could only guess "the tool may not be installed".
+///
+/// Fixed server-side strings only — never anything from the frontend
+/// (G-SAFE-01) — and no shell is executed to read them.
+const PATH_CANDIDATES: &[&str] = &[
+    "/usr/local/bin",
+    "/usr/local/sbin",
+    "/opt/homebrew/bin",
+    "/opt/homebrew/sbin",
+    "/opt/local/bin",
+    "/opt/local/sbin",
+];
+
+/// Home-relative counterparts of [`PATH_CANDIDATES`].
+const HOME_PATH_CANDIDATES: &[&str] = &[".local/bin", ".cargo/bin", ".bun/bin", ".volta/bin"];
+
+/// Every directory macOS's own path files declare: `/etc/paths` plus each
+/// entry in `/etc/paths.d`. That is the system's answer to "what a process
+/// should see"; a Finder-launched app simply never gets asked.
+fn system_path_dirs() -> Vec<std::path::PathBuf> {
+    let mut files = vec![std::path::PathBuf::from("/etc/paths")];
+    if let Ok(entries) = std::fs::read_dir("/etc/paths.d") {
+        for e in entries.flatten() {
+            files.push(e.path());
+        }
+    }
+    let mut out = Vec::new();
+    for f in files {
+        let Ok(text) = std::fs::read_to_string(&f) else {
+            continue;
+        };
+        for line in text.lines() {
+            let line = line.trim();
+            if !line.is_empty() {
+                out.push(std::path::PathBuf::from(line));
+            }
+        }
+    }
+    out
+}
+
+/// `v22.16.0` → `[22, 16, 0]`, so nvm's directory names compare as
+/// versions instead of as strings — `v9.11.2` must not beat `v10.0.0`.
+fn version_key(name: &str) -> Vec<u64> {
+    name.trim_start_matches('v')
+        .split('.')
+        .map(|part| {
+            part.chars()
+                .take_while(|c| c.is_ascii_digit())
+                .collect::<String>()
+                .parse::<u64>()
+                .unwrap_or(0)
+        })
+        .collect()
+}
+
+/// The `bin` of the highest installed nvm Node. nvm keeps one directory
+/// per version and maintains no "current" symlink, so the choice is made
+/// by version order here: appending every version would let an arbitrary
+/// old `node` win PATH resolution.
+fn highest_nvm_bin(versions: &std::path::Path) -> Option<std::path::PathBuf> {
+    let entries = std::fs::read_dir(versions).ok()?;
+    let mut best: Option<(Vec<u64>, std::path::PathBuf)> = None;
+    for e in entries.flatten() {
+        let p = e.path();
+        if !p.is_dir() {
+            continue;
+        }
+        let name = p.file_name().and_then(|s| s.to_str()).unwrap_or("");
+        let first = name.as_bytes().first();
+        if !first.is_some_and(|b| b.is_ascii_digit() || *b == b'v') {
+            continue;
+        }
+        let bin = p.join("bin");
+        if !bin.is_dir() {
+            continue;
+        }
+        let key = version_key(name);
+        if best.as_ref().is_none_or(|(k, _)| &key > k) {
+            best = Some((key, bin));
+        }
+    }
+    best.map(|(_, bin)| bin)
+}
+
+/// `existing` plus every candidate that is not already listed, in
+/// candidate order. Pure: the caller decides which candidates exist, so
+/// the test never depends on the machine's own PATH (G-CI-03).
+pub fn merge_path(
+    existing: &[std::path::PathBuf],
+    candidates: &[std::path::PathBuf],
+) -> Vec<std::path::PathBuf> {
+    let mut out = existing.to_vec();
+    for c in candidates {
+        if !out.contains(c) {
+            out.push(c.clone());
+        }
+    }
+    out
+}
+
+/// Every directory worth appending to this process's `PATH`, already
+/// deduplicated. Existence is NOT checked here — [`augment_process_path`]
+/// filters, which keeps this half testable against a fixture.
+pub fn path_candidates() -> Vec<std::path::PathBuf> {
+    let mut out = system_path_dirs();
+    for d in PATH_CANDIDATES {
+        out.push(std::path::PathBuf::from(d));
+    }
+    if let Some(home) = home_dir() {
+        for d in HOME_PATH_CANDIDATES {
+            out.push(home.join(d));
+        }
+        if let Some(bin) = highest_nvm_bin(&home.join(".nvm/versions/node")) {
+            out.push(bin);
+        }
+    }
+    merge_path(&[], &out)
+}
+
+/// Widen this process's `PATH` with [`path_candidates`] and return only
+/// the directories that were actually added.
+///
+/// Called once, as the first statement of the desktop app's `run()`,
+/// before the builder can spawn anything: a Finder-launched app inherits
+/// launchd's minimal PATH, so `docker`, `go` and friends were invisible to
+/// every provider and each reported "nothing found" without a word of
+/// explanation. Nothing here executes a shell or reads anything the
+/// frontend supplied (G-SAFE-01); directories that do not exist are
+/// skipped, so absence stays absence (I-absence-is-normal).
+pub fn augment_process_path() -> Vec<std::path::PathBuf> {
+    let current = std::env::var_os("PATH").unwrap_or_default();
+    let existing: Vec<std::path::PathBuf> = std::env::split_paths(&current)
+        .filter(|p| !p.as_os_str().is_empty())
+        .collect();
+    let candidates: Vec<std::path::PathBuf> = path_candidates()
+        .into_iter()
+        .filter(|c| c.is_dir())
+        .collect();
+    let merged = merge_path(&existing, &candidates);
+    let added = merged[existing.len()..].to_vec();
+    if added.is_empty() {
+        return added;
+    }
+    // An entry containing `:` cannot be represented; skipping the update
+    // keeps the current PATH rather than writing a corrupted one.
+    if let Ok(joined) = std::env::join_paths(&merged) {
+        std::env::set_var("PATH", joined);
+    }
+    added
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -430,5 +588,106 @@ mod tests {
         let (_, count) = measure_markers(&root);
         assert_eq!(count, 1, "only the outer node_modules counts");
         let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn merge_path_keeps_order_and_never_duplicates() {
+        let existing = vec![PathBuf::from("/usr/bin"), PathBuf::from("/bin")];
+        let candidates = vec![PathBuf::from("/bin"), PathBuf::from("/opt/homebrew/bin")];
+        assert_eq!(
+            merge_path(&existing, &candidates),
+            vec![
+                PathBuf::from("/usr/bin"),
+                PathBuf::from("/bin"),
+                PathBuf::from("/opt/homebrew/bin"),
+            ],
+            "existing entries stay put, missing ones append in candidate order"
+        );
+    }
+
+    #[test]
+    fn merge_path_from_an_empty_path_is_exactly_the_candidates() {
+        let candidates = vec![PathBuf::from("/a"), PathBuf::from("/b")];
+        assert_eq!(merge_path(&[], &candidates), candidates);
+    }
+
+    #[test]
+    fn merge_path_is_idempotent() {
+        let existing = vec![PathBuf::from("/usr/bin")];
+        let candidates = vec![PathBuf::from("/a"), PathBuf::from("/b")];
+        let once = merge_path(&existing, &candidates);
+        assert_eq!(merge_path(&once, &candidates), once);
+    }
+
+    #[test]
+    fn path_candidates_never_list_a_directory_twice() {
+        let candidates = path_candidates();
+        let mut sorted = candidates.clone();
+        sorted.sort();
+        sorted.dedup();
+        assert_eq!(
+            sorted.len(),
+            candidates.len(),
+            "duplicate in {candidates:?}"
+        );
+    }
+
+    #[test]
+    fn nvm_versions_compare_as_versions_not_as_strings() {
+        assert!(
+            version_key("v22.16.0") > version_key("v10.0.0"),
+            "string order would put v10 first"
+        );
+        assert!(version_key("v9.11.2") < version_key("v10.0.0"));
+        assert_eq!(version_key("v22.16.0"), vec![22, 16, 0]);
+    }
+
+    /// The nvm pick is decided by a fixture, never by whatever is installed
+    /// on the machine (G-CI-03).
+    #[test]
+    fn highest_nvm_bin_picks_the_newest_installed_version() {
+        let root = std::env::temp_dir().join(format!("devclean-nvm-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        for v in ["v10.0.0", "v22.16.0", "v9.11.2"] {
+            std::fs::create_dir_all(root.join(v).join("bin")).unwrap();
+            std::fs::write(root.join(v).join("bin").join("node"), "x").unwrap();
+        }
+        // A directory without `bin/` is not an installation.
+        std::fs::create_dir_all(root.join("downloads")).unwrap();
+
+        assert_eq!(
+            highest_nvm_bin(&root),
+            Some(root.join("v22.16.0/bin")),
+            "the highest installed version must win, not the alphabetically last"
+        );
+        assert_eq!(
+            highest_nvm_bin(&root.join("absent")),
+            None,
+            "no nvm install is not an error"
+        );
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// Self-consistency only: whatever this machine holds, the call may
+    /// only ADD directories that exist, and a second call must add nothing.
+    #[test]
+    fn augment_only_adds_existing_directories_and_is_idempotent() {
+        let added = augment_process_path();
+        for d in &added {
+            assert!(d.is_dir(), "{} was added but does not exist", d.display());
+        }
+        let now = std::env::var_os("PATH").unwrap_or_default();
+        let now: Vec<PathBuf> = std::env::split_paths(&now).collect();
+        for d in &added {
+            assert!(
+                now.contains(d),
+                "{} missing from PATH after the call",
+                d.display()
+            );
+        }
+        assert!(
+            augment_process_path().is_empty(),
+            "a second call must be a no-op"
+        );
     }
 }
