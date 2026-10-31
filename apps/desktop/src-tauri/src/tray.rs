@@ -465,6 +465,7 @@ fn accent(provider: &str) -> (u8, u8, u8) {
         "browser_temp" => (0xc0, 0x26, 0xd3), // fuchsia-600
         "llm_models" => (0x7c, 0x3a, 0xed),   // violet-600
         "ruby" => (0xb9, 0x1c, 0x1c),         // red-700
+        "wails" => (0x0e, 0x74, 0x90),        // cyan-700
         // `xcode_data` is zinc-500 in providerMeta — the grey fallback
         // below IS that colour, so it is deliberately not listed.
         _ => (0x71, 0x71, 0x7a),
@@ -497,6 +498,12 @@ fn glyph_mask(provider: &str, x: f32, y: f32, c: f32) -> bool {
         // disc (docker prune / caches / large blobs)
         "go_cache" | "docker_pruned" | "global_cache" | "browser_temp" | "llm_models" => {
             (x * x + y * y) <= (c * 0.55).powi(2) && (x * x + y * y) >= (c * 0.28).powi(2)
+        }
+        // window: a frame with a title bar (wails desktop shell)
+        "wails" => {
+            let outer = box_shape(c * 0.58, c * 0.5, c * 0.05);
+            let inner = x.abs() <= c * 0.46 && y >= -c * 0.2 && y <= c * 0.37;
+            (outer && !inner) || box_shape(c * 0.58, c * 0.08, -c * 0.3)
         }
         // page with lines (AI history / documents)
         "opencode_fs" | "opencode_db" | "claude" | "xcode_data" => {
@@ -704,6 +711,7 @@ mod tests {
             "browser_temp",
             "llm_models",
             "ruby",
+            "wails",
             "something_new",
         ] {
             let img = chip(provider);
@@ -749,6 +757,7 @@ mod tests {
             "browser_temp",
             "llm_models",
             "ruby",
+            "wails",
         ] {
             assert_ne!(
                 accent(provider),

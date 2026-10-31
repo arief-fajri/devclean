@@ -29,6 +29,7 @@ const KNOWN = [
   "browser_temp",
   "llm_models",
   "ruby",
+  "wails",
 ];
 
 describe("providerMeta", () => {

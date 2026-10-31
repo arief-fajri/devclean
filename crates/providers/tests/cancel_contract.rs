@@ -17,7 +17,8 @@ use devclean_providers::{
     DockerProvider, DockerPrunedProvider, FlutterProvider, GlobalCacheProvider, GoProvider,
     GoVendorProvider, GradleCacheProvider, LlmModelsProvider, NodeModulesProvider,
     NpmCacheProvider, OpencodeDbProvider, OpencodeFsProvider, OwnScanner, PodsProvider,
-    PythonCacheProvider, RubyProvider, RustTargetProvider, TreeRule, XcodeDataProvider,
+    PythonCacheProvider, RubyProvider, RustTargetProvider, TreeRule, WailsProvider,
+    XcodeDataProvider,
 };
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
@@ -188,6 +189,24 @@ fn llm_models_stops_when_cancelled() {
 #[test]
 fn ruby_stops_when_cancelled() {
     assert!(cancelled_scan(&RubyProvider).is_empty());
+}
+
+#[test]
+fn wails_stops_when_cancelled() {
+    // Wails walks the scan roots, so an empty root list would make the
+    // assertion vacuous. Give it a real project and a pre-set flag.
+    let n = FIXTURE_SEQ.fetch_add(1, Ordering::SeqCst);
+    let root =
+        std::env::temp_dir().join(format!("devclean-cancel-wails-{}-{n}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&root);
+    std::fs::create_dir_all(root.join("app/build/bin")).unwrap();
+    std::fs::write(root.join("app/wails.json"), b"{}").unwrap();
+    std::fs::write(root.join("app/build/bin/app"), b"x").unwrap();
+    let cancel = AtomicBool::new(true);
+    assert!(WailsProvider
+        .scan(std::slice::from_ref(&root), &cancel)
+        .is_empty());
+    let _ = std::fs::remove_dir_all(&root);
 }
 
 #[test]

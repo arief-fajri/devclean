@@ -27,6 +27,7 @@ pub mod registry;
 pub mod ruby;
 pub mod rust_target;
 pub mod tree;
+pub mod wails;
 pub mod xcode_data;
 
 pub use ai_guard::{probe_process, sqlite_exclusive_available, ProcState};
@@ -59,6 +60,7 @@ pub use registry::ProviderRegistry;
 pub use ruby::RubyProvider;
 pub use rust_target::RustTargetProvider;
 pub use tree::{walk_tree_rules, Match, TreeRule, TreeRuleSpec};
+pub use wails::WailsProvider;
 pub use xcode_data::XcodeDataProvider;
 
 /// All providers in scan order.
@@ -89,5 +91,7 @@ pub fn all_providers() -> Vec<Scannable> {
         // Wave D5.
         Scannable::Own(Arc::new(LlmModelsProvider)),
         Scannable::Own(Arc::new(RubyProvider)),
+        // Wave F: Wails build output.
+        Scannable::Own(Arc::new(WailsProvider)),
     ]
 }

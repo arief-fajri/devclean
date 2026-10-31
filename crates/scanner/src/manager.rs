@@ -399,6 +399,7 @@ fn short_prefix(provider_id: &str) -> &str {
         "browser_temp" => "bt",
         "llm_models" => "lm",
         "ruby" => "rb",
+        "wails" => "wa",
         // Stubs and future providers share one prefix on purpose: the
         // uniqueness test turns this into a failure instead of two
         // providers quietly sharing `xx:0000`.

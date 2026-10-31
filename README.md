@@ -54,7 +54,7 @@ cargo tauri dev
 **Your setup works if:**
 
 - The DevClean window opens (Vite at `http://localhost:1420`)
-- **Overview** shows a reclaimable total and the **Scan now** button lists 21 providers without any setup (see below)
+- **Overview** shows a reclaimable total and the **Scan now** button lists 22 providers without any setup (see below)
 - `cargo test --workspace` is green · `cargo clippy` has 0 warnings · `npm --prefix apps/desktop run check` has 0 errors
 
 Full details: [docs/development/developing.md](docs/development/developing.md), and [CONTRIBUTING.md](CONTRIBUTING.md) for the rules a change has to follow.
@@ -78,7 +78,7 @@ devclean/
 │   └── src-tauri/src/     # main.rs, commands.rs, events.rs, state.rs, tray.rs
 ├── crates/
 │   ├── core/              # types, SafetyValidator, settings, preview tokens
-│   ├── providers/         # Provider trait + 21 resource providers
+│   ├── providers/         # Provider trait + 22 resource providers
 │   ├── scanner/           # ScanManager (concurrent, cancellable) + cache
 │   └── cleanup/           # preview + gated executor, retention, SQLite
 └── docs/

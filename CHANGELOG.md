@@ -13,6 +13,10 @@ A contract bump therefore does not imply a product release, and vice versa.
 
 ## [Unreleased]
 
+### Added
+
+- **Wails builds are covered.** A project with `wails.json` at its root now reports `build/bin/` (the compiled app — `Caution`, a full rebuild) and `frontend/dist/` (the frontend bundle — `Safe`) as their own `wails` provider. The rest of `build/` (`appicon.png`, platform templates) is committed config and is deliberately not touched. Decision record: [wails-coverage](docs/decisions/wails-coverage.md).
+
 ### Fixed
 
 - **Tools installed in the normal places are no longer invisible to the packaged app.** A Finder-launched app inherits launchd's `PATH` (`/usr/bin:/bin:/usr/sbin:/sbin`), which has neither `/usr/local/bin` (Docker Desktop) nor `/opt/homebrew/bin` (Homebrew's `go`). Every CLI-backed provider therefore returned empty — Docker, Docker images & volumes, and the Go caches never appeared, with no error anywhere. `system::augment_process_path()` now runs before the builder spawns anything and appends `/etc/paths`, `/etc/paths.d/*`, a fixed list of well-known locations (`/usr/local/bin`, `/opt/homebrew/bin`, `~/.cargo/bin`, `~/.bun/bin`, …), and the highest installed nvm Node. No shell is executed and the list is fixed server-side (G-SAFE-01). See [security.md](docs/security.md).

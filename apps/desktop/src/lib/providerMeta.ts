@@ -18,6 +18,7 @@ import {
   Globe,
   HardDrive,
   MessageSquare,
+  Monitor,
   Package,
   Smartphone,
   Terminal,
@@ -192,6 +193,13 @@ export const PROVIDER_META: Record<string, ProviderMeta> = {
     label: "Ruby caches",
     accent: "text-red-700 dark:text-red-300",
     tile: "bg-red-100 dark:bg-red-950",
+  },
+  wails: {
+    icon: Monitor,
+    tick: Monitor,
+    label: "Wails build output",
+    accent: "text-cyan-700 dark:text-cyan-300",
+    tile: "bg-cyan-100 dark:bg-cyan-950",
   },
 };
 
