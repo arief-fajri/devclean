@@ -3,6 +3,10 @@
 //!
 //! Pipeline: `User request -> Provider -> SafetyValidator -> Execute`.
 //!
+//! Every check runs on the lexical spelling AND on the canonical
+//! (symlink-resolved) form, so a symlink into protected territory cannot
+//! open a back door.
+//!
 //! Invariants (see `docs/development/methodology/system-model.md`):
 //! - I1: the frontend never supplies a raw path; it supplies a resource id.
 //! - I2: deletion only happens for validator-approved paths.
@@ -21,15 +25,33 @@ pub enum SafetyError {
     UnknownResource(String),
 }
 
+/// One reference path stored in both forms the validator compares against:
+/// the lexically normalized spelling, and the symlink-resolved (canonical)
+/// physical location. They differ exactly when the path walks through a
+/// symlink — the gap a purely lexical check cannot see.
+#[derive(Debug, Clone)]
+struct PathEntry {
+    lexical: PathBuf,
+    canonical: PathBuf,
+}
+
+impl PathEntry {
+    fn new(path: &Path) -> Self {
+        let lexical = normalize(path);
+        let canonical = canonicalize_best_effort(&lexical);
+        Self { lexical, canonical }
+    }
+}
+
 /// Validates cleanup targets against protected paths and scan roots.
 #[derive(Debug, Clone)]
 pub struct SafetyValidator {
-    protected: Vec<PathBuf>,
-    scan_roots: Vec<PathBuf>,
+    protected: Vec<PathEntry>,
+    scan_roots: Vec<PathEntry>,
     /// Provider-owned global cache dirs (e.g. `~/.cargo/registry`), declared
     /// via `Provider::extra_allowed_roots`. Same protected-path rules apply;
     /// only the roots check is widened. Empty for scan-root-only providers.
-    extra_roots: Vec<PathBuf>,
+    extra_roots: Vec<PathEntry>,
 }
 
 impl SafetyValidator {
@@ -38,12 +60,22 @@ impl SafetyValidator {
     }
 
     pub fn new_with_extra_roots(scan_roots: Vec<PathBuf>, extra_roots: Vec<PathBuf>) -> Self {
-        let protected = default_protected_paths();
-        let norm = |paths: Vec<PathBuf>| paths.into_iter().map(|p| normalize(&p)).collect();
+        Self::with_protected(default_protected_paths(), scan_roots, extra_roots)
+    }
+
+    /// Construct a validator with an explicit protected list. Production code
+    /// seeds it from [`default_protected_paths`]; this exists for tests and
+    /// future per-platform extension.
+    pub fn with_protected(
+        protected: Vec<PathBuf>,
+        scan_roots: Vec<PathBuf>,
+        extra_roots: Vec<PathBuf>,
+    ) -> Self {
+        let entries = |paths: Vec<PathBuf>| paths.iter().map(|p| PathEntry::new(p)).collect();
         Self {
-            protected,
-            scan_roots: norm(scan_roots),
-            extra_roots: norm(extra_roots),
+            protected: entries(protected),
+            scan_roots: entries(scan_roots),
+            extra_roots: entries(extra_roots),
         }
     }
 
@@ -63,25 +95,50 @@ impl SafetyValidator {
 
     /// Core check: path must be inside a scan root and must not touch a
     /// protected path in either direction (equal, inside, or ancestor-of).
+    ///
+    /// The check runs twice: once on the lexical spelling the provider
+    /// reported, and once on the canonical (symlink-resolved) form, so a
+    /// scan root or path component that is a symlink into protected
+    /// territory (e.g. `~/Dev → ~/Documents/Dev`) is refused too.
     pub fn validate_path(&self, path: &Path) -> Result<(), SafetyError> {
-        let path = normalize(path);
+        let lexical = normalize(path);
+        self.check_form(&lexical, false)?;
+        let canonical = canonicalize_best_effort(&lexical);
+        if canonical != lexical {
+            self.check_form(&canonical, true)?;
+        }
+        Ok(())
+    }
 
-        for p in &self.protected {
+    /// One pass of the three-direction protected check plus the scan-root
+    /// allow-list, against one form of every reference path.
+    fn check_form(&self, path: &Path, canonical: bool) -> Result<(), SafetyError> {
+        fn field(e: &PathEntry, canonical: bool) -> &Path {
+            if canonical {
+                e.canonical.as_path()
+            } else {
+                e.lexical.as_path()
+            }
+        }
+        let shown = path.display().to_string();
+
+        for entry in &self.protected {
+            let p = field(entry, canonical);
             // Exact match: never clean a protected dir itself.
-            if path == *p {
-                return Err(SafetyError::Protected(path.display().to_string()));
+            if path == p {
+                return Err(SafetyError::Protected(shown));
             }
             // Inside a protected dir (e.g. `~/Documents/foo`). The filesystem
             // root `/` is exempt: every absolute path is "inside" it, so it
             // carries no signal (it is still covered by the exact match and
             // the ancestor check below).
             if p.parent().is_some() && path.starts_with(p) {
-                return Err(SafetyError::Protected(path.display().to_string()));
+                return Err(SafetyError::Protected(shown));
             }
             // Ancestor of a protected dir (e.g. cleaning `$HOME` would wipe
             // `~/.ssh`): rejected, even if it sits inside a scan root (I7).
-            if p.starts_with(&path) {
-                return Err(SafetyError::Protected(path.display().to_string()));
+            if p.starts_with(path) {
+                return Err(SafetyError::Protected(shown));
             }
         }
 
@@ -89,9 +146,9 @@ impl SafetyValidator {
             .scan_roots
             .iter()
             .chain(self.extra_roots.iter())
-            .any(|r| path.starts_with(r));
+            .any(|r| path.starts_with(field(r, canonical)));
         if !inside_root {
-            return Err(SafetyError::OutsideScanRoots(path.display().to_string()));
+            return Err(SafetyError::OutsideScanRoots(shown));
         }
 
         Ok(())
@@ -144,6 +201,35 @@ fn normalize(path: &Path) -> PathBuf {
     } else {
         out
     }
+}
+
+/// Resolve a path through symlinks as far as it physically exists. When the
+/// leaf (or part of the chain) is missing — already cleaned, or a name the
+/// provider reported that was never created — the nearest existing ancestor
+/// is resolved and the remaining components are appended, so every symlink
+/// that DOES exist is still seen. Nothing to resolve falls back to the
+/// lexical form.
+fn canonicalize_best_effort(path: &Path) -> PathBuf {
+    if let Ok(c) = std::fs::canonicalize(path) {
+        return c;
+    }
+    let mut tail: Vec<std::ffi::OsString> = Vec::new();
+    let mut cursor: &Path = path;
+    while let Some(name) = cursor.file_name() {
+        tail.push(name.to_os_string());
+        let Some(parent) = cursor.parent() else {
+            break;
+        };
+        cursor = parent;
+        if let Ok(c) = std::fs::canonicalize(cursor) {
+            let mut out = c;
+            for part in tail.iter().rev() {
+                out.push(part);
+            }
+            return normalize(&out);
+        }
+    }
+    normalize(path)
 }
 
 #[cfg(test)]
@@ -234,5 +320,120 @@ mod tests {
         assert!(v.validate_path(&home.join(".cargo/bin/rustc")).is_err());
         // …and protected paths stay untouchable from any direction.
         assert!(v.validate_path(&home.join(".ssh")).is_err());
+    }
+
+    /// Symlink regression tests (feedback verifikasi v1.0.0): a purely
+    /// lexical validator lets a scan root or path component that is a
+    /// symlink into protected territory pass. Unix-only (symlink API).
+    #[cfg(unix)]
+    mod symlink_tests {
+        use super::*;
+        use std::os::unix::fs::symlink;
+
+        fn scratch(tag: &str) -> PathBuf {
+            let root =
+                std::env::temp_dir().join(format!("devclean-safety-{tag}-{}", std::process::id()));
+            let _ = std::fs::remove_dir_all(&root);
+            std::fs::create_dir_all(&root).unwrap();
+            root
+        }
+
+        fn expect_protected(v: &SafetyValidator, path: &Path) {
+            match v.validate_path(path) {
+                Err(SafetyError::Protected(_)) => {}
+                other => panic!("expected Protected for {}, got {other:?}", path.display()),
+            }
+        }
+
+        #[test]
+        fn scenario_a_scan_root_that_is_a_symlink_into_a_protected_dir_is_refused() {
+            let tmp = scratch("scan-root-link");
+            let protected = tmp.join("Documents");
+            let dev = protected.join("Dev");
+            let victim = dev.join("node_modules");
+            std::fs::create_dir_all(&victim).unwrap();
+            std::fs::write(dev.join("IMPORTANT.txt"), "keep").unwrap();
+            let link = tmp.join("scanlink");
+            symlink(&dev, &link).unwrap();
+
+            let v =
+                SafetyValidator::with_protected(vec![protected], vec![link.clone()], Vec::new());
+            expect_protected(&v, &link.join("node_modules"));
+            // Validation never touches the disk.
+            assert!(victim.exists());
+            assert!(dev.join("IMPORTANT.txt").exists());
+            let _ = std::fs::remove_dir_all(&tmp);
+        }
+
+        #[test]
+        fn scenario_a_is_still_refused_when_the_leaf_does_not_exist_yet() {
+            let tmp = scratch("scan-root-link-missing");
+            let protected = tmp.join("Documents");
+            let dev = protected.join("Dev");
+            std::fs::create_dir_all(&dev).unwrap();
+            let link = tmp.join("scanlink");
+            symlink(&dev, &link).unwrap();
+
+            let v = SafetyValidator::with_protected(vec![protected], vec![link], Vec::new());
+            // node_modules was never created; the parent walk still sees the
+            // symlink and refuses.
+            expect_protected(&v, &tmp.join("scanlink/node_modules"));
+            let _ = std::fs::remove_dir_all(&tmp);
+        }
+
+        #[test]
+        fn scenario_b_symlink_mid_path_inside_a_scan_root_is_refused() {
+            let tmp = scratch("mid-link");
+            let protected = tmp.join("Documents");
+            std::fs::create_dir_all(protected.join("Dev")).unwrap();
+            let scan = tmp.join("Projects");
+            std::fs::create_dir_all(&scan).unwrap();
+            symlink(protected.join("Dev"), scan.join("link")).unwrap();
+
+            let v =
+                SafetyValidator::with_protected(vec![protected], vec![scan.clone()], Vec::new());
+            expect_protected(&v, &scan.join("link/node_modules"));
+            let _ = std::fs::remove_dir_all(&tmp);
+        }
+
+        #[test]
+        fn scenario_c_target_that_is_itself_a_symlink_is_resolved_before_the_check() {
+            let tmp = scratch("target-link");
+            let protected = tmp.join("Documents");
+            std::fs::create_dir_all(protected.join("Dev")).unwrap();
+            let scan = tmp.join("Projects");
+            std::fs::create_dir_all(&scan).unwrap();
+            symlink(protected.join("Dev"), scan.join("evil_link")).unwrap();
+            let real = scan.join("real");
+            std::fs::create_dir_all(&real).unwrap();
+            symlink(&real, scan.join("good_link")).unwrap();
+
+            let v =
+                SafetyValidator::with_protected(vec![protected], vec![scan.clone()], Vec::new());
+            // The link lives inside the scan root but RESOLVES into protected
+            // territory: refused (over-strict on purpose — remove_dir_all
+            // would only unlink, but validation never has to guess).
+            expect_protected(&v, &scan.join("evil_link"));
+            // A link that resolves inside the scan root stays cleanable.
+            assert!(v.validate_path(&scan.join("good_link")).is_ok());
+            let _ = std::fs::remove_dir_all(&tmp);
+        }
+
+        #[test]
+        fn missing_targets_are_still_validated_lexically() {
+            let v = SafetyValidator::with_protected(
+                vec![PathBuf::from("/Users/test/Documents")],
+                vec![PathBuf::from("/Users/test/Projects")],
+                Vec::new(),
+            );
+            // Nonexistent path inside the scan root: cleanable.
+            assert!(v
+                .validate_path(Path::new("/Users/test/Projects/my-app/node_modules"))
+                .is_ok());
+            // Nonexistent path spelled inside a protected dir: refused.
+            assert!(v
+                .validate_path(Path::new("/Users/test/Documents/notes"))
+                .is_err());
+        }
     }
 }

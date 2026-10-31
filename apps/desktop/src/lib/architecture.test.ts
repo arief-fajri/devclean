@@ -231,3 +231,37 @@ describe("layering — the selection bar is covered by nothing it must beat", ()
     ).toBeGreaterThan(shell.indexOf("<main"));
   });
 });
+
+describe("cleanup confirmation — the no-undo warning lives BEFORE the deletion", () => {
+  const dialog = component("CleanupFlowDialog.svelte");
+
+  /** Slice of the dialog between the review phase and the running phase. */
+  const reviewScreen = dialog.slice(
+    dialog.indexOf('{:else if phase === "review" && preview && !nothingToClean}'),
+    dialog.lastIndexOf('{:else if phase === "running"}'),
+  );
+
+  it("states 'Permanent deletion has no undo' on the confirmation screen", () => {
+    // v1.0.0 shipped the warning only on the done screen, after the bytes
+    // were already gone. The ADR promises the dialogs say it out loud —
+    // the confirm screen is the one that can still stop the click.
+    expect(reviewScreen).toContain("Permanent deletion has no undo.");
+  });
+
+  it("checkbox no longer claims the data 'can be recreated'", () => {
+    // Dangerous items (Xcode Archives, opencode history, Docker volumes)
+    // are not regenerable — the old wording was false for them.
+    expect(reviewScreen).not.toContain("can be recreated");
+    expect(reviewScreen).toContain(
+      "deleted permanently and cannot be undone",
+    );
+  });
+
+  it("demands a second, dangerous-specific acknowledgement gated on safety", () => {
+    expect(reviewScreen).toContain("dangerousItems");
+    expect(reviewScreen).toContain("irreversible consequences");
+    // The clean button must consult both acks.
+    expect(reviewScreen).toMatch(/dangerousItems\.length === 0 \|\| dangerousAck/);
+    expect(reviewScreen).toMatch(/!acknowledged\s*\|\|\s*\(\s*dangerousItems\.length > 0 && !dangerousAck\s*\)/);
+  });
+});

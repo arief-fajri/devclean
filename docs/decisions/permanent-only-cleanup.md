@@ -11,8 +11,11 @@ immediately. A `2.3 GB SUCCESS` that leaves the Trash full reads as a bug
 inconsistent: some providers reclaimed now, others reported `0 B freed` with
 bytes pending). The Trash also added a whole platform matrix (macOS flat vs
 freedesktop sidecars, EXDEV copies, `libc` date formatting) for a safety net
-that most cleanups never needed — every artifact is regenerable
-(`npm install`, `cargo build`, `go build`, Docker layer rebuild).
+that most cleanups never needed — almost every artifact is regenerable
+(`npm install`, `cargo build`, `go build`, Docker layer rebuild). The
+exception: items classified **Dangerous** (Xcode Archives with shipped
+dSYMs, opencode conversation history, Docker local volumes) are not —
+they carry their own consequence copy and a separate confirmation.
 
 ## Decision
 
@@ -26,7 +29,9 @@ that most cleanups never needed — every artifact is regenerable
    Trash (pre-1.0)`. New entries always write `false` (omitted in practice).
 4. **Preview + confirmation stay mandatory.** With no undo, the re-measured
    preview and backend-enforced `preview_token` are the safety net (G-UI-01,
-   I6, I11). The dialogs state `Permanent deletion has no undo` out loud.
+   I6, I11). The confirmation dialog states `Permanent deletion has no undo`
+   before the click (the done screen repeats it), and Dangerous items
+   demand a second acknowledgement spelling out their consequences.
 
 ## Consequences
 

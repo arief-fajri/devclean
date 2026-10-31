@@ -37,10 +37,15 @@ CleanupProvider.cleanup_action()  → RemoveDir(path) | RunCommand(prog, args)
 SafetyValidator (for RemoveDir)
   ├─ path == protected or inside protected? → DENY
   ├─ path an ancestor of protected (e.g. $HOME)? → DENY
-  └─ path outside scan roots? → DENY
+  ├─ path outside scan roots? → DENY
+  └─ every check repeats on the canonical (symlink-resolved) form,
+     so a scan root or path component that is a symlink into
+     protected territory is refused too
   ↓
 Execute → measure freed = before − after → report per resource
 ```
+
+Every branch runs twice: once on the lexical spelling the provider reported, and once on the canonical form (`canonicalize`, best-effort up to the nearest existing ancestor). A `~/Dev → ~/Documents/Dev` symlink used to pass the lexical check and delete real files under `~/Documents`; the canonical pass refuses it.
 
 ## Strictly forbidden
 

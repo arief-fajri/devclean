@@ -28,8 +28,14 @@ G-SAFE-05  Configuration and credentials are never deleted by an age-based prune
            whatever the glob matches (I10).
            Enforcement: code — `CleanupAction::PruneOlderThan.skip_names` ·
            test — a_skip_list_beats_a_broad_pattern ✅
-G-SAFE-04  Protected paths are untouchable from any direction (==, inside, ancestor).
-           Enforcement: code+test — SafetyValidator, 7 tests ✅
+G-SAFE-04  Protected paths are untouchable from any direction (==, inside, ancestor),
+           in both the lexical and the canonical (symlink-resolved) form — a scan
+           root or path component that is a symlink into protected territory is
+           refused too.
+           Enforcement: code+test — SafetyValidator (lexical + canonical pass) ·
+           tests — rejects_ssh_and_documents_children and the scenario_a/b/c
+           symlink suite, plus engine e2e
+           removal_through_a_symlinked_scan_root_is_refused_and_the_neighbour_survives ✅
 G-SAFE-07  A failed liveness probe fails toward MORE caution, never less
            (Wave D4). `ProcState::Unknown` from the browser probe never
            reads as `NotRunning`: it floors the browser-temp row's safety

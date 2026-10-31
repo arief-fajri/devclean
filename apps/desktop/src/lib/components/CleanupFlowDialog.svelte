@@ -88,9 +88,12 @@
 
   // Explicit understanding gate (G-UI-01). Resets for every new preview.
   let acknowledged = $state(false);
+  /** Second gate, only demanded when the selection contains Dangerous items. */
+  let dangerousAck = $state(false);
   $effect(() => {
     void preview?.total_bytes;
     acknowledged = false;
+    dangerousAck = false;
   });
 
   const done = $derived(progress?.done ?? 0);
@@ -99,6 +102,8 @@
 
   const reviewItems = $derived((preview?.items ?? []).filter((i) => i.safety !== "safe"));
   const safeItems = $derived((preview?.items ?? []).filter((i) => i.safety === "safe"));
+  /** Items whose deletion is irreversible — they demand their own ack. */
+  const dangerousItems = $derived((preview?.items ?? []).filter((i) => i.safety === "dangerous"));
 
   const doneCounts = $derived.by(() => {
     let success = 0;
@@ -387,6 +392,14 @@
         </p>
       {/if}
 
+      <p
+        class="mt-3 flex items-start gap-1.5 rounded-lg bg-amber-50 px-2.5 py-2 text-xs text-amber-800 dark:bg-amber-950/40 dark:text-amber-200"
+        role="note"
+      >
+        <span aria-hidden="true" class="mt-0.5 flex shrink-0"><TriangleAlert size={13} /></span>
+        <span>Permanent deletion has no undo.</span>
+      </p>
+
       <label class="mt-3 flex items-start gap-2 text-sm text-zinc-700 dark:text-zinc-300">
         <input
           type="checkbox"
@@ -394,8 +407,21 @@
           bind:checked={acknowledged}
           disabled={cleaning}
         />
-        I understand this data will be deleted and can be recreated.
+        I understand this data will be deleted permanently and cannot be undone.
       </label>
+      {#if dangerousItems.length > 0}
+        <label class="mt-2 flex items-start gap-2 text-sm text-red-700 dark:text-red-300">
+          <input
+            type="checkbox"
+            class="mt-0.5 h-4 w-4 accent-red-600"
+            bind:checked={dangerousAck}
+            disabled={cleaning}
+          />
+          I understand the {dangerousItems.length}
+          {dangerousItems.length === 1 ? "Dangerous item" : "Dangerous items"} above have
+          irreversible consequences.
+        </label>
+      {/if}
       </div>
 
       <!-- Sticky footer -->
@@ -411,8 +437,13 @@
         <button
           class="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-700 disabled:opacity-50"
           onclick={onConfirm}
-          disabled={cleaning || !acknowledged || !canConfirm}
-          title={acknowledged ? "" : "Check the understanding statement first"}
+          disabled={cleaning ||
+            !acknowledged ||
+            (dangerousItems.length > 0 && !dangerousAck) ||
+            !canConfirm}
+          title={acknowledged && (dangerousItems.length === 0 || dangerousAck)
+            ? ""
+            : "Check the understanding statement first"}
         >
           {cleaning ? "Cleaning…" : `Clean ${formatBytes(preview.total_bytes)}`}
         </button>

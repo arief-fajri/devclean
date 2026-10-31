@@ -11,6 +11,17 @@ Two version numbers move independently:
 
 A contract bump therefore does not imply a product release, and vice versa.
 
+## [Unreleased]
+
+### Fixed
+
+- **The safety validator now sees through symlinks.** `SafetyValidator::validate_path` additionally checks the canonical (symlink-resolved) form of the target — best-effort up to the nearest existing ancestor — so a scan root or path component that is a symlink into protected territory (`~/Dev → ~/Documents/Dev`) is refused before `remove_dir_all` runs, instead of slipping past the purely lexical check and deleting real files under `~/Documents`. Regression tests cover scenarios A, B and C from the v1.0.0 verification, plus an engine end-to-end test proving the neighbour file survives a refused run. See [security.md](docs/security.md).
+- **The "no undo" warning is where it can still stop the click.** `Permanent deletion has no undo` now appears on the confirmation screen, not only on the done screen after the bytes are gone (the done screen keeps it). The acknowledgement checkbox says "deleted permanently and cannot be undone" instead of the false-for-Dangerous "can be recreated", and a selection containing `dangerous` items demands a second, consequence-spelling acknowledgement before the Clean button unlocks.
+
+### Changed
+
+- **The "regenerable" claims are honest.** `system-model.md`'s desired outcome and the permanent-only ADR no longer say *everything* deleted is regenerable — almost everything is; the exceptions are the items classified **Dangerous** (Xcode Archives with shipped dSYMs, opencode conversation history, Docker local volumes), which carry their own consequence copy and the second acknowledgement. The ADR's "dialogs state it out loud" now matches the code.
+
 ## [1.0.0] — 2026-10-24
 
 ### Added

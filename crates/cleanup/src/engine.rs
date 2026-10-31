@@ -1027,6 +1027,55 @@ mod tests {
         let _ = std::fs::remove_dir_all(&root);
     }
 
+    /// End-to-end symlink regression (feedback verifikasi v1.0.0, scenario A):
+    /// a scan root that IS a symlink into protected territory must be refused
+    /// before `remove_dir_all` runs — the neighbour file survives, nothing is
+    /// freed. Unix-only (symlink API).
+    #[cfg(unix)]
+    #[test]
+    fn removal_through_a_symlinked_scan_root_is_refused_and_the_neighbour_survives() {
+        use std::os::unix::fs::symlink;
+
+        let root = std::env::temp_dir().join(format!("devclean-cu-symlink-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let victim = root.join("Documents/Dev");
+        let target = victim.join("node_modules");
+        std::fs::create_dir_all(&target).unwrap();
+        std::fs::write(target.join("a.js"), "y".repeat(2000)).unwrap();
+        std::fs::write(victim.join("IMPORTANT.txt"), "keep me").unwrap();
+        // The user's "scan root" is a symlink into the protected folder.
+        let link = root.join("scanlink");
+        symlink(&victim, &link).unwrap();
+        let linked_target = link.join("node_modules");
+
+        let (mut resources, providers) = setup();
+        resources.insert("nm:0301".to_string(), resource("nm:0301", &linked_target));
+        let validator =
+            SafetyValidator::with_protected(vec![root.join("Documents")], vec![link], Vec::new());
+        let lookup = |id: &str| resources.get(id).map(|x| x.path.clone());
+
+        let out = CleanupEngine::default().execute(
+            &["nm:0301".to_string()],
+            &resources,
+            &providers,
+            &validator,
+            lookup,
+            None,
+        );
+
+        assert_eq!(out[0].status, CleanupStatus::Failed, "{:?}", out[0].error);
+        assert_eq!(
+            out[0].freed_bytes, 0,
+            "a refused cleanup freed nothing and must say so"
+        );
+        assert!(target.exists(), "node_modules behind the symlink survives");
+        assert!(
+            victim.join("IMPORTANT.txt").exists(),
+            "the neighbour file is never touched"
+        );
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
     #[test]
     fn command_backed_actions_report_measured_freed() {
         let id = "sn:trash".to_string();
