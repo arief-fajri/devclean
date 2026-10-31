@@ -16,6 +16,7 @@ A contract bump therefore does not imply a product release, and vice versa.
 ### Fixed
 
 - **Tools installed in the normal places are no longer invisible to the packaged app.** A Finder-launched app inherits launchd's `PATH` (`/usr/bin:/bin:/usr/sbin:/sbin`), which has neither `/usr/local/bin` (Docker Desktop) nor `/opt/homebrew/bin` (Homebrew's `go`). Every CLI-backed provider therefore returned empty — Docker, Docker images & volumes, and the Go caches never appeared, with no error anywhere. `system::augment_process_path()` now runs before the builder spawns anything and appends `/etc/paths`, `/etc/paths.d/*`, a fixed list of well-known locations (`/usr/local/bin`, `/opt/homebrew/bin`, `~/.cargo/bin`, `~/.bun/bin`, …), and the highest installed nvm Node. No shell is executed and the list is fixed server-side (G-SAFE-01). See [security.md](docs/security.md).
+- **Choosing "Build cache + unused images" now saves.** Rust serialized `DockerPruneScope::BuildCacheImages` as `build-cache-images` (the derived `kebab-case` name) while the contract and `tauri.ts` spell it `build-cache+images`; picking that option could not round-trip through `update_settings`. The variant now uses the contract's spelling, accepts the old spelling as an alias so existing `settings.json` files still load, and has a regression test for all four values.
 
 ## [1.0.1] — 2026-10-31
 

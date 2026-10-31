@@ -31,6 +31,13 @@ pub enum DockerPruneScope {
     /// + `docker image prune -af` — unused images.
     ///
     /// Requires privileged opt-in.
+    ///
+    /// The wire value is `build-cache+images`, exactly as the contract and
+    /// `tauri.ts` spell it. The derived `kebab-case` name wrote
+    /// `build-cache-images` into `settings.json` before v1.1.0, so that
+    /// spelling is accepted as an alias; the two must never be conflated
+    /// with a deserialize error the UI would surface as "could not save".
+    #[serde(rename = "build-cache+images", alias = "build-cache-images")]
     BuildCacheImages,
     /// + `docker volume prune -af` — unused volumes, which may hold state.
     ///
@@ -53,6 +60,16 @@ impl DockerPruneScope {
             Self::BuildCache => "only the build cache — images rebuild from your Dockerfile",
             Self::BuildCacheImages => "also unused images, which you rebuild by hand",
             Self::All => "also unused images AND volumes — volumes can hold database state",
+        }
+    }
+
+    /// Short name for refusal messages (`needs Docker scope 'build cache'`).
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Off => "off",
+            Self::BuildCache => "build cache",
+            Self::BuildCacheImages => "build cache + images",
+            Self::All => "all",
         }
     }
 }
@@ -277,5 +294,57 @@ mod tests {
         s.save_to(&path).unwrap();
         assert_eq!(Settings::load_from(&path).theme, ThemeMode::Dark);
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// The contract and `tauri.ts` already spelled this value
+    /// `build-cache+images`; the derived `kebab-case` name disagreed, so
+    /// choosing that scope in Settings could not round-trip. One spelling
+    /// wins: the contract's.
+    #[test]
+    fn docker_scope_uses_the_contract_spelling() {
+        for (scope, wire) in [
+            (DockerPruneScope::Off, "\"off\""),
+            (DockerPruneScope::BuildCache, "\"build-cache\""),
+            (DockerPruneScope::BuildCacheImages, "\"build-cache+images\""),
+            (DockerPruneScope::All, "\"all\""),
+        ] {
+            assert_eq!(
+                serde_json::to_string(&scope).unwrap(),
+                wire,
+                "serialized form drifted from the contract"
+            );
+            assert_eq!(
+                serde_json::from_str::<DockerPruneScope>(wire).unwrap(),
+                scope,
+                "{wire} did not deserialize"
+            );
+        }
+    }
+
+    /// A settings file written by 1.0.x carries the old `kebab-case` name.
+    /// It must still load as the same scope, not fail and reset the file.
+    #[test]
+    fn legacy_build_cache_images_spelling_still_loads() {
+        assert_eq!(
+            serde_json::from_str::<DockerPruneScope>("\"build-cache-images\"").unwrap(),
+            DockerPruneScope::BuildCacheImages
+        );
+    }
+
+    #[test]
+    fn docker_scope_labels_are_distinct() {
+        let labels = [
+            DockerPruneScope::Off.label(),
+            DockerPruneScope::BuildCache.label(),
+            DockerPruneScope::BuildCacheImages.label(),
+            DockerPruneScope::All.label(),
+        ];
+        assert_eq!(
+            labels
+                .iter()
+                .collect::<std::collections::HashSet<_>>()
+                .len(),
+            labels.len()
+        );
     }
 }
