@@ -19,6 +19,7 @@
     DOCKER_SCOPE_NEEDS_PRIVILEGED,
   type DockerPruneScope,
     type ProviderInfo,
+    type ProviderStatus,
     type ScanRootCandidate,
     type Settings,
     type ThemeMode,
@@ -47,6 +48,16 @@
     const out: Record<string, { count: number; bytes: number }> = {};
     for (const p of scanStore.summary?.providers ?? []) {
       out[p.provider] = { count: p.resource_count, bytes: p.reclaimable_bytes };
+    }
+    return out;
+  });
+
+  /** Last scan outcome per provider id, so "nothing found" can distinguish
+   *  an empty cache from a missing tool (contract v1.2.0). */
+  const providerOutcome = $derived.by(() => {
+    const out: Record<string, ProviderStatus> = {};
+    for (const s of scanStore.summary?.provider_status ?? []) {
+      out[s.provider] = s;
     }
     return out;
   });
@@ -285,6 +296,7 @@
               {@const meta = providerMeta(p.id)}
               {@const Icon = meta.icon}
               {@const stat = providerStats[p.id]}
+              {@const outcome = providerOutcome[p.id]}
               {@const isDisabled = disabledProviders.includes(p.id)}
               <li class="flex items-center gap-3 py-2.5">
                 <span
@@ -303,6 +315,12 @@
                       {stat.count === 1 ? "item" : "items"} · {formatBytes(stat.bytes)} found
                     {:else if isDisabled}
                       Skipped — not scanned
+                    {:else if outcome?.status === "unavailable"}
+                      {outcome.detail ?? "Unavailable — the tool may not be installed"}
+                    {:else if outcome?.status === "timed_out"}
+                      {outcome.detail ?? "Scan timed out"}
+                    {:else if outcome?.status === "failed"}
+                      {outcome.detail ?? "Scan failed"}
                     {:else}
                       Nothing found — the tool may not be installed
                     {/if}

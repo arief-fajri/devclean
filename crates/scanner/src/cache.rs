@@ -134,6 +134,18 @@ pub fn merge_cached_provider(
         .summary
         .providers
         .sort_by_key(|p| std::cmp::Reverse(p.reclaimable_bytes));
+    envelope
+        .summary
+        .provider_status
+        .retain(|s| s.provider != provider_id);
+    envelope
+        .summary
+        .provider_status
+        .extend(partial.provider_status.iter().cloned());
+    envelope
+        .summary
+        .provider_status
+        .sort_by(|a, b| a.provider.cmp(&b.provider));
     envelope.summary.total_bytes = envelope
         .summary
         .resources
@@ -176,6 +188,7 @@ mod tests {
             total_bytes: 10,
             reclaimable_bytes: 10,
             providers: vec![],
+            provider_status: vec![],
             resources: vec![devclean_core::Resource {
                 id: "nm:0000".to_string(),
                 provider: "node_modules".to_string(),
@@ -319,6 +332,18 @@ mod tests {
             // A full scan measured it — which is exactly why the targeted
             // merge below must clear it.
             unique_bytes: Some(700),
+            provider_status: vec![
+                devclean_core::ProviderStatus {
+                    provider: "node_modules".into(),
+                    status: devclean_core::ProviderStatusKind::Ok,
+                    detail: None,
+                },
+                devclean_core::ProviderStatus {
+                    provider: "go_cache".into(),
+                    status: devclean_core::ProviderStatusKind::Ok,
+                    detail: None,
+                },
+            ],
             providers: vec![
                 devclean_core::ProviderSummary {
                     provider: "node_modules".into(),
@@ -357,6 +382,11 @@ mod tests {
             reclaimable_bytes: 50,
             blocked_bytes: 0,
             unique_bytes: None,
+            provider_status: vec![devclean_core::ProviderStatus {
+                provider: "node_modules".into(),
+                status: devclean_core::ProviderStatusKind::Unavailable,
+                detail: Some("Docker daemon is not running".into()),
+            }],
             providers: vec![devclean_core::ProviderSummary {
                 provider: "node_modules".into(),
                 name: "node_modules".into(),
@@ -402,6 +432,27 @@ mod tests {
             Some(300),
             "the untouched provider must survive"
         );
+        let status = |provider: &str| {
+            after
+                .summary
+                .provider_status
+                .iter()
+                .find(|s| s.provider == provider)
+                .unwrap_or_else(|| panic!("missing status for {provider}"))
+        };
+        assert_eq!(
+            status("node_modules").status,
+            devclean_core::ProviderStatusKind::Unavailable
+        );
+        assert_eq!(
+            status("node_modules").detail.as_deref(),
+            Some("Docker daemon is not running")
+        );
+        assert_eq!(
+            status("go_cache").status,
+            devclean_core::ProviderStatusKind::Ok,
+            "the untouched provider's status must survive"
+        );
         let _ = std::fs::remove_file(&path);
     }
 
@@ -438,6 +489,7 @@ mod tests {
             blocked_bytes: 0,
             unique_bytes: None,
             providers: vec![],
+            provider_status: vec![],
             resources: vec![],
         };
         // No file at all.

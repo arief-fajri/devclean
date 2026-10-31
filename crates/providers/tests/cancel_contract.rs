@@ -210,6 +210,29 @@ fn wails_stops_when_cancelled() {
 }
 
 #[test]
+fn wails_v3_stops_when_cancelled() {
+    // Same reason as the v2 fixture: the marker walk needs real work.
+    let n = FIXTURE_SEQ.fetch_add(1, Ordering::SeqCst);
+    let root =
+        std::env::temp_dir().join(format!("devclean-cancel-wails3-{}-{n}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&root);
+    std::fs::create_dir_all(root.join("app/build")).unwrap();
+    std::fs::create_dir_all(root.join("app/bin")).unwrap();
+    std::fs::write(
+        root.join("app/go.mod"),
+        "module example\nrequire github.com/wailsapp/wails/v3 v3.0.0\n",
+    )
+    .unwrap();
+    std::fs::write(root.join("app/build/config.yml"), "version: '3'\n").unwrap();
+    std::fs::write(root.join("app/bin/app"), b"x").unwrap();
+    let cancel = AtomicBool::new(true);
+    assert!(WailsProvider
+        .scan(std::slice::from_ref(&root), &cancel)
+        .is_empty());
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+#[test]
 fn opencode_fs_stops_when_cancelled() {
     assert!(cancelled_scan(&OpencodeFsProvider).is_empty());
 }

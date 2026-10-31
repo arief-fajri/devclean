@@ -18,8 +18,8 @@ pub mod types;
 
 pub use format::{format_age, format_bytes};
 pub use limits::{
-    CLEANUP_COMMAND_TIMEOUT, PREVIEW_TIMEOUT, PROVIDER_COMMAND_TIMEOUT, PROVIDER_SCAN_TIMEOUT,
-    UPDATE_CHECK_TIMEOUT, UPDATE_DOWNLOAD_TIMEOUT,
+    CLEANUP_COMMAND_TIMEOUT, DOCKER_PROBE_TIMEOUT, PREVIEW_TIMEOUT, PROVIDER_COMMAND_TIMEOUT,
+    PROVIDER_SCAN_TIMEOUT, UPDATE_CHECK_TIMEOUT, UPDATE_DOWNLOAD_TIMEOUT,
 };
 pub use policy::{block_reason_for, stamp_blocked_reason, PolicyInputs};
 pub use preview_token::{authorize, GateError, PreviewToken, PREVIEW_TTL_SECS};
@@ -31,7 +31,7 @@ pub use system::{
 };
 pub use types::{
     composite_age_days, Activity, BlockReason, CachedScan, CleanupPreview, CleanupPreviewItem,
-    CleanupResult, CleanupRun, CleanupStatus, DiskFree, HistoryEntry, ProviderInfo,
-    ProviderSummary, Resource, ResourceImpact, SafetyLevel, ScanSummary, Sizing, UpdatePhase,
-    UpdateStatus,
+    CleanupResult, CleanupRun, CleanupStatus, DiskFree, HistoryEntry, ProviderInfo, ProviderStatus,
+    ProviderStatusKind, ProviderSummary, Resource, ResourceImpact, SafetyLevel, ScanSummary,
+    Sizing, UpdatePhase, UpdateStatus,
 };

@@ -238,6 +238,35 @@ pub struct DiskFree {
     pub mount: Option<String>,
 }
 
+/// Why a provider contributed the rows it did (contract v1.2.0).
+///
+/// `Empty` is the normal "nothing to clean" outcome. `Unavailable` means the
+/// provider's tool/daemon could not be reached (for example Docker Desktop is
+/// not running), so an empty result must not be read as "nothing to clean".
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ProviderStatusKind {
+    Ok,
+    Empty,
+    Unavailable,
+    TimedOut,
+    Failed,
+    Cancelled,
+}
+
+/// Per-provider scan outcome, including providers that produced no rows.
+///
+/// `ScanSummary.providers` stays "providers with rows"; this list is the
+/// complete account of every provider that was active in the run, so the UI
+/// can explain why a known provider (Docker, Wails, …) is absent.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ProviderStatus {
+    pub provider: String,
+    pub status: ProviderStatusKind,
+    #[serde(default)]
+    pub detail: Option<String>,
+}
+
 /// Per-provider totals for the dashboard.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProviderSummary {
@@ -254,6 +283,11 @@ pub struct ScanSummary {
     pub total_bytes: u64,
     pub reclaimable_bytes: u64,
     pub providers: Vec<ProviderSummary>,
+    /// One entry for every provider active in this run, including those that
+    /// produced no rows. `#[serde(default)]` keeps older scan caches loadable;
+    /// an empty list simply means "this cache predates provider status".
+    #[serde(default)]
+    pub provider_status: Vec<ProviderStatus>,
     pub resources: Vec<Resource>,
     /// Bytes the backend will refuse to clean, for ANY reason — retention,
     /// AI report-only, a missing privileged opt-in, the Docker scope, git

@@ -73,10 +73,28 @@ export interface ProviderSummary {
   resource_count: number;
 }
 
+/** Why a provider contributed the rows it did (contract v1.2.0). */
+export type ProviderStatusKind =
+  | "ok"
+  | "empty"
+  | "unavailable"
+  | "timed_out"
+  | "failed"
+  | "cancelled";
+
+export interface ProviderStatus {
+  provider: string;
+  status: ProviderStatusKind;
+  detail?: string | null;
+}
+
 export interface ScanSummary {
   total_bytes: number;
   reclaimable_bytes: number;
   providers: ProviderSummary[];
+  /** One entry per provider active in the run, including empty ones.
+   *  Absent in caches written before v1.2.0. */
+  provider_status?: ProviderStatus[];
   resources: Resource[];
   /** Bytes held back by the retention policy — reported separately so the
    * headline number never silently shrinks. */

@@ -22,6 +22,12 @@ pub const CLEANUP_COMMAND_TIMEOUT: Duration = Duration::from_secs(120);
 /// that has not answered in 30s is not going to.
 pub const PROVIDER_COMMAND_TIMEOUT: Duration = Duration::from_secs(30);
 
+/// Maximum wall time for `docker info` — the availability probe, not a
+/// measurement. When the daemon is down the CLI can hang until the scan's
+/// own deadline, which used to cost the Docker providers their whole scan
+/// slot. A reachable daemon answers in well under a second.
+pub const DOCKER_PROBE_TIMEOUT: Duration = Duration::from_secs(5);
+
 /// Maximum wall time for the cleanup **preview** — re-measuring every selected
 /// path before the confirmation appears.
 ///

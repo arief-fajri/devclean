@@ -1,6 +1,6 @@
 # Tauri Contract (public behavior contract)
 
-> The single document defining what the frontend may see. Changing this file = changing the contract → requires a deliberate review and a regression test. Version: **v1.1.0 (tool discovery)**. From v1.0.0 a caller-visible breaking change requires contract **2.0.0** — see [one-point-oh.md](../decisions/one-point-oh.md).
+> The single document defining what the frontend may see. Changing this file = changing the contract → requires a deliberate review and a regression test. Version: **v1.2.0 (provider status + Wails v3)**. From v1.0.0 a caller-visible breaking change requires contract **2.0.0** — see [one-point-oh.md](../decisions/one-point-oh.md).
 
 ## Commands (19)
 
@@ -100,11 +100,23 @@ type Activity = "active" | "recent" | "stale" | "dormant";
 type BlockReason = "retention" | "ai_read_only" | "privileged_required"
   | "docker_scope" | "docker_scope_required" | "protected" | "browser_running";   // +docker_scope_required (v1.1.0)
 
+type ProviderStatusKind = "ok" | "empty" | "unavailable" | "timed_out"
+  | "failed" | "cancelled";   // v1.2.0
+
+/** One entry per provider ACTIVE in the run, including providers that
+ *  produced no rows. `providers` above stays "providers with rows"; this
+ *  list explains an empty result (e.g. Docker daemon not running). */
+interface ProviderStatus { provider: string; status: ProviderStatusKind;
+  detail?: string | null }
+
 interface ProviderSummary { provider: string; name: string; total_bytes: number;
   reclaimable_bytes: number; resource_count: number }
 
 interface ScanSummary { total_bytes: number; reclaimable_bytes: number;
-  providers: ProviderSummary[]; resources: Resource[];
+  providers: ProviderSummary[];
+  /** v1.2.0: why each active provider did or did not contribute. Absent in
+   *  caches written before v1.2.0. */
+  provider_status?: ProviderStatus[]; resources: Resource[];
   /** Bytes the backend will refuse to clean, for ANY reason — retention,
    *  AI report-only, privileged opt-in, Docker scope, git protection,
    *  a running browser. */
@@ -202,7 +214,8 @@ Not:
 16. **`blocked_reason: "browser_running"` can now appear, and a browser-temp row's safety reports what the probe knows (v0.13.0).** The seven Chromium-family browsers clone their `.app` bundle into `/var/folders/…/X/<bundle-id>.code_sign_clone/` when codesign re-signs a helper; leftovers of a crashed or automated session are reported as `browser_temp`. A **confirmed-running** browser stamps the new reason at scan time, and the cleanup path **re-probes and refuses live** — a stale scan cannot delete the clone of a browser that started meanwhile. A **failed** liveness probe never blocks, but floors the row's safety to `caution`; `NotRunning` is the only state that yields `safe` (G-SAFE-07). Also new under existing ids: node's rule matches `.next`/`.turbo`/`.svelte-kit`/`.expo`, python's matches `.ruff_cache`/`.tox`/`__pypackages__`, `global_cache` grows six targets, and `xcode_data` becomes four rows — including **Archives as the first `dangerous`** (its dSYMs die with it), with `CoreSimulator/Devices` deliberately excluded. Decision records: [browser-temp-probe.md](../decisions/browser-temp-probe.md), [wave-d-coverage.md](../decisions/wave-d-coverage.md).
 17. **`ScanSummary.unique_bytes` reports the deduplicated figure (v0.13.0).** After a full scan it is the distinct-inode total: an inode hard-linked into two artifacts counts once, while `total_bytes` keeps summing rows as before. It becomes `null` whenever the figure can no longer be measured — a targeted rescan, a post-cleanup prune, an older scan cache — and the frontend carries it without ever recomputing it (the inode keys never leave the backend). No cache version bump: absence is the honest default.
 18. **CLI-backed providers work in the packaged app (v1.1.0).** A Finder-launched app inherited launchd's `PATH` (`/usr/bin:/bin:/usr/sbin:/sbin`), which lacks `/usr/local/bin` and `/opt/homebrew/bin`; `docker`, `docker_pruned` and `go_cache` therefore returned no rows at all, silently. The app now widens its own `PATH` before anything can spawn, using fixed server-side directories only (no shell, no input). **No command, event or type changed** — providers report the same rows when their tool is present; absence still means "nothing to report".
-19. **Wails build output is a provider (v1.1.0).** `get_providers` and scan results carry one new id, `wails` (prefix `wa`). It reports `build/bin/` (`caution`) and `frontend/dist/` (`safe`) for every project with a `wails.json` at its root; the rest of `build/` is committed config and is deliberately not reported. No command or event shape changed — it surfaces the way every own-scanner does. Decision record: [wails-coverage.md](../decisions/wails-coverage.md).
+19. **Wails build output is a provider (v1.1.0; v3 support in v1.2.0).** `get_providers` and scan results carry one id, `wails` (prefix `wa`). v2 projects are marked by `wails.json` and report `build/bin/` (`caution`) and `frontend/dist/` (`safe`). v3 projects have no `wails.json`: the marker is `go.mod` depending on `github.com/wailsapp/wails/v3` together with `build/config.yml` or a `Taskfile.yml` that invokes `wails3`. They report `bin/` (`caution`), `frontend/dist/` when present (`safe`), and root `dist/` when a root `package.json` confirms the custom frontend layout (`safe`). The rest of `build/` is committed config and is deliberately not reported in either generation. No command or event shape changed — it surfaces the way every own-scanner does. Decision record: [wails-coverage.md](../decisions/wails-coverage.md).
+20. **Every active provider now reports a status (v1.2.0).** `ScanSummary.provider_status` lists `ok`, `empty`, `unavailable`, `timed_out`, `failed` or `cancelled` per provider, with an optional detail. `providers` keeps its old meaning (only providers with rows), so an empty Docker result can no longer be mistaken for "nothing to clean": when the daemon is unreachable the Docker providers report `unavailable` with `"Docker daemon is not running"`. Docker probes are now bounded (`DOCKER_PROBE_TIMEOUT`, 5s) instead of parking the scan thread until the 60s scan deadline. The field is additive and `#[serde(default)]`; older caches load with an empty list.
 
 ## Menu bar surface (v0.7.0)
 
@@ -223,6 +236,11 @@ One click of either button opens the menu (`show_menu_on_left_click`); the info 
 
 Contract versions are their own sequence, independent of the product version in `Cargo.toml` — the frontend and backend always ship together, so the contract changes on its own schedule. The two are aligned at 1.0.
 
+- `v1.2.0` — provider status + Wails v3 coverage. **No command or event added, removed or re-typed.** **Types (additive):** `+ScanSummary.provider_status?: ProviderStatus[]` (`#[serde(default)]`), `+ProviderStatus`, `+ProviderStatusKind`. **Providers stay 22** (`wails` now understands both generations).
+  - **Behaviour:** every active provider reports `ok | empty | unavailable | timed_out | failed | cancelled` with an optional detail (behavioural note 20). The Resources page shows an amber notice for providers that could not scan; Settings names the reason per provider. The scan cache and targeted-rescan merge carry the status list, so a refreshed provider cannot leave a stale "unavailable" behind.
+  - **Behaviour:** `wails` detects v3 projects by `go.mod` (`github.com/wailsapp/wails/v3`) plus `build/config.yml` or a `Taskfile.yml` invoking `wails3`, and reports root `bin/` and root `dist/` (behavioural note 19). v2 (`wails.json`, `build/bin/`) is unchanged.
+  - **Fixed:** Docker availability/measurement probes are bounded by `DOCKER_PROBE_TIMEOUT` (5s) and `PROVIDER_COMMAND_TIMEOUT`, so a stopped daemon no longer parks a scan thread until the 60s provider deadline.
+  - Regression tests: `reports_v3_bin_and_root_dist_without_wails_json`, `a_taskfile_that_invokes_wails3_is_a_v3_marker`, `a_wails_dependency_without_the_v3_build_config_is_not_a_project`, `root_dist_requires_a_root_package_json`, `v3_wins_when_a_migrating_project_still_has_wails_json`, `project_root_walks_back_to_a_v3_marker`, `wails_v3_stops_when_cancelled`; `an_empty_scan_is_reported_as_empty_not_unavailable`, `a_missing_tool_is_reported_as_unavailable_with_its_reason`, `provider_timeout_yields_empty_without_hanging` (extended); `scan-merge.test.ts` (status merge), `contract-sync.test.ts`.
 - `v1.1.0` — tool discovery + Docker scope enforcement. **No command or event added, removed or re-typed.** **Types (additive):** `+BlockReason: "docker_scope_required"`. **Providers 21 → 22:** `+wails`.
   - **Behaviour:** `Settings.docker_prune_scope` is now enforced as a *minimum*: a provider whose `required_docker_scope` is `all` is refused (`docker_scope_required`, detail names the scope) when the user selected `build-cache`, even with the privileged opt-in on. `docker_scope` keeps its existing meaning — the scope is `off`. The scan stamps the new reason; the cleanup engine refuses it through the same `block_reason_for`.
   - **Behaviour:** the app widens its own `PATH` at startup so CLI-backed providers work when launched from Finder (see behavioural note 18). No wire shape changed.

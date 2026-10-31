@@ -527,6 +527,7 @@ mod tests {
             reclaimable_bytes: providers.iter().map(|p| p.2).sum(),
             blocked_bytes: kept,
             unique_bytes: None,
+            provider_status: vec![],
             providers: providers
                 .into_iter()
                 .map(|(id, name, bytes)| ProviderSummary {

@@ -977,6 +977,7 @@ mod preview_deadline_tests {
             reclaimable_bytes: 10,
             blocked_bytes: 0,
             unique_bytes: None,
+            provider_status: vec![],
             providers: vec![devclean_core::ProviderSummary {
                 provider: "node_modules".into(),
                 name: "node_modules".into(),

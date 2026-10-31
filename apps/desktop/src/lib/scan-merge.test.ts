@@ -84,6 +84,30 @@ describe("mergeProviderSummary", () => {
     expect(merged.blocked_bytes).toBe(200);
   });
 
+  it("replaces only the target provider's status", () => {
+    const before = summary({
+      provider_status: [
+        { provider: "go_cache", status: "ok", detail: null },
+        { provider: "node_modules", status: "ok", detail: null },
+      ],
+    });
+    const partial: ScanSummary = {
+      total_bytes: 0,
+      reclaimable_bytes: 0,
+      blocked_bytes: 0,
+      providers: [],
+      provider_status: [
+        { provider: "node_modules", status: "unavailable", detail: "Docker daemon is not running" },
+      ],
+      resources: [],
+    };
+    const merged = mergeProviderSummary(before, "node_modules", partial);
+    expect(merged.provider_status).toEqual([
+      { provider: "go_cache", status: "ok", detail: null },
+      { provider: "node_modules", status: "unavailable", detail: "Docker daemon is not running" },
+    ]);
+  });
+
   // Wave D6: one provider's rows cannot measure a whole-scan dedup figure.
   // The frontend carries `unique_bytes`; a merge must null it, never
   // recompute it (the inode keys never leave the backend).

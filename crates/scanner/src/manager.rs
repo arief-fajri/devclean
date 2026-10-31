@@ -1,8 +1,8 @@
 //! Scan orchestration: fan out to providers, aggregate, register ids.
 
 use devclean_core::{
-    stamp_blocked_reason, PolicyInputs, ProviderSummary, Resource, ScanSummary,
-    PROVIDER_SCAN_TIMEOUT,
+    stamp_blocked_reason, PolicyInputs, ProviderStatus, ProviderStatusKind, ProviderSummary,
+    Resource, ScanSummary, PROVIDER_SCAN_TIMEOUT,
 };
 use devclean_providers::{
     all_providers, walk_tree_rules, Provider, ProviderRegistry, Scannable, TreeRule,
@@ -213,23 +213,57 @@ impl ScanManager {
                 };
                 if cancelled.load(Ordering::SeqCst) {
                     report(&cb, &pid);
-                    return vec![(pid, Vec::new())];
+                    return vec![ProviderScanOutput {
+                        provider: pid,
+                        resources: Vec::new(),
+                        status: ProviderStatusKind::Cancelled,
+                        detail: None,
+                    }];
                 }
                 let roots = roots.clone();
-                let scan = tokio::task::spawn_blocking(move || p.scan(&roots, &cancelled));
-                let found = match tokio::time::timeout(timeout, scan).await {
-                    Ok(Ok(found)) => found,
+                let scanner = Arc::clone(&p);
+                let cancel_after = Arc::clone(&cancelled);
+                let scan = tokio::task::spawn_blocking(move || scanner.scan(&roots, &cancelled));
+                let (found, status, detail) = match tokio::time::timeout(timeout, scan).await {
+                    Ok(Ok(found)) => (found, None, None),
                     Ok(Err(e)) => {
                         tracing::warn!(provider = %pid, "scan task panicked: {e}; skipping");
-                        Vec::new()
+                        (
+                            Vec::new(),
+                            Some(ProviderStatusKind::Failed),
+                            Some(format!("scan task panicked: {e}")),
+                        )
                     }
                     Err(_) => {
                         tracing::warn!(provider = %pid, "scan timed out after {timeout:?}; skipping");
-                        Vec::new()
+                        (
+                            Vec::new(),
+                            Some(ProviderStatusKind::TimedOut),
+                            Some(format!("timed out after {timeout:?}")),
+                        )
                     }
                 };
+                // A cancel that lands mid-scan still yields partial rows;
+                // report it as cancelled rather than "empty" or "ok".
+                let (status, detail) = if cancel_after.load(Ordering::SeqCst) {
+                    (ProviderStatusKind::Cancelled, None)
+                } else if let Some(status) = status {
+                    (status, detail)
+                } else if found.is_empty() {
+                    match p.unavailable_reason() {
+                        Some(reason) => (ProviderStatusKind::Unavailable, Some(reason)),
+                        None => (ProviderStatusKind::Empty, None),
+                    }
+                } else {
+                    (ProviderStatusKind::Ok, None)
+                };
                 report(&cb, &pid);
-                vec![(pid, found)]
+                vec![ProviderScanOutput {
+                    provider: pid,
+                    resources: found,
+                    status,
+                    detail,
+                }]
             }));
         }
 
@@ -265,40 +299,83 @@ impl ScanManager {
                 };
                 if cancelled.load(Ordering::SeqCst) {
                     report_all(&cb);
-                    return ids.iter().map(|id| (id.clone(), Vec::new())).collect();
+                    return ids
+                        .into_iter()
+                        .map(|id| ProviderScanOutput {
+                            provider: id,
+                            resources: Vec::new(),
+                            status: ProviderStatusKind::Cancelled,
+                            detail: None,
+                        })
+                        .collect();
                 }
                 let rules_for_walk = rules.clone();
                 let roots_for_walk = roots.clone();
+                let cancel_after = Arc::clone(&cancelled);
                 let walk = tokio::task::spawn_blocking(move || {
                     walk_tree_rules(&roots_for_walk, &rules_for_walk, &cancelled)
                 });
                 // One group per rule, in input order — the registry
                 // assigns ids per provider, so rows must stay grouped.
-                let groups = match tokio::time::timeout(timeout, walk).await {
-                    Ok(Ok(groups)) => groups,
+                let (groups, status, detail) = match tokio::time::timeout(timeout, walk).await {
+                    Ok(Ok(groups)) => (groups, None, None),
                     Ok(Err(e)) => {
                         tracing::warn!(group = "tree", "shared walk panicked: {e}; skipping");
-                        vec![Vec::new(); n]
+                        (
+                            vec![Vec::new(); n],
+                            Some(ProviderStatusKind::Failed),
+                            Some(format!("shared walk panicked: {e}")),
+                        )
                     }
                     Err(_) => {
                         tracing::warn!(
                             group = "tree",
                             "shared walk timed out after {timeout:?}; skipping"
                         );
-                        vec![Vec::new(); n]
+                        (
+                            vec![Vec::new(); n],
+                            Some(ProviderStatusKind::TimedOut),
+                            Some(format!("shared walk timed out after {timeout:?}")),
+                        )
                     }
                 };
+                let cancelled_now = cancel_after.load(Ordering::SeqCst);
                 report_all(&cb);
-                ids.into_iter().zip(groups).collect()
+                ids.into_iter()
+                    .zip(groups)
+                    .map(|(id, found)| {
+                        let (status, detail) = if cancelled_now {
+                            (ProviderStatusKind::Cancelled, None)
+                        } else if let Some(status) = status {
+                            (status, detail.clone())
+                        } else if found.is_empty() {
+                            (ProviderStatusKind::Empty, None)
+                        } else {
+                            (ProviderStatusKind::Ok, None)
+                        };
+                        ProviderScanOutput {
+                            provider: id,
+                            resources: found,
+                            status,
+                            detail,
+                        }
+                    })
+                    .collect()
             }));
         }
 
         let mut registry = ProviderRegistry::default();
         let mut resources: Vec<Resource> = Vec::new();
+        let mut provider_status: Vec<ProviderStatus> = Vec::new();
         for h in handles {
-            for (provider_id, found) in h.await.unwrap_or_default() {
-                let prefix = short_prefix(&provider_id);
-                resources.extend(registry.register(&provider_id, prefix, found));
+            for out in h.await.unwrap_or_default() {
+                let prefix = short_prefix(&out.provider);
+                resources.extend(registry.register(&out.provider, prefix, out.resources));
+                provider_status.push(ProviderStatus {
+                    provider: out.provider,
+                    status: out.status,
+                    detail: out.detail,
+                });
             }
         }
         resources.retain(|r| !is_excluded(&r.path, excluded));
@@ -348,7 +425,7 @@ impl ScanManager {
             );
         }
 
-        let mut summary = aggregate(resources);
+        let mut summary = aggregate(resources, provider_status);
         // Wave D6 invalidation: a TARGETED rescan holds one provider's
         // rows, so a whole-scan figure cannot be measured from it. `None`
         // is the honest answer — never a stale `Some` from before.
@@ -359,10 +436,18 @@ impl ScanManager {
     }
 }
 
-/// One scan task's output: provider id plus the rows it produced. Own
-/// tasks return exactly one entry; the shared-walk task returns one per
-/// tree rule, all registered under their own id.
-type ScanTaskOutput = Vec<(String, Vec<Resource>)>;
+/// One provider's contribution to a run: the rows it produced, plus why it
+/// produced none when that is not simply "nothing to clean". Own tasks
+/// return exactly one entry; the shared-walk task returns one per tree
+/// rule, all registered under their own id.
+struct ProviderScanOutput {
+    provider: String,
+    resources: Vec<Resource>,
+    status: ProviderStatusKind,
+    detail: Option<String>,
+}
+
+type ScanTaskOutput = Vec<ProviderScanOutput>;
 
 /// True when `path` is the excluded dir itself or lives under it.
 fn is_excluded(path: &std::path::Path, excluded: &[PathBuf]) -> bool {
@@ -407,7 +492,10 @@ fn short_prefix(provider_id: &str) -> &str {
     }
 }
 
-fn aggregate(mut resources: Vec<Resource>) -> ScanSummary {
+fn aggregate(
+    mut resources: Vec<Resource>,
+    mut provider_status: Vec<ProviderStatus>,
+) -> ScanSummary {
     // Wave D6: fold the per-inode maps first-wins into the whole-scan
     // figure, then CLEAR them — the keys are internal, must never be
     // retained in `AppState`, the scan cache or any wire payload, and the
@@ -445,6 +533,8 @@ fn aggregate(mut resources: Vec<Resource>) -> ScanSummary {
         })
         .collect();
     summaries.sort_by_key(|a| std::cmp::Reverse(a.reclaimable_bytes));
+    // Deterministic order regardless of which task finished first.
+    provider_status.sort_by(|a, b| a.provider.cmp(&b.provider));
 
     ScanSummary {
         total_bytes: resources.iter().map(|r| r.size_bytes).sum(),
@@ -458,6 +548,7 @@ fn aggregate(mut resources: Vec<Resource>) -> ScanSummary {
         // one provider's rows cannot measure a whole-scan figure.
         unique_bytes: Some(unique),
         providers: summaries,
+        provider_status,
         resources,
     }
 }
@@ -525,6 +616,39 @@ mod tests {
                 });
             }
             out
+        }
+    }
+
+    /// A provider that finds nothing. `detail` decides whether the scan
+    /// reports `Empty` (normal) or `Unavailable` (tool/daemon missing).
+    struct EmptyProvider {
+        tag: &'static str,
+        unavailable: Option<&'static str>,
+    }
+
+    impl Provider for EmptyProvider {
+        fn id(&self) -> &'static str {
+            self.tag
+        }
+        fn name(&self) -> &'static str {
+            "Empty stub"
+        }
+        fn default_safety(&self) -> SafetyLevel {
+            SafetyLevel::Safe
+        }
+        fn measure(&self, _path: &Path) -> Option<u64> {
+            None
+        }
+        fn cleanup_action(&self, path: &Path) -> devclean_providers::CleanupAction {
+            devclean_providers::CleanupAction::RemoveDir(path.to_path_buf())
+        }
+        fn unavailable_reason(&self) -> Option<String> {
+            self.unavailable.map(str::to_string)
+        }
+    }
+    impl OwnScanner for EmptyProvider {
+        fn scan(&self, _roots: &[PathBuf], _cancel: &AtomicBool) -> Vec<Resource> {
+            Vec::new()
         }
     }
 
@@ -605,6 +729,68 @@ mod tests {
             .await;
         assert!(t0.elapsed() < Duration::from_secs(5));
         assert!(summary.resources.is_empty());
+        let status = summary
+            .provider_status
+            .iter()
+            .find(|s| s.provider == "slow")
+            .expect("timed-out provider still has a status");
+        assert_eq!(status.status, ProviderStatusKind::TimedOut);
+        assert!(status.detail.is_some());
+    }
+
+    #[tokio::test]
+    async fn an_empty_scan_is_reported_as_empty_not_unavailable() {
+        let provider = Arc::new(EmptyProvider {
+            tag: "quiet",
+            unavailable: None,
+        });
+        let mgr = manager_with(provider, Duration::from_secs(10));
+        let summary = mgr
+            .scan_all(
+                vec![PathBuf::from("/tmp")],
+                &[],
+                &[],
+                permissive(),
+                None,
+                None,
+            )
+            .await;
+        let status = summary
+            .provider_status
+            .iter()
+            .find(|s| s.provider == "quiet")
+            .expect("empty provider still has a status");
+        assert_eq!(status.status, ProviderStatusKind::Empty);
+        assert!(status.detail.is_none());
+    }
+
+    #[tokio::test]
+    async fn a_missing_tool_is_reported_as_unavailable_with_its_reason() {
+        let provider = Arc::new(EmptyProvider {
+            tag: "ghost",
+            unavailable: Some("Docker daemon is not running"),
+        });
+        let mgr = manager_with(provider, Duration::from_secs(10));
+        let summary = mgr
+            .scan_all(
+                vec![PathBuf::from("/tmp")],
+                &[],
+                &[],
+                permissive(),
+                None,
+                None,
+            )
+            .await;
+        let status = summary
+            .provider_status
+            .iter()
+            .find(|s| s.provider == "ghost")
+            .expect("unavailable provider still has a status");
+        assert_eq!(status.status, ProviderStatusKind::Unavailable);
+        assert_eq!(
+            status.detail.as_deref(),
+            Some("Docker daemon is not running")
+        );
     }
 
     #[tokio::test]
@@ -722,6 +908,7 @@ mod tests {
             .await;
         assert!(summary.resources.is_empty());
         assert!(summary.providers.is_empty());
+        assert!(summary.provider_status.is_empty());
     }
 
     /// Stub whose scan time DECREASES with its index, so a fast provider

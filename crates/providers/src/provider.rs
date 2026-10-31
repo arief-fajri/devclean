@@ -144,6 +144,18 @@ pub trait Provider: Send + Sync {
     fn project_root(&self, _artifact: &Path) -> Option<PathBuf> {
         None
     }
+
+    /// Why this provider could not produce rows, when "empty" is not the
+    /// whole story. Called by the scanner only after a successful scan
+    /// returned nothing, so a healthy provider pays no extra probe.
+    ///
+    /// `None` means "nothing to report", not "unavailable" (contract
+    /// v1.2.0). Providers whose tool or daemon is missing override this so
+    /// the UI can distinguish "Docker is not running" from "Docker has no
+    /// reclaimable data".
+    fn unavailable_reason(&self) -> Option<String> {
+        None
+    }
 }
 
 /// Providers that own their traversal: Docker, the Go and npm caches, the

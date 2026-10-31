@@ -5,29 +5,37 @@
 //! only, `Safe`). Images/containers/volumes are reported as
 //! `Caution`/`Dangerous` and are NOT cleaned by default.
 
+use super::exec::run_with_deadline;
 use super::provider::{impact, CleanupAction, OwnScanner, Provider};
-use devclean_core::{Resource, SafetyLevel};
+use devclean_core::{Resource, SafetyLevel, DOCKER_PROBE_TIMEOUT, PROVIDER_COMMAND_TIMEOUT};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 
 pub struct DockerProvider;
 
-fn docker_available() -> bool {
-    std::process::Command::new("docker")
-        .args(["info", "--format", "{{.ServerVersion}}"])
-        .output()
-        .map(|o| o.status.success())
-        .unwrap_or(false)
+/// G-REL-05: a daemon that is down must not park the scan thread. `docker
+/// info` answers immediately when the daemon is reachable and can hang
+/// until the scan's own deadline when it is not, so this probe is bounded
+/// separately from the measurement.
+pub(crate) fn docker_available() -> bool {
+    run_with_deadline(
+        "docker",
+        &["info", "--format", "{{.ServerVersion}}"],
+        DOCKER_PROBE_TIMEOUT,
+    )
+    .map(|o| o.status.success())
+    .unwrap_or(false)
 }
 
 /// Parse `docker system df --format json` reclaimable for build cache.
 /// Returns `None` when Docker is absent — absence is normal, not an error.
 fn build_cache_bytes() -> Option<u64> {
-    let out = std::process::Command::new("docker")
-        .args(["system", "df", "--format", "{{json .}}"])
-        .output()
-        .ok()
-        .filter(|o| o.status.success())?;
+    let out = run_with_deadline(
+        "docker",
+        &["system", "df", "--format", "{{json .}}"],
+        PROVIDER_COMMAND_TIMEOUT,
+    )
+    .filter(|o| o.status.success())?;
     let text = String::from_utf8_lossy(&out.stdout);
     parse_df_output(&text)
 }
@@ -88,11 +96,12 @@ pub fn df_text() -> Option<String> {
     df_text_impl()
 }
 fn df_text_impl() -> Option<String> {
-    let out = std::process::Command::new("docker")
-        .args(["system", "df", "--format", "{{json .}}"])
-        .output()
-        .ok()
-        .filter(|o| o.status.success())?;
+    let out = run_with_deadline(
+        "docker",
+        &["system", "df", "--format", "{{json .}}"],
+        PROVIDER_COMMAND_TIMEOUT,
+    )
+    .filter(|o| o.status.success())?;
     Some(String::from_utf8_lossy(&out.stdout).into_owned())
 }
 
@@ -156,6 +165,10 @@ impl Provider for DockerProvider {
     /// whole thing or nothing — so retention never holds it back (I9).
     fn required_docker_scope(&self) -> Option<devclean_core::DockerPruneScope> {
         Some(devclean_core::DockerPruneScope::BuildCache)
+    }
+
+    fn unavailable_reason(&self) -> Option<String> {
+        (!docker_available()).then(|| "Docker daemon is not running".to_string())
     }
 }
 impl OwnScanner for DockerProvider {

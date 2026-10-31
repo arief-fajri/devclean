@@ -17,6 +17,7 @@
 //! choose to free images without touching a volume that might hold a
 //! database.
 
+use super::docker::docker_available;
 use super::provider::{impact, CleanupAction, OwnScanner, Provider};
 use devclean_core::{DockerPruneScope, Resource, SafetyLevel};
 use std::path::{Path, PathBuf};
@@ -27,14 +28,6 @@ const IMAGES_PATH: &str = "__docker__/images";
 const VOLUMES_PATH: &str = "__docker__/volumes";
 
 pub struct DockerPrunedProvider;
-
-fn docker_available() -> bool {
-    std::process::Command::new("docker")
-        .args(["info", "--format", "{{.ServerVersion}}"])
-        .output()
-        .map(|o| o.status.success())
-        .unwrap_or(false)
-}
 
 impl Provider for DockerPrunedProvider {
     fn id(&self) -> &'static str {
@@ -78,6 +71,10 @@ impl Provider for DockerPrunedProvider {
     /// requires both that scope to be selected AND the privileged opt-in.
     fn required_docker_scope(&self) -> Option<DockerPruneScope> {
         Some(DockerPruneScope::All)
+    }
+
+    fn unavailable_reason(&self) -> Option<String> {
+        (!docker_available()).then(|| "Docker daemon is not running".to_string())
     }
 }
 impl OwnScanner for DockerPrunedProvider {

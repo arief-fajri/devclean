@@ -16,6 +16,7 @@
   import { scanStore } from "$lib/stores/scan.svelte";
   import { settingsStore } from "$lib/stores/settings.svelte";
   import { viewStore } from "$lib/stores/view.svelte";
+  import type { ProviderStatus } from "$lib/tauri";
   import { CircleCheck, RefreshCw, TriangleAlert } from "lucide-svelte";
 
   const route = routeDef("resources");
@@ -28,6 +29,20 @@
   const listCounts = $derived(countBySafety(allResources));
   const staleTotal = $derived(allResources.filter((r) => isStaleActivity(r.activity)).length);
   const resultCount = $derived(groups.reduce((acc, g) => acc + g.resources.length, 0));
+
+  /** Providers that could not scan, so an empty list is not mistaken for
+   *  "nothing to clean" (contract v1.2.0). */
+  const providerIssues = $derived(
+    (scanStore.summary?.provider_status ?? []).filter(
+      (s) => s.status === "unavailable" || s.status === "timed_out" || s.status === "failed",
+    ),
+  );
+
+  function issueText(s: ProviderStatus): string {
+    if (s.status === "unavailable") return s.detail ?? "Tool not available";
+    if (s.status === "timed_out") return s.detail ?? "Scan timed out";
+    return s.detail ?? "Scan failed";
+  }
 
   /** Safe, not-yet-selected ids for "Select safe items". */
   const selectableSafeIds = $derived(
@@ -80,6 +95,22 @@
     selectableSafe={selectableSafeIds.length}
     onSelectSafe={() => scanStore.selectMany(selectableSafeIds)}
   />
+
+  {#if providerIssues.length > 0}
+    <div class="mt-4 space-y-2" role="status" data-testid="provider-issues">
+      {#each providerIssues as s (s.provider)}
+        <div
+          class="flex items-start gap-2 rounded-xl border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-900 dark:border-amber-800 dark:bg-amber-950/30 dark:text-amber-100"
+        >
+          <span aria-hidden="true" class="flex shrink-0"><TriangleAlert size={16} /></span>
+          <span class="min-w-0 flex-1">
+            <span class="font-medium">{providerName(s.provider)}</span>
+            <span class="text-amber-800/80 dark:text-amber-100/80"> — {issueText(s)}</span>
+          </span>
+        </div>
+      {/each}
+    </div>
+  {/if}
 
   <div class="mt-4 space-y-3">
     {#each groups as g (g.summary.provider)}

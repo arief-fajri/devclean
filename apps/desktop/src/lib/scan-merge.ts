@@ -46,10 +46,23 @@ export function mergeProviderSummary(
     ...partial.providers,
   ].sort((a, b) => b.reclaimable_bytes - a.reclaimable_bytes);
 
+  // The refreshed provider may have gone from "unavailable" to "ok" (or
+  // vice versa); keep every other provider's last-known status.
+  const provider_status = [
+    ...(summary.provider_status ?? []).filter((s) => s.provider !== provider),
+    ...(partial.provider_status ?? []),
+  ].sort((a, b) => a.provider.localeCompare(b.provider));
+
   // Wave D6: a targeted merge holds a subset of rows — the whole-scan dedup
   // figure is no longer measurable, so it becomes null. The frontend never
   // recomputes it: the inode keys that define it never leave the backend.
-  return { ...totals(resources), unique_bytes: null, providers, resources };
+  return {
+    ...totals(resources),
+    unique_bytes: null,
+    providers,
+    provider_status,
+    resources,
+  };
 }
 
 /**
