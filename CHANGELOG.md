@@ -11,7 +11,7 @@ Two version numbers move independently:
 
 A contract bump therefore does not imply a product release, and vice versa.
 
-## [Unreleased]
+## [1.0.1] — 2026-10-31
 
 ### Fixed
 
