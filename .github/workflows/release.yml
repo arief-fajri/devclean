@@ -9,7 +9,8 @@ run-name: release ${{ inputs.tag }}
 # statement — it should be a decision, not a side effect of a merge. The tag is
 # created first (and reviewed as a commit), then this workflow attaches
 # artifacts to it. It never creates the tag itself, so nothing is released that
-# nobody looked at.
+# nobody looked at. Once verify and build pass, the release is published
+# immediately — there is no draft step to complete by hand.
 
 on:
   workflow_dispatch:
@@ -18,11 +19,6 @@ on:
         description: "Tag to release (must already exist, e.g. v0.1.0)"
         required: true
         type: string
-      draft:
-        description: "Create the release as a draft"
-        required: false
-        type: boolean
-        default: true
 
 permissions:
   contents: write # required to create the release; the default is read
@@ -247,6 +243,6 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
-          ARGS=(--verify-tag --title "${{ inputs.tag }}" --generate-notes)
-          if [ "${{ inputs.draft }}" = "true" ]; then ARGS+=(--draft); fi
-          gh release create "${{ inputs.tag }}" "${ARGS[@]}" dist-artifacts/*
+          gh release create "${{ inputs.tag }}" \
+            --verify-tag --title "${{ inputs.tag }}" --generate-notes --latest \
+            dist-artifacts/*
