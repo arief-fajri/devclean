@@ -394,6 +394,14 @@
         </p>
       {/if}
 
+      <p
+        class="mt-3 flex items-start gap-1.5 rounded-lg bg-amber-50 px-2.5 py-2 text-xs text-amber-800 dark:bg-amber-950/40 dark:text-amber-200"
+        role="note"
+      >
+        <span aria-hidden="true" class="mt-0.5 flex shrink-0"><TriangleAlert size={13} /></span>
+        <span>Permanent deletion has no undo.</span>
+      </p>
+
       <label class="mt-3 flex items-start gap-2 text-sm text-zinc-700 dark:text-zinc-300">
         <input
           type="checkbox"
