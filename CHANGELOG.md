@@ -11,6 +11,12 @@ Two version numbers move independently:
 
 A contract bump therefore does not imply a product release, and vice versa.
 
+## [1.1.1] — 2026-11-12
+
+### Fixed
+
+- **The cleanup dialog says what opencode history cleanup actually deletes.** The confirmation showed `2283 of 2643 sessions are older than 30 days` twice and never displayed the provider's consequence, so nothing stated that only old sessions go. The dialog now renders `impact.consequence` as the explanation and keeps `CleanupPreviewItem.warning` for real hazards. `opencode_db`'s consequence now reads: only sessions untouched for more than 30 days are deleted; all newer sessions stay (contract v1.2.1).
+
 ## [1.1.0] — 2026-10-31
 
 ### Added

@@ -427,6 +427,11 @@ fn warning_for(r: &Resource) -> Option<String> {
     match r.provider.as_str() {
         "docker" => Some("Future Docker builds may take longer.".to_string()),
         "go_cache" => Some("Future Go builds may take longer.".to_string()),
+        // `detail` is context (project age, session counts), not a hazard.
+        // Copying it into `warning` made the dialog print the same sentence
+        // twice and hid the provider's consequence. Keep the fallback only
+        // for a provider that has no consequence to show.
+        _ if r.impact.is_some() => None,
         _ => r.detail.clone(),
     }
 }
@@ -631,6 +636,45 @@ mod tests {
         assert!(results[0].error.is_some());
         assert!(target.exists(), "refused path must be untouched");
         let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// The confirmation dialog shows the provider's `impact.consequence`.
+    /// `detail` must not masquerade as a hazard warning: doing so printed the
+    /// same sentence twice and hid the consequence (opencode history).
+    #[test]
+    fn preview_keeps_detail_out_of_warning_when_impact_exists() {
+        let (root, target) = fixture("warn-detail");
+        let (mut resources, providers) = setup();
+        let mut r = resource("nm:0102", &target);
+        r.detail = Some("project: app · 143d old".to_string());
+        r.impact = Some(devclean_core::ResourceImpact {
+            consequence: "Dependencies are reinstalled from the lockfile.".to_string(),
+            cost: None,
+            command: None,
+        });
+        resources.insert(r.id.clone(), r);
+
+        let preview =
+            CleanupEngine::default().preview(&["nm:0102".to_string()], &resources, &providers);
+
+        assert_eq!(preview.items.len(), 1);
+        assert!(
+            preview.items[0].warning.is_none(),
+            "detail is context, not a warning; got {:?}",
+            preview.items[0].warning
+        );
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// A provider-specific hazard must still reach the dialog.
+    #[test]
+    fn a_real_provider_warning_survives_the_detail_filter() {
+        let mut r = resource("dk:0001", Path::new("/tmp/__docker__"));
+        r.provider = "docker".to_string();
+        assert_eq!(
+            warning_for(&r).as_deref(),
+            Some("Future Docker builds may take longer.")
+        );
     }
 
     #[cfg(unix)]

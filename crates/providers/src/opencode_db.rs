@@ -17,8 +17,8 @@
 //! directory.
 
 use super::ai_guard;
-use super::provider::{home_dir, impact, CleanupAction, OwnScanner, Provider};
-use devclean_core::{Resource, SafetyLevel};
+use super::provider::{home_dir, CleanupAction, OwnScanner, Provider};
+use devclean_core::{Resource, ResourceImpact, SafetyLevel};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::AtomicBool;
 
@@ -175,6 +175,29 @@ fn now_millis() -> i64 {
         .unwrap_or(0)
 }
 
+/// The consequence shown before a cleanup. It must state the retention scope:
+/// the SQL below deletes only sessions past the cutoff, so a generic "this
+/// history is deleted" line would overstate what the button does.
+fn history_impact(old_sessions: u64, total: u64, running: bool, bytes: u64) -> ResourceImpact {
+    let consequence = if running {
+        "opencode is running right now, so this is SKIPPED. Quit opencode and clean it then."
+            .to_string()
+    } else {
+        format!(
+            "Only sessions untouched for more than {SESSION_RETENTION_DAYS} days are deleted \
+             ({old_sessions} of {total}); all newer sessions stay"
+        )
+    };
+    ResourceImpact {
+        consequence,
+        cost: Some(format!(
+            "The database shrinks only after a full VACUUM, which can take minutes on a {} GB file",
+            bytes / 1_000_000_000
+        )),
+        command: None,
+    }
+}
+
 impl Provider for OpencodeDbProvider {
     fn id(&self) -> &'static str {
         "opencode_db"
@@ -258,19 +281,7 @@ impl OwnScanner for OpencodeDbProvider {
             last_commit_unix: None,
             blocked_reason: None,
             blocked_detail: None,
-            impact: impact(
-                if running {
-                    "opencode is running right now, so this is SKIPPED. Quit opencode and clean it then."
-                } else {
-                    "Those sessions, and every message, part and tool result under them, \
-                     are deleted. This cannot be undone — there is no undo in opencode."
-                },
-                Some(&format!(
-                    "The database shrinks only after a full VACUUM, which can take minutes on a {} GB file",
-                    bytes / 1_000_000_000
-                )),
-                None,
-            ),
+            impact: Some(history_impact(old_sessions, total, running, bytes)),
         }]
     }
 }
@@ -462,5 +473,43 @@ mod tests {
         compact_unlocked(&db, 10_000).unwrap();
         assert_eq!(counts(&db).0, 4, "nothing is old enough to delete");
         let _ = std::fs::remove_file(&db);
+    }
+
+    /// The confirmation dialog renders this sentence. It must say what the
+    /// DELETE below actually does: only old sessions go, newer ones stay.
+    #[test]
+    fn impact_states_the_thirty_day_retention_scope() {
+        let got = history_impact(2283, 2643, false, 23_000_000_000);
+        assert!(
+            got.consequence.contains("more than 30 days"),
+            "got: {}",
+            got.consequence
+        );
+        assert!(
+            got.consequence.contains("2283 of 2643"),
+            "the counts make the scope concrete, got: {}",
+            got.consequence
+        );
+        assert!(
+            got.consequence.contains("newer sessions stay"),
+            "got: {}",
+            got.consequence
+        );
+        assert!(
+            !got.consequence.contains("Those sessions"),
+            "the old vague wording must be gone, got: {}",
+            got.consequence
+        );
+    }
+
+    #[test]
+    fn impact_says_skipped_while_opencode_runs() {
+        let got = history_impact(1, 2, true, 1_000_000_000);
+        assert!(
+            got.consequence.contains("SKIPPED"),
+            "got: {}",
+            got.consequence
+        );
+        assert!(got.consequence.contains("Quit opencode"));
     }
 }

@@ -154,7 +154,9 @@
       {@const meta = safetyMeta(item.safety)}
       {@const Icon = meta.icon}
       {@const impact = lookupImpact(item.resource_id)}
-      {@const consequence = item.warning ?? impact?.consequence ?? meta.hint}
+      {@const consequence = impact?.consequence ?? item.warning ?? meta.hint}
+      {@const extraWarning =
+        item.warning && item.warning !== consequence ? item.warning : null}
       <li
         class="rounded-lg border p-2 {highlight
           ? 'border-amber-300 bg-amber-50 dark:border-amber-800 dark:bg-amber-950/40'
@@ -186,14 +188,14 @@
         </div>
         <p class="mt-1 text-xs text-zinc-500">
           {consequence}
-          {#if !item.warning && impact?.cost}
+          {#if impact?.cost}
             <span class="text-zinc-400"> · {impact.cost}</span>
           {/if}
         </p>
-        {#if item.warning}
+        {#if extraWarning}
           <p class="mt-0.5 flex items-center gap-1 text-xs text-amber-700 dark:text-amber-300">
             <span aria-hidden="true" class="inline-flex"><TriangleAlert size={11} /></span>
-            {item.warning}
+            {extraWarning}
           </p>
         {:else if impact?.command}
           <p class="mt-0.5 font-mono text-[11px] text-zinc-400">{impact.command}</p>
@@ -391,14 +393,6 @@
           <span>{coverageText}</span>
         </p>
       {/if}
-
-      <p
-        class="mt-3 flex items-start gap-1.5 rounded-lg bg-amber-50 px-2.5 py-2 text-xs text-amber-800 dark:bg-amber-950/40 dark:text-amber-200"
-        role="note"
-      >
-        <span aria-hidden="true" class="mt-0.5 flex shrink-0"><TriangleAlert size={13} /></span>
-        <span>Permanent deletion has no undo.</span>
-      </p>
 
       <label class="mt-3 flex items-start gap-2 text-sm text-zinc-700 dark:text-zinc-300">
         <input
